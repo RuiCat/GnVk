@@ -178,10 +178,6 @@ ENGINE_SRC := $(CORE_SRC) $(GFX_SRC) $(AUDIO_SRC) $(INPUT_SRC) \
               $(UI_SRC) $(NET_SRC) $(FILE_SRC) $(PLAT_SRC) $(MEDIA_SRC)
 ENGINE_OBJ := $(patsubst src/%.cpp, $(BUILD_DIR)/%.o, $(ENGINE_SRC))
 
-SAMPLE_MAIN := samples/main.cpp
-SAMPLE_BASE := $(wildcard samples/base/*.cpp)
-SAMPLE_UI   := $(wildcard samples/ui/*.cpp)
-
 # ── 颜色 ────────────────────────────────────────────────
 GREEN   := \033[0;32m
 YELLOW  := \033[0;33m
@@ -215,44 +211,36 @@ $(BUILD_DIR)/%.o: src/%.cpp
 	$(COMPILE.cc)
 
 # ═══════════════════════════════════════════════════════════
-#  5. 示例
+#  5. 测试程序 (新框架)
 # ═══════════════════════════════════════════════════════════
-SAMPLE_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
-SAMPLE_LIBS  := -L. -lGN_mini $(LIBS)
+TEST_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) \
+              -Isamples -Isamples/common $(INCLUDES)
+TEST_LIBS  := -L. -lGN_mini $(LIBS)
 
-.PHONY: sample
-sample:
+.PHONY: test
+test:
 ifndef N
-	@echo "用法: make sample N=<编号>  [PLATFORM=linux]"
-	@echo "可用: base(1-23) ui(1-7)"
+	@echo "用法: make test N=<编号>"
+	@echo "  01=hello  02=texture  03=atlas  04=font"
+	@echo "  05=input  06=particle 07=scroll"
+	@echo "  08=cube3d 09=model3d 10=scene3d"
+	@echo "  11=audio  12=video"
+	@echo "  13=button 14=list 15=dialog 16=scene"
 	@exit 1
 endif
-	@$(MAKE) _build_sample SRC="$(N)"
+	@NUM=$$(printf "%02d" $(N)); \
+	echo "$(YELLOW)🔨 编译 Test $$NUM ...$(RESET)"; \
+	g++ $(TEST_FLAGS) -DTEST_$$NUM samples/main.cpp $(TEST_LIBS) -o build/test_$$NUM; \
+	echo "$(GREEN)   → build/test_$$NUM$(RESET)"
 
-_build_sample:
-	@case "$(SRC)" in \
-		base/*|Sample*|sample*) \
-			FILE="samples/base/Sample$(SRC).cpp"; \
-			[ -f "$$FILE" ] || FILE="samples/base/sample$(SRC).cpp"; \
-			;; \
-		ui/*) FILE="samples/ui/Sample$(SRC).cpp";; \
-		*)    FILE="$(SRC)";; \
-	esac; \
-	if [ ! -f "$$FILE" ]; then \
-		echo "❌ 找不到: $$FILE"; exit 1; \
-	fi; \
-	OUT="build/sample_$$(basename $$FILE .cpp)"; \
-	echo "$(YELLOW)🔨 $$FILE → $$OUT$(RESET)"; \
-	$(CXX) $(SAMPLE_FLAGS) $(SAMPLE_MAIN) "$$FILE" $(SAMPLE_LIBS) -o "$$OUT"
-
-.PHONY: samples
-samples: $(TARGET)
-	@echo "$(YELLOW)🔨 编译所有示例...$(RESET)"
-	@c=0; t=0; for f in $(SAMPLE_BASE) $(SAMPLE_UI); do \
-		out="build/sample_$$(basename $$f .cpp)"; \
-		$(CXX) $(SAMPLE_FLAGS) $(SAMPLE_MAIN) "$$f" $(SAMPLE_LIBS) -o "$$out" 2>/dev/null && c=$$((c+1)); \
-		t=$$((t+1)); \
-	done; echo "$(GREEN)✅ $$c/$$t 个示例$(RESET)"
+.PHONY: tests
+tests:
+	@echo "$(YELLOW)🔨 编译所有测试...$(RESET)"
+	@c=0; for n in $$(seq -w 1 16); do \
+		if g++ $(TEST_FLAGS) -DTEST_$$n samples/main.cpp $(TEST_LIBS) -o build/test_$$n 2>/dev/null; then \
+			c=$$((c+1)); echo " ✅ test_$$n"; \
+		else echo " ❌ test_$$n"; fi; \
+	done; echo "$(GREEN)✅ $$c/16 个测试$(RESET)"
 
 # ═══════════════════════════════════════════════════════════
 #  6. 调试版本
