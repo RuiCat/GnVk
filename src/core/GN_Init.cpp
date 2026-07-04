@@ -96,6 +96,7 @@ void (*GT_pFuncExit)     (void)          = GT_FuncEmpty2;
 void (*GT_pFuncDisplay2D)(unsigned int)  = GT_FuncEmpty;
 void (*GT_pFuncDisplay3D)(unsigned int)  = GT_FuncEmpty;
 void (*GT_pFuncRun)      (unsigned int)  = GT_FuncEmpty;
+void (*GT_pFuncPreFrame) (unsigned int)  = GT_FuncEmpty;  // pass前回调(Vulkan安全init)
 
 /********************************************************* 显示错误原因来选择修复 *****************************************************************************/
 //开始运行应用回调 一并加载用户资源
@@ -185,7 +186,9 @@ GN_INIT_API void GN_CallBackFuncModuleRelease(){
 	GT_UserModule.Delete();
 }
 /*************************************************************** 供循环框架调用的处理 ***********************************************************************************************************/
-GN_INIT_API void GF_FrameCycleProc1(unsigned int nTime){}
+GN_INIT_API void GF_FrameCycleProc1(unsigned int nTime){
+    GT_pFuncPreFrame(nTime);  // pass前回调(Vulkan: 在此安全init GPU资源)
+}
 
 GN_INIT_API void GF_FrameCycleProc2(unsigned int nTime){
     if(!GNg::GN_VkBeginFrame()) return; // Vulkan: start frame, skip rendering on failure

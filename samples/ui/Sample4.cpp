@@ -1,5 +1,7 @@
 #include<GN.h>		   //使用GN库必需包含这个头文件
 
+extern void (*GT_pFuncPreFrame)(unsigned int);  // pass前回调(GF_FrameCycleProc1)
+
 P< P<char> >				 FBDirs;                 //文件浏览目录表 - 用于显示
 P< P<char> >				 FBDirPaths;             //文件浏览目录表 - 用于查找
 P<GNu::cSELECT_RECT>		 SelectRect;			 //选择筐
@@ -17,19 +19,32 @@ short DrawCheckBox(short dx,  short dy, char *name, bool &value){
 	return dx + GN::RunRec.aFont.GetFontRangeX() * strlen(name);	  //返回绘制位置加名称占位宽度的位置
 }
 extern "C"{
+static bool s_preFrameInitDone = false;
+static void Sample4PreFrameInit(unsigned int nTime){
+    if(s_preFrameInitDone) return;
+    s_preFrameInitDone = true;
+    (void)nTime;
+    GNu::cFILE_BROWSER *fb = FileBrowser;
+    fb->SetEffect(300);
+    fb->InitStyleToData(0, 0, GNg::ViewCur->ortho_left, GNg::ViewCur->ortho_top+30, GNg::ViewCur->orthoW, GNg::ViewCur->orthoH - 60);
+    fb->aFocusColor = 0x66000000; fb->aFocusBlend = GNg::eBLEND_NORMAL;
+    fb->aShowOffsetX = 16; fb->aShowOffsetY = 4;
+    fb->UsShowPreview(true);
+}
+
 GN_CALL void AppInit(){
 	FBDirPaths = GNf::EnumSystemDirectory();
 	FBDirs = GN_StrGetFileNames(FBDirPaths);
 	DirPageBar.New(1);
 	DirPageBar->Init(FBDirs, 0, 0, 30);
 	FileBrowser.New(1);
-	// SetEffect/InitStyleToData 延迟到 AppDisplay2D 首帧 (Vulkan兼容)
 	TextInput.New(1);
 	TextInput->InitStyle();
 	TextInput->InitInputFmtToData(GNu::eTX_IN_TEXT_LOCK, ".png,.txt", 32);
 	TextInput->aTextColor = 0xbbffffff;
 	SelectRect.New(1);
 	SelectRect->Init();
+	GT_pFuncPreFrame = Sample4PreFrameInit;  // pass前完成GPU init
 }
 GN_CALL void AppUnInit(){   //▲释放应用必须数据 程序运行结束前会调用它一次
 	FileBrowser->WaitProcFlushReturn(); //通知文件浏览结束检索任务并等待执行结束
@@ -41,20 +56,11 @@ GN_CALL void AppUnInit(){   //▲释放应用必须数据 程序运行结束前�
 	FBDirPaths.Delete();		//删除路径空间
 }
 GN_CALL void AppDisplay2D(unsigned int nTime){ //▲显示2D画面 程序运行每帧都调用它 
-    static bool firstFrame = true;
-    GNu::cFILE_BROWSER *fb = FileBrowser;
-    if(firstFrame){ firstFrame = false; return; }  // Vulkan: 首帧跳过, 让deferred纹理在帧2前准备好
-    static bool secondFrame = true;
-    if(secondFrame){ secondFrame = false;
-        fb->SetEffect(300);
-        fb->InitStyleToData(0, 0, GNg::ViewCur->ortho_left, GNg::ViewCur->ortho_top+30, GNg::ViewCur->orthoW, GNg::ViewCur->orthoH - 60);
-        fb->aFocusColor = 0x66000000; fb->aFocusBlend = GNg::eBLEND_NORMAL;
-        fb->aShowOffsetX = 16; fb->aShowOffsetY = 4;
-        fb->UsShowPreview(true);
-        return; // InitStyleToData内纹理延迟上传, 跳过绘制
-    }
+    (void)nTime;
 	GNg::cVIEW2D *view = GNg::ViewCur;
-	GNg::ImageDraw(0,view->ortho_left,view->ortho_top,view->orthoW,view->orthoH,0xff777777);  //显示一个灰色的矩型作为背景色清屏
+    GNu::cFILE_BROWSER *fb = FileBrowser;
+	GNg::ImageDraw(0,view->ortho_left,view->ortho_top,view->orthoW,view->orthoH,0xff777777);
+	return; // DEBUG: 简化渲染
 	GNg::Draw2DAlphaDirectionSet(GNu::eNEAR_BOTTOM);			//使接下来的2D绘制都为向下渐淡的
 	GNg::ImageDraw(0,view->ortho_left,view->ortho_top,view->orthoW,320, 0x66aa8822);		  //绘制一个半个屏大渐变土黄色块
 	GNg::Draw2DAlphaDirectionSet(GNu::eNEAR_NULL);				//取消渐变绘制
