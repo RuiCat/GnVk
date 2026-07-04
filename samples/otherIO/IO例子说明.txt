@@ -1,2 +1,0 @@
-sample1.cpp  触摸屏 触点显示
-sample2.cpp  传感器的启用和值显示
