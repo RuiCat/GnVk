@@ -3,6 +3,11 @@
 
 #include <GN.h>
 
+// ── 初始化 (在 AppInit 中调用) ────────────────
+inline void TestInit() {
+    GN::RunRec.aFont.SetFreeTypeFont(16);  // 初始化调试字体 (FreeType)
+}
+
 // ── 颜色常量 ──────────────────────────────
 #define TEST_RED    0xffff4444
 #define TEST_GREEN  0xff44ff44

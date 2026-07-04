@@ -2,7 +2,7 @@
 #include "common/test_utils.h"
 
 extern "C" {
-GN_CALL void AppInit() {}
+GN_CALL void AppInit() { TestInit(); }
 GN_CALL void AppUnInit() {}
 
 GN_CALL void AppDisplay2D(unsigned int nTime) {
