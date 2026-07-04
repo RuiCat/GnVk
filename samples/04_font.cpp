@@ -46,7 +46,7 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     sprintf(info, "Font Size: 18px  |  Renderer: FreeType");
     GN_RunTextOut(info, 0, 20, Vh()-40, 0,0, TEST_GRAY, GNg::eBLEND_NORMAL);
 
-    DrawFPS();
+    DrawFPS(FontText);
 }
 
 GN_CALL void AppDisplay3D(unsigned int nTime) { (void)nTime; }

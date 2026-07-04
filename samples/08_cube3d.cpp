@@ -1,14 +1,14 @@
 // Test 08: Cube3D Test (TODO)
 #include "common/test_utils.h"
+GNg::cTEXT_ART InfoFont;
 extern "C" {
-GN_CALL void AppInit() { TestInit(); }
-GN_CALL void AppUnInit() {}
+GN_CALL void AppInit() { InfoFont.Init(nullptr); InfoFont.SetFreeTypeFont(16); }
+GN_CALL void AppUnInit() { InfoFont.Release(); }
 GN_CALL void AppDisplay2D(unsigned int nTime) {
-    (void)nTime;
-    ClearScreen(0xff111133);
-    GN_RunTextOut("Cube3D Test - TODO", 0, Vcx()-60, Vcy()-20, 0,0, TEST_WHITE, GNg::eBLEND_NORMAL);
-    GN_RunTextOut("coming soon...", 0, Vcx()-50, Vcy()+10, 0,0, TEST_YELLOW, GNg::eBLEND_NORMAL);
-    DrawFPS();
+    (void)nTime; ClearScreen(0xff111133);
+    InfoFont.OutText("Cube3D Test - TODO", 0, Vcx()-60, Vcy()-20, 0,0, TEST_WHITE);
+    InfoFont.OutText("coming soon...", 0, Vcx()-50, Vcy()+10, 0,0, TEST_YELLOW);
+    DrawFPS(InfoFont);
 }
 GN_CALL void AppDisplay3D(unsigned int nTime) { (void)nTime; }
 GN_CALL void AppRun(unsigned int nTime) { (void)nTime; }

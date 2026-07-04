@@ -4,11 +4,7 @@
 #include <GN.h>
 
 // ── 初始化 (在 AppInit 中调用) ────────────────
-inline void TestInit() {
-    // 启用调试文本输出 (GN_RunTextOut 依赖)
-    GN::RunRec.aFont.SetFreeTypeFont(16);
-    if(!GN::RunRec.zGWPrintReady) GN::RunRec.PrintViewOnOff();
-}
+inline void TestInit() {}
 
 // ── 颜色常量 ──────────────────────────────
 #define TEST_RED    0xffff4444
@@ -31,17 +27,16 @@ inline void ClearScreen(unsigned int color = TEST_GRAY) {
     GNg::ImageDraw(0, 0, 0, Vw(), Vh(), color);
 }
 
-// ── 帧率显示 ──────────────────────────────
-inline void DrawFPS(int x = 4, int y = 4) {
+// ── FPS 显示 (使用 cTEXT_ART) ──────────────
+inline void DrawFPS(GNg::cTEXT_ART &font, int x = 4, int y = 4) {
     static char buf[32];
     static unsigned int lastFps = 0;
     unsigned int fps = GN::TimeGetRunFpsCount();
     if(fps != lastFps) {
         lastFps = fps;
-        int sec = fps / 60;
-        sprintf(buf, "FPS:%d (%ds)", fps % 60, sec);
+        sprintf(buf, "FPS:%d", fps % 60);
     }
-    GN_RunTextOut(buf, 0, x, y, 0, 0, TEST_YELLOW, GNg::eBLEND_NORMAL);
+    font.OutText(buf, 0, x, y, 0, 0, TEST_YELLOW);
 }
 
 // ── 简单断言 (运行日志) ────────────────────
