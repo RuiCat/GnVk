@@ -60,7 +60,6 @@ GN_CALL void AppDisplay2D(unsigned int nTime){ //▲显示2D画面 程序运行�
 	GNg::cVIEW2D *view = GNg::ViewCur;
     GNu::cFILE_BROWSER *fb = FileBrowser;
 	GNg::ImageDraw(0,view->ortho_left,view->ortho_top,view->orthoW,view->orthoH,0xff777777);
-	return; // DEBUG: 简化渲染
 	GNg::Draw2DAlphaDirectionSet(GNu::eNEAR_BOTTOM);			//使接下来的2D绘制都为向下渐淡的
 	GNg::ImageDraw(0,view->ortho_left,view->ortho_top,view->orthoW,320, 0x66aa8822);		  //绘制一个半个屏大渐变土黄色块
 	GNg::Draw2DAlphaDirectionSet(GNu::eNEAR_NULL);				//取消渐变绘制

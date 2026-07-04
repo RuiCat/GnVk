@@ -1392,7 +1392,6 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
 
         // pass内: 延迟上传到帧首 (must copy before unmap!)
     if(s_inRenderPass && s_pendingUploadCnt < 256){
-        if(s_pendingUploadCnt == 0) fprintf(stderr, "[GN_Vk] defer upload start\n");
         s_pendingUploads[s_pendingUploadCnt].img = this;
         s_pendingUploads[s_pendingUploadCnt].data = new uint8[dstSz];
         memcpy(s_pendingUploads[s_pendingUploadCnt].data, d, dstSz);
