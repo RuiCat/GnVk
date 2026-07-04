@@ -5,7 +5,9 @@
 
 // ── 初始化 (在 AppInit 中调用) ────────────────
 inline void TestInit() {
-    GN::RunRec.aFont.SetFreeTypeFont(16);  // 初始化调试字体 (FreeType)
+    // 启用调试文本输出 (GN_RunTextOut 依赖)
+    GN::RunRec.aFont.SetFreeTypeFont(16);
+    if(!GN::RunRec.zGWPrintReady) GN::RunRec.PrintViewOnOff();
 }
 
 // ── 颜色常量 ──────────────────────────────
