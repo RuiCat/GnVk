@@ -1,2 +1,0 @@
-调用 cBGM_MUSIC::zInit 有错!!
-调用SoundLoad:samples/base/sound/click.wav 数据传输有错!

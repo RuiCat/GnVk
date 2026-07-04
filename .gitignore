@@ -1,0 +1,5 @@
+build/
+libGN_mini.*
+*.o
+*.d
+RunLog.txt

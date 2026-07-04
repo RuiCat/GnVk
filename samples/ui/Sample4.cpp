@@ -17,28 +17,19 @@ short DrawCheckBox(short dx,  short dy, char *name, bool &value){
 	return dx + GN::RunRec.aFont.GetFontRangeX() * strlen(name);	  //返回绘制位置加名称占位宽度的位置
 }
 extern "C"{
-GN_CALL void AppInit(){     //▲初始化应用必须数据 程序开始准备好引擎系统后会调用它一次 
-	FBDirPaths = GNf::EnumSystemDirectory();  //列举系统的几个常用目录并获取到它
-	FBDirs = GN_StrGetFileNames(FBDirPaths);  //获取出斋目录名
-	DirPageBar.New(1);						  //创建分页栏空间
-	DirPageBar->Init(FBDirs, 0, 0, 30);		  //初始化分页栏 指定各个分页栏名 和栏厚度
-
-	FileBrowser.New(1);						  //创建文件浏览空间
-	GNu::cFILE_BROWSER *fb = FileBrowser;	  //临时拿出文件浏览的裸指针以访问更快
-	fb->SetEffect(300);						  //设置闪动动效的间隔时间  !!如想更换文件图标可以把 GN_system/fileicon 目录下的文件替换一下 文件file_icon.ini里列出的扩展名顺序一一对应文件图标编号
-	fb->InitStyleToData(0, 0, GNg::ViewCur->ortho_left,GNg::ViewCur->ortho_top+30,GNg::ViewCur->orthoW,GNg::ViewCur->orthoH - 60); //初始化文件浏览 并指定它的范围
-	fb->aFocusColor = 0x66000000;					//设置选择焦点颜色
-	fb->aFocusBlend = GNg::eBLEND_NORMAL;			//设置选择焦点混合模式
-	fb->aShowOffsetX = 16;  fb->aShowOffsetY = 4;   //使文件浏览显示的图标右移16像素 下移4像素 
-	fb->UsShowPreview(true);						//启用文件图标缩图预览
-
-	TextInput.New(1);						  //创建文本输入筐空间
-	TextInput->InitStyle();					  //初始化输入筐 先不指定范围 因为窗口刚打开会触发 GN::ViewReSized = true 在那里设置它的范围
-	TextInput->InitInputFmtToData(GNu::eTX_IN_TEXT_LOCK, ".png,.txt", 32);  //设置输入格式为不能滚动的文本 并指定默认值和最大可输入数 
-	TextInput->aTextColor = 0xbbffffff;		  //指定输入筐文本颜色
-	
-	SelectRect.New(1);						  //创建选框空间
-	SelectRect->Init();						  //初始化选框
+GN_CALL void AppInit(){
+	FBDirPaths = GNf::EnumSystemDirectory();
+	FBDirs = GN_StrGetFileNames(FBDirPaths);
+	DirPageBar.New(1);
+	DirPageBar->Init(FBDirs, 0, 0, 30);
+	FileBrowser.New(1);
+	// SetEffect/InitStyleToData 延迟到 AppDisplay2D 首帧 (Vulkan兼容)
+	TextInput.New(1);
+	TextInput->InitStyle();
+	TextInput->InitInputFmtToData(GNu::eTX_IN_TEXT_LOCK, ".png,.txt", 32);
+	TextInput->aTextColor = 0xbbffffff;
+	SelectRect.New(1);
+	SelectRect->Init();
 }
 GN_CALL void AppUnInit(){   //▲释放应用必须数据 程序运行结束前会调用它一次
 	FileBrowser->WaitProcFlushReturn(); //通知文件浏览结束检索任务并等待执行结束
@@ -50,6 +41,18 @@ GN_CALL void AppUnInit(){   //▲释放应用必须数据 程序运行结束前�
 	FBDirPaths.Delete();		//删除路径空间
 }
 GN_CALL void AppDisplay2D(unsigned int nTime){ //▲显示2D画面 程序运行每帧都调用它 
+    static bool firstFrame = true;
+    GNu::cFILE_BROWSER *fb = FileBrowser;
+    if(firstFrame){ firstFrame = false; return; }  // Vulkan: 首帧跳过, 让deferred纹理在帧2前准备好
+    static bool secondFrame = true;
+    if(secondFrame){ secondFrame = false;
+        fb->SetEffect(300);
+        fb->InitStyleToData(0, 0, GNg::ViewCur->ortho_left, GNg::ViewCur->ortho_top+30, GNg::ViewCur->orthoW, GNg::ViewCur->orthoH - 60);
+        fb->aFocusColor = 0x66000000; fb->aFocusBlend = GNg::eBLEND_NORMAL;
+        fb->aShowOffsetX = 16; fb->aShowOffsetY = 4;
+        fb->UsShowPreview(true);
+        return; // InitStyleToData内纹理延迟上传, 跳过绘制
+    }
 	GNg::cVIEW2D *view = GNg::ViewCur;
 	GNg::ImageDraw(0,view->ortho_left,view->ortho_top,view->orthoW,view->orthoH,0xff777777);  //显示一个灰色的矩型作为背景色清屏
 	GNg::Draw2DAlphaDirectionSet(GNu::eNEAR_BOTTOM);			//使接下来的2D绘制都为向下渐淡的
@@ -68,7 +71,6 @@ GN_CALL void AppDisplay2D(unsigned int nTime){ //▲显示2D画面 程序运行�
 	GN::RunRec.aFont.OutText("查找", 0, view->ortho_right-33, view->ortho_top+8, 0, 0, 0xffa08850);	//在右上角输出土黄色 查找 文字
 	TextInput->UpdateRun(nTime);				//更新显示输入筐
 
-	GNu::cFILE_BROWSER *fb = FileBrowser;		//临时拿出文件浏览的裸指针以访问更快
 	if(GN::Mouse1[GM_LEFT] && GNg::ViewCur->HitRange(view->ortho_right-35, view->ortho_top, 35, 30)){ //当鼠标落在[查找]里且点击左键
 		if(!fb->IsBusy()){	 //文件浏览处于空闲时
 			char *input_text = TextInput->GetTextData();  //获取输入筐的内容

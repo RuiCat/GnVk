@@ -616,7 +616,7 @@ static bool    s_scissorEnabled = false;
 static VkBuffer s_pendingStagingBufs[32]; static VkDeviceMemory s_pendingStagingMems[32]; static int s_pendingStagingCnt = 0;
 // 延迟纹理上传: pass内记录, 帧首GN_VkBeginFrame处理
 struct sPendingUpload { sIMAGE *img; uint8 *data; int w,h,fmt; };
-static sPendingUpload s_pendingUploads[8];
+static sPendingUpload s_pendingUploads[256];  // 支持大量纹理(文件浏览器等)
 static int s_pendingUploadCnt = 0;
 static bool    s_scissorDirty   = false; // 首次由 GN_VkBeginFrame 设置
 
@@ -798,14 +798,19 @@ static void EndRTRenderPass() {
 
 bool GN_VkBeginFrame() {
     if(!GN_Vk.initialized) return false;
-    // 处理pass内延迟的纹理上传 (在render pass之前, 安全)
+    // TODO: 处理pass内延迟的纹理上传 (临时禁用排查崩溃)
+    // for(int i=0;i<s_pendingUploadCnt;i++){ ... }
+    // 注意: 必须在vkWaitForFences之后处理, 否则GPU还在用旧帧资源!
+    vkWaitForFences(GN_Vk.device,1,&GN_Vk.inFlightFence,VK_TRUE,UINT64_MAX);
+    // 处理pass内延迟的纹理上传 (必须在vkWaitForFences之后)
     for(int i=0;i<s_pendingUploadCnt;i++){
-        s_pendingUploads[i].img->DataFill(s_pendingUploads[i].data,
-            s_pendingUploads[i].fmt, s_pendingUploads[i].w, s_pendingUploads[i].h, 0, 0);
+        if(s_pendingUploads[i].img && s_pendingUploads[i].data){
+            s_pendingUploads[i].img->DataFill(s_pendingUploads[i].data,
+                s_pendingUploads[i].fmt, s_pendingUploads[i].w, s_pendingUploads[i].h, 0, 0);
+        }
         delete[] s_pendingUploads[i].data;
     }
     s_pendingUploadCnt = 0;
-    vkWaitForFences(GN_Vk.device,1,&GN_Vk.inFlightFence,VK_TRUE,UINT64_MAX);
     vkResetFences(GN_Vk.device,1,&GN_Vk.inFlightFence);
     VkResult res=vkAcquireNextImageKHR(GN_Vk.device,GN_Vk.swapchain,UINT64_MAX,GN_Vk.imageAvailable,0,&GN_Vk.currentFrame);
     if(res!=VK_SUCCESS&&res!=VK_SUBOPTIMAL_KHR) return false;
@@ -831,12 +836,6 @@ bool GN_VkBeginFrame() {
 
 void GN_VkEndFrame() {
     if(!GN_Vk.initialized) return;
-    // 释放pass内DataFill暂存的staging buffers
-    for(int i=0;i<s_pendingStagingCnt;i++){
-        vkDestroyBuffer(GN_Vk.device,s_pendingStagingBufs[i],0);
-        vkFreeMemory(GN_Vk.device,s_pendingStagingMems[i],0);
-    }
-    s_pendingStagingCnt=0;
     // Close final batch
     if(gVCnt > 0 && s_batchCount < 256) {
         s_batchEnd[s_batchCount] = gVCnt;
@@ -1142,70 +1141,8 @@ static uint8_t* LoadPngFile(const char *path, int *w_out, int *h_out) {
 
 // ── 通用 GPU 纹理上传 ─────────────────────────────────
 static void UploadImageToGPU(sIMAGE *out, int w, int h, uint8_t *px) {
-    VkDeviceSize sz = (VkDeviceSize)w * (VkDeviceSize)h * 4;
-    VkBuffer sb; VkDeviceMemory sm;
-    CreateBuf(sz, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, sb, sm);
-    void *d; vkMapMemory(GN_Vk.device,sm,0,sz,0,&d); memcpy(d,px,sz); vkUnmapMemory(GN_Vk.device,sm);
-    // Create image
-    VkImageCreateInfo ici={VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-    ici.imageType=VK_IMAGE_TYPE_2D; ici.extent={(uint32_t)w,(uint32_t)h,1};
-    ici.mipLevels=1; ici.arrayLayers=1; ici.format=VK_FORMAT_R8G8B8A8_UNORM;
-    ici.tiling=VK_IMAGE_TILING_OPTIMAL; ici.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
-    ici.usage=VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT;
-    ici.samples=VK_SAMPLE_COUNT_1_BIT; ici.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
-    VkResult res = vkCreateImage(GN_Vk.device,&ici,0,&out->vkImage);
-    VkCheck(res, "vkCreateImage in UploadImageToGPU");
-    VkMemoryRequirements mr; vkGetImageMemoryRequirements(GN_Vk.device,out->vkImage,&mr);
-    VkMemoryAllocateInfo mai={VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    mai.allocationSize=mr.size; mai.memoryTypeIndex=FindMemType(mr.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    res = vkAllocateMemory(GN_Vk.device,&mai,0,&out->vkImageMemory);
-    VkCheck(res, "vkAllocateMemory in UploadImageToGPU");
-    res = vkBindImageMemory(GN_Vk.device,out->vkImage,out->vkImageMemory,0);
-    VkCheck(res, "vkBindImageMemory in UploadImageToGPU");
-    // One-time command: transition → copy → transition
-    VkCommandBuffer cb;
-    {VkCommandBufferAllocateInfo ai={VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-     ai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; ai.commandPool=GN_Vk.commandPool; ai.commandBufferCount=1;
-     res = vkAllocateCommandBuffers(GN_Vk.device,&ai,&cb);
-     VkCheck(res, "vkAllocateCommandBuffers in UploadImageToGPU");}
-    {VkCommandBufferBeginInfo bi={VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-     bi.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; vkBeginCommandBuffer(cb,&bi);}
-    {VkImageMemoryBarrier b={VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-     b.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; b.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-     b.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-     b.image=out->vkImage; b.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
-     b.subresourceRange.levelCount=1; b.subresourceRange.layerCount=1;
-     b.srcAccessMask=0; b.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
-     vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,0,0,0,1,&b);}
-    {VkBufferImageCopy rgn={}; rgn.imageSubresource.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
-     rgn.imageSubresource.layerCount=1; rgn.imageExtent={(uint32_t)w,(uint32_t)h,1};
-     vkCmdCopyBufferToImage(cb,sb,out->vkImage,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&rgn);}
-    {VkImageMemoryBarrier b={VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-     b.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; b.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-     b.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-     b.image=out->vkImage; b.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
-     b.subresourceRange.levelCount=1; b.subresourceRange.layerCount=1;
-     b.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; b.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
-     vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,0,0,0,0,0,1,&b);}
-    vkEndCommandBuffer(cb);
-    {VkSubmitInfo si={VK_STRUCTURE_TYPE_SUBMIT_INFO}; si.commandBufferCount=1;
-     si.pCommandBuffers=&cb; vkQueueSubmit(GN_Vk.graphicsQueue,1,&si,0); vkQueueWaitIdle(GN_Vk.graphicsQueue);}
-    vkFreeCommandBuffers(GN_Vk.device,GN_Vk.commandPool,1,&cb);
-    vkDestroyBuffer(GN_Vk.device,sb,0); vkFreeMemory(GN_Vk.device,sm,0);
-    // ImageView + DescriptorSet
-    out->vkImageView=MakeImageView(out->vkImage,VK_FORMAT_R8G8B8A8_UNORM);
-    VkDescriptorSetAllocateInfo dsai={VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    dsai.descriptorPool=GN_Vk.descriptorPool; dsai.descriptorSetCount=1;
-    dsai.pSetLayouts=&GN_Vk.descriptorLayout;
-    res = vkAllocateDescriptorSets(GN_Vk.device,&dsai,&out->vkDescriptorSet);
-    VkCheck(res, "vkAllocateDescriptorSets in UploadImageToGPU");
-    VkDescriptorBufferInfo dbi={GN_Vk.uniformBuffer,0,sizeof(VkUBO)};
-    VkDescriptorImageInfo dii={GN_Vk.defaultSampler,out->vkImageView,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet wds[2]={{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
-    wds[0].dstSet=out->vkDescriptorSet;wds[0].dstBinding=0;wds[0].descriptorType=VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;wds[0].descriptorCount=1;wds[0].pBufferInfo=&dbi;
-    wds[1].dstSet=out->vkDescriptorSet;wds[1].dstBinding=1;wds[1].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;wds[1].descriptorCount=1;wds[1].pImageInfo=&dii;
-    vkUpdateDescriptorSets(GN_Vk.device,2,wds,0,0);
+    // Delegate to DataFill — 自动处理pass内延迟上传
+    out->DataFill(px, CR_RGBA, w, h, 0, 0, 0, false);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1420,7 +1357,6 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
 
     // If we already have a VkImage, do sub-region update
     if(vkImage != VK_NULL_HANDLE) {
-        // Determine source bytes per pixel from format
         int srcBpp; bool expandRGBA = false;
         switch(fmt) {
             case CR_ALPHA: case CR_LUMINANCE: expandRGBA=true; srcBpp=1; break;
@@ -1431,79 +1367,76 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         }
         VkDeviceSize srcSz = (VkDeviceSize)w * (VkDeviceSize)h * srcBpp;
         VkDeviceSize dstSz = (VkDeviceSize)w * (VkDeviceSize)h * 4;
-
         VkBuffer stagingBuf; VkDeviceMemory stagingMem;
         CreateBuf(dstSz, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                   stagingBuf, stagingMem);
         void *d; vkMapMemory(GN_Vk.device, stagingMem, 0, dstSz, 0, &d);
         if(expandRGBA || srcBpp == 3) {
-            uint8_t *dst = (uint8_t*)d;
+            uint8_t *dst8 = (uint8_t*)d;
             for(int i = 0; i < w * h; i++) {
                 if(srcBpp == 1) {
                     uint8_t a = ((uint8_t*)data)[i];
-                    dst[i*4]=a; dst[i*4+1]=a; dst[i*4+2]=a; dst[i*4+3]=a;
+                    dst8[i*4]=a; dst8[i*4+1]=a; dst8[i*4+2]=a; dst8[i*4+3]=a;
                 } else if(srcBpp == 2) {
-                    uint8_t l=((uint8_t*)data)[i*2], a=((uint8_t*)data)[i*2+1];
-                    dst[i*4]=l; dst[i*4+1]=l; dst[i*4+2]=l; dst[i*4+3]=a;
-                } else { // RGB 3-byte → RGBA
-                    dst[i*4]=((uint8_t*)data)[i*3];
-                    dst[i*4+1]=((uint8_t*)data)[i*3+1];
-                    dst[i*4+2]=((uint8_t*)data)[i*3+2];
-                    dst[i*4+3]=0xFF;
+                    uint8_t l=((uint8_t*)data)[i*2], a2=((uint8_t*)data)[i*2+1];
+                    dst8[i*4]=l; dst8[i*4+1]=l; dst8[i*4+2]=l; dst8[i*4+3]=a2;
+                } else {
+                    dst8[i*4  ]=((uint8_t*)data)[i*3];
+                    dst8[i*4+1]=((uint8_t*)data)[i*3+1];
+                    dst8[i*4+2]=((uint8_t*)data)[i*3+2];
+                    dst8[i*4+3]=0xFF;
                 }
             }
-        } else {
-            memcpy(d, data, dstSz);
-        }
+        } else { memcpy(d, data, dstSz); }
+
+        // pass内: 延迟上传到帧首 (must copy before unmap!)
+    if(s_inRenderPass && s_pendingUploadCnt < 256){
+        if(s_pendingUploadCnt == 0) fprintf(stderr, "[GN_Vk] defer upload start\n");
+        s_pendingUploads[s_pendingUploadCnt].img = this;
+        s_pendingUploads[s_pendingUploadCnt].data = new uint8[dstSz];
+        memcpy(s_pendingUploads[s_pendingUploadCnt].data, d, dstSz);
+        s_pendingUploads[s_pendingUploadCnt].w = w;
+        s_pendingUploads[s_pendingUploadCnt].h = h;
+        s_pendingUploads[s_pendingUploadCnt].fmt = CR_RGBA; // staging已展开为RGBA
+        s_pendingUploadCnt++;
         vkUnmapMemory(GN_Vk.device, stagingMem);
+        vkDestroyBuffer(GN_Vk.device, stagingBuf, 0);
+        vkFreeMemory(GN_Vk.device, stagingMem, 0);
+        return;
+    }
+    vkUnmapMemory(GN_Vk.device, stagingMem);
 
-        // pass内: 延迟上传到帧首(完全避免pass内queue submit)
-        if(s_inRenderPass && s_pendingUploadCnt < 8){
-            s_pendingUploads[s_pendingUploadCnt].img = this;
-            VkDeviceSize copySz = (VkDeviceSize)w * (VkDeviceSize)h * 4;
-            s_pendingUploads[s_pendingUploadCnt].data = new uint8[copySz];
-            memcpy(s_pendingUploads[s_pendingUploadCnt].data, d, copySz);
-            s_pendingUploads[s_pendingUploadCnt].w = w;
-            s_pendingUploads[s_pendingUploadCnt].h = h;
-            s_pendingUploads[s_pendingUploadCnt].fmt = fmt;
-            s_pendingUploadCnt++;
-            vkDestroyBuffer(GN_Vk.device, stagingBuf, 0);
-            vkFreeMemory(GN_Vk.device, stagingMem, 0);
-            return;
-        }
-
-        {VkCommandBufferAllocateInfo ai={VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-            ai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; ai.commandPool=GN_Vk.commandPool; ai.commandBufferCount=1;
-            VkCommandBuffer cb; VkResult res = vkAllocateCommandBuffers(GN_Vk.device,&ai,&cb);
-            VkCheck(res, "vkAllocateCommandBuffers in DataFill(sub-region)");
-            VkCommandBufferBeginInfo bi={VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-            bi.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; vkBeginCommandBuffer(cb,&bi);
-
-        {VkImageMemoryBarrier b1={VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    {VkCommandBufferAllocateInfo ai={VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        ai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; ai.commandPool=GN_Vk.commandPool; ai.commandBufferCount=1;
+        VkCommandBuffer cb; VkResult res = vkAllocateCommandBuffers(GN_Vk.device,&ai,&cb);
+        VkCheck(res, "vkAllocateCommandBuffers in DataFill(sub-region)");
+        VkCommandBufferBeginInfo bi={VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        bi.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; vkBeginCommandBuffer(cb,&bi);
+        VkImageMemoryBarrier b1={VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         b1.oldLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; b1.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b1.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; b1.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
         b1.image=vkImage; b1.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
         b1.subresourceRange.levelCount=1; b1.subresourceRange.layerCount=1;
         b1.srcAccessMask=VK_ACCESS_SHADER_READ_BIT; b1.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
-        vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,0,0,0,1,&b1);}
-        {VkBufferImageCopy rgn={}; rgn.bufferOffset=0; rgn.imageSubresource.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+        vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,0,0,0,1,&b1);
+        VkBufferImageCopy rgn={}; rgn.bufferOffset=0; rgn.imageSubresource.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
         rgn.imageSubresource.layerCount=1; rgn.imageOffset={offset_x, offset_y, 0};
         rgn.imageExtent={(uint32_t)w,(uint32_t)h,1};
-        vkCmdCopyBufferToImage(cb,stagingBuf,vkImage,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&rgn);}
-        {VkImageMemoryBarrier b2={VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        vkCmdCopyBufferToImage(cb,stagingBuf,vkImage,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&rgn);
+        VkImageMemoryBarrier b2={VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         b2.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; b2.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         b2.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED; b2.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
         b2.image=vkImage; b2.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
         b2.subresourceRange.levelCount=1; b2.subresourceRange.layerCount=1;
         b2.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; b2.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,0,0,0,0,0,1,&b2);}
+        vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,0,0,0,0,0,1,&b2);
         vkEndCommandBuffer(cb);
-        {VkFence f; VkFenceCreateInfo fci={VK_STRUCTURE_TYPE_FENCE_CREATE_INFO}; vkCreateFence(GN_Vk.device,&fci,0,&f);
-         VkSubmitInfo si={VK_STRUCTURE_TYPE_SUBMIT_INFO}; si.commandBufferCount=1; si.pCommandBuffers=&cb;
-         vkQueueSubmit(GN_Vk.graphicsQueue,1,&si,f); vkWaitForFences(GN_Vk.device,1,&f,VK_TRUE,UINT64_MAX);
-         vkDestroyFence(GN_Vk.device,f,0);}
-        vkFreeCommandBuffers(GN_Vk.device,GN_Vk.commandPool,1,&cb);
+        VkFence f; VkFenceCreateInfo fci={VK_STRUCTURE_TYPE_FENCE_CREATE_INFO}; vkCreateFence(GN_Vk.device,&fci,0,&f);
+        VkSubmitInfo si={VK_STRUCTURE_TYPE_SUBMIT_INFO}; si.commandBufferCount=1; si.pCommandBuffers=&cb;
+        vkQueueSubmit(GN_Vk.graphicsQueue,1,&si,f); vkWaitForFences(GN_Vk.device,1,&f,VK_TRUE,UINT64_MAX);
+        vkDestroyFence(GN_Vk.device,f,0);
+        vkFreeCommandBuffers(GN_Vk.device,GN_Vk.commandPool,1,&cb);}
         vkDestroyBuffer(GN_Vk.device,stagingBuf,0); vkFreeMemory(GN_Vk.device,stagingMem,0);
         return;
     }
@@ -1557,6 +1490,21 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         }
     } else {
         memcpy(d, data, dstSz);
+    }
+    // pass内延迟: 新纹理创建也需要避免pass内queue submit
+    if(s_inRenderPass && s_pendingUploadCnt < 256){
+        s_pendingUploads[s_pendingUploadCnt].img = this;
+        s_pendingUploads[s_pendingUploadCnt].data = new uint8[dstSz];
+        memcpy(s_pendingUploads[s_pendingUploadCnt].data, d, dstSz);
+        s_pendingUploads[s_pendingUploadCnt].w = w;
+        s_pendingUploads[s_pendingUploadCnt].h = h;
+        s_pendingUploads[s_pendingUploadCnt].fmt = CR_RGBA;
+        s_pendingUploadCnt++;
+        vkUnmapMemory(GN_Vk.device, stagingMem);
+        vkDestroyBuffer(GN_Vk.device, stagingBuf, 0);
+        vkFreeMemory(GN_Vk.device, stagingMem, 0);
+        width = w; height = h; uRange = 1.0f; vRange = 1.0f; texnum = 1;
+        return;
     }
     vkUnmapMemory(GN_Vk.device, stagingMem);
 

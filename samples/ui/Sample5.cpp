@@ -22,18 +22,17 @@ unsigned int MakeUserInfoData(uint8 *data, unsigned int count){
 	return wpos - data;  //最尾的写位置减数据起始位置即为数据总大小
 }
 extern "C"{
-GN_CALL void AppInit(){     //▲初始化应用必须数据 程序开始准备好引擎系统后会调用它一次 
-	UiScene.New(1);				//分配UI场景空间
+GN_CALL void AppInit(){ /* Vulkan: UI延迟到AppDisplay2D首帧初始化 */ }
+static bool s_sample5InitDone = false;
+static void Sample5Init(){
+	if(s_sample5InitDone) return; s_sample5InitDone = true;
+	UiScene.New(1);
 	float progr;
-	UiScene->InitLoadToData("samples/ui/ScrollBlock/ScrollBlock.gui", progr);	//加载本例UI场景
-	ScrollBlock = CUP(GNu::cSCROLL_LIST_GUI, UiScene->Search("UiBlock"));		//在UI场景里查找获取到名为UiBlock的滚动嵌套UI块
-	//本例UI场景在编辑器里已经为 UiBlock 指定好UI数值提取文件 并绑定好数据表文件 data1.sld 以实现无需多写代码就可以定制显示大量数据
-	//!数据表文件里数据格式排布没有固定标准 通常是与子区块UI显示取值相匹配的 正确配置好UI数值提取文件 您就可顺利把数据表里的数据显示在UI上
-
-	//ScrollBlock->aSubUiArg.Delete();	//您可以删除它来强制使用 手动配置数值提取文件
-	if(!ScrollBlock->aSubUiArg){		//无UI数值提取文件 aSubUiArg通常用于存UI数值提取文件
-		P<GNu::cVALUE_EXTRACT_FILE> pextract_file(1);			//新建UI数值提取文件
-		GNu::cVALUE_EXTRACT_FILE *extract_file = pextract_file; //临时拿出数值提取文件裸指针以访问更快
+	UiScene->InitLoadToData("samples/ui/ScrollBlock/ScrollBlock.gui", progr);
+	ScrollBlock = CUP(GNu::cSCROLL_LIST_GUI, UiScene->Search("UiBlock"));
+	if(!ScrollBlock->aSubUiArg){
+		P<GNu::cVALUE_EXTRACT_FILE> pextract_file(1);
+		GNu::cVALUE_EXTRACT_FILE *extract_file = pextract_file;
 		extract_file->extract_descs.New(13);					//新建13个数值提取描述 依次一一对应子区块UI组里的各个UI组件
 		GN::sVALUE_LAYOUT2 *_extract_descs = extract_file->extract_descs; //临时拿出数值提取描述裸指针以访问更快
 		uint8 uobj_buf[8];	/*以下代码教您怎么按本例读取要求手动配置数值提取描述*/
@@ -86,6 +85,7 @@ GN_CALL void AppUnInit(){   //▲释放应用必须数据 程序运行结束前�
 	UiScene.Delete();			//删除UI场景和相关数据
 }
 GN_CALL void AppDisplay2D(unsigned int nTime){ //▲显示2D画面 程序运行每帧都调用它 
+    Sample5Init(); // Vulkan: ViewCur在首帧才可用, 延迟到此处初始化
 	if(GN::Key1[GK_1]){			//当有按下键盘1键
 		GNu::cVALUE_EXTRACT_FILE *extract_file = CVP(GNu::cVALUE_EXTRACT_FILE)(ScrollBlock->aSubUiArg); //临时拿出UI数值提取文件裸指针以访问更快
 		if(extract_file->fp){		//提取文件已准备好
