@@ -67,7 +67,7 @@ Windows: C:/Windows/Fonts/msyh.ttc
 | `GN_RunRec.cpp` PNG 加载代码 | 🗑️ 已移除 |
 | `GT_SYS_FontDefName` 常量 | 🗑️ 已清空 |
 | `eFONT_GB2312` 枚举值 | 🗑️ 已删除（`eFONT_FREETYPE` 改为值 2） |
-| Sample11/15/16 GB2312 引用 | ✏️ 已改为 FreeType |
+| GB2312 字库引用 | ✏️ 已改为 FreeType |
 | `GN_Sys.cpp` UTF-8↔GB2312 转换 | ⚠️ 保留（系统层路径编码需要） |
 
 **FreeType 是唯一的中文渲染方案。** 不再需要预生成 PNG 字库。

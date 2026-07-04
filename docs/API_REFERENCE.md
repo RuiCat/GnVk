@@ -105,9 +105,9 @@ class cVIEW2D : public sWINDOW {
 struct sIMAGE {
     unsigned int width, height;    // 图像尺寸
     float uRange, vRange;          // UV范围（图集子区域）
-    unsigned int glID;             // OpenGL纹理ID
+    VkImage vkImage;               // Vulkan 纹理句柄
 
-    // 从文件加载（支持 PNG/BMP/TGA/HDR）
+    // 从文件加载（支持 PNG）
     bool InitToData(const char *filename);
     // 释放纹理
     void Release();
