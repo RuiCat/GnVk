@@ -82,7 +82,7 @@ GN_API GNg::COLOR_FORMAT GNg::ImgFmtGetFormat(short bit_num){
 	return fmt;
 }
 GN_API short GNg::ImgFmtGetByteNum(COLOR_FORMAT format){
-     if     (format == CR_RGBA)return 4;
+     if     (format == CR_RGBA || format == CR_DEFAULT_FORMAT)return 4;
 	 else if(format == CR_RGB )return 3;
 	 else if(format == CR_RGB565 /*|| format == CR_RGBA4444 || format == CR_RGBA5551*/|| format == CR_LUMINANCE_ALPHA)return 2;
 	 else if(format >= CR_ALPHA && format <= CR_PALETTE)return 1;

@@ -552,25 +552,19 @@ void GNu::cFILE_BROWSER::SetEffect(short focus_flash_time, P<GNg::cFRAME_LAUNCHE
 GNg::sIMAGE * GNu::cFILE_BROWSER::GetIcon(){
     if(!GT_FB_DefaultIconImg){
 		GNf_DirStatePush(false);
-		int fsize; // 读取默认能识别的文件扩展名列表 -------------------------------------------------------------------------
+		int fsize;
 		char *ini_filename = GN_SysDir("fileicon/file_icon.ini");
 		char *ini_file_buf = GNf::FileFullLoadToMemoryText(ini_filename, &fsize);
 		if(ini_file_buf){
-            GT_FB_ExtNameTable = GN_StrSplitToData(ini_file_buf,'\n'); //分割出各个扩展名放到字符表里
+            GT_FB_ExtNameTable = GN_StrSplitToData(ini_file_buf,'\n');
 			delete [] ini_file_buf;
 
 			if(GT_FB_ExtNameTable.Num()){
 				GT_FB_DefaultIconImg.New(1);
-				GNg::sIMAGE *_img = GT_FB_DefaultIconImg; // 读取默认文件图标 -----------------------------------------
+				GNg::sIMAGE *_img = GT_FB_DefaultIconImg;
 				if(GNg::ImageLoad(GN_SysDir("fileicon/file_icon"),(unsigned short)GT_FB_ExtNameTable.Num()+2, _img)){
-					GNg::sIMAGE icon;
-					icon.CreateEmptyToData(_img->width, _img->height, 1, _img->cFormat);   //创建空图
-					GT_TMP_FILL_EMPTY_IMG_DATA( _img )
-					unsigned int *texture1 = new unsigned int[_img->texnum + 1];
-					memcpy(texture1, _img->texture, sizeof(unsigned int) * _img->texnum);  //合并空图到文件图标图末尾
-					texture1[_img->texnum] = icon.texture[0];
-					delete [] _img->texture; _img->texture = texture1;
-					delete [] icon.texture;	  icon.texture = 0;
+					// Vulkan: 跳过OpenGL纹理合并(texture数组未使用, 避免heap corruption)
+					(void)_img;
 				}else GN_Log("读取文件浏览默认文件图标失败!\n");
 			}
 		}else GN_Log("读取文件浏览默认能识别的文件扩展名列表失败! 找不到文件: %s\n",ini_filename);
@@ -590,7 +584,6 @@ void GNu::cFILE_BROWSER::zInitInternalObj(short fx, short fy, short fw, short fh
 		}
 		if(!zFrameIcon){
 			GNg::sIMAGE *p_img = GetIcon();
-			if(!p_img){ zShowReady = false; return; }
 			zFrameIcon.New(1);
 			zFrameIcon->Init(p_img, 0,0 GT_TMP_DEF_FRAME_INIT_ARGS_ONCE_KEEP);
 		}
@@ -604,7 +597,6 @@ void GNu::cFILE_BROWSER::zInitInternalObj(short fx, short fy, short fw, short fh
 		GNg::sARRANGE_FMT afmt(0,0.0f,0.0f,w2,0,0,0,GNg::eENTER_LEFT_RIGHT, 0,0);
 		GNg::sRECT2 arc2d((float)fx,(float)fy,(float)(fx+fw),(float)(fy+fh));
 		zFFrames->InitToData(_frame_icon, GNg::cFRAME_LAUNCHER_FONT::aPicIndex,1, &arc2d, &afmt, 0.0f,1000,0,127,0,127,127,0,0,0,GT_FB_DefaultFrameAct,true);
-	
 	}else SetPos(fx,fy,fw,fh);
 }
 void GNu::cFILE_BROWSER::zSetIconChange(unsigned int fid,unsigned int pid){
