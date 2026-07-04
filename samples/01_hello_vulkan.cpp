@@ -22,10 +22,10 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     InfoFont.OutText("GN_mini Engine v2026", 0, Vcx()-80, Vcy()-30, 0,0, TEST_YELLOW);
 
     GNg::ImageDraw(0, Vcx()-120, Vcy()+20, 60,40, TEST_RED);
-    GNg::ImageDraw(0, Vcx()-50,  Vcy()+10, 60,50, TEST_GREEN);
-    GNg::ImageDraw(0, Vcx()+20,  Vcy(),   60,60, TEST_BLUE);
-    GNg::ImageDraw(0, Vcx()+90,  Vcy()+10, 60,50, TEST_CYAN);
-    GNg::LineFrame2dDraw(Vcx()-125, Vcy()-5, 260, 70, 1, TEST_WHITE);
+    GNg::ImageDraw(0, Vcx()-50,  Vcy()+10, 55,50, TEST_GREEN);
+    GNg::ImageDraw(0, Vcx()+15,  Vcy(),   55,60, TEST_BLUE);
+    GNg::ImageDraw(0, Vcx()+80,  Vcy()+10, 55,50, TEST_CYAN);
+    GNg::LineFrame2dDraw(Vcx()-125, Vcy()-10, 265, 80, 1, TEST_WHITE);
 
     DrawFPS(InfoFont);
 }
