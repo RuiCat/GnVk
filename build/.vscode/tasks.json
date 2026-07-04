@@ -1,0 +1,53 @@
+{
+    "tasks": [
+        {
+            "type": "shell",
+            "label": "🔨 make (编译引擎库)",
+            "command": "make",
+            "args": ["-j", "0"],
+            "options": {
+                "cwd": "${workspaceFolder}/.."
+            },
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "编译 libGN_mini.so"
+        },
+        {
+            "type": "shell",
+            "label": "🧹 make clean",
+            "command": "make",
+            "args": ["clean"],
+            "options": {
+                "cwd": "${workspaceFolder}/.."
+            },
+            "problemMatcher": [],
+            "detail": "清理编译产物"
+        },
+        {
+            "type": "shell",
+            "label": "🐛 make debug",
+            "command": "make",
+            "args": ["debug", "-j", "0"],
+            "options": {
+                "cwd": "${workspaceFolder}/.."
+            },
+            "problemMatcher": ["$gcc"],
+            "detail": "编译调试版本 (含符号)"
+        },
+        {
+            "type": "shell",
+            "label": "📋 make samples",
+            "command": "make",
+            "args": ["samples"],
+            "options": {
+                "cwd": "${workspaceFolder}/.."
+            },
+            "problemMatcher": ["$gcc"],
+            "detail": "编译所有示例程序"
+        }
+    ],
+    "version": "2.0.0"
+}
