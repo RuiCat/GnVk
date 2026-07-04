@@ -5,6 +5,7 @@ GNg::sIMAGE TexImg;
 
 extern "C" {
 GN_CALL void AppInit() {
+    TestInit();
     // 加载测试纹理 (需 assets/ui/ 目录下的引擎默认纹理)
     TexImg.InitToData(GN_SysDir("ui/bubbleB"), 1);
 }

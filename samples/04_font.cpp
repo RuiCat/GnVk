@@ -5,6 +5,7 @@ GNg::cTEXT_ART FontText;
 
 extern "C" {
 GN_CALL void AppInit() {
+    TestInit();
     FontText.Init(nullptr);
     FontText.SetFreeTypeFont(18);
 }

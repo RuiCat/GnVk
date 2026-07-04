@@ -5,6 +5,7 @@ GNg::sIMAGE BubbleImg, FrameImg;
 
 extern "C" {
 GN_CALL void AppInit() {
+    TestInit();
     BubbleImg.InitToData(GN_SysDir("ui/bubbleB"), 9, GNg::CR_ALPHA);
 }
 
