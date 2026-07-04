@@ -6,7 +6,7 @@ GNg::cTEXT_ART InfoFont;
 
 extern "C" {
 GN_CALL void AppInit() {
-    InfoFont.Init(nullptr); InfoFont.SetFreeTypeFont(16);
+    InfoFont.SetFreeTypeFont(16);
     TexImg.InitToData(GN_SysDir("ui/bubbleB"), 1);
 }
 
