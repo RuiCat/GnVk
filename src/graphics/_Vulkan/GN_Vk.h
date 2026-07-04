@@ -28,6 +28,7 @@ struct sIMAGE {
     VkSampler        vkSampler;
     VkDescriptorSet  vkDescriptorSet;
     bool             vkIsLinear;     // LINEAR tiling: 零GPU操作直接CPU写入(视频用)
+    bool             skipDefer;      // 跳过延迟上传(FreeType字体atlas等需即时更新)
     void            *z__attrb;
 
     static sIMAGE   *zRTexture;

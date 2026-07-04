@@ -88,6 +88,7 @@ bool cFREETYPE_FONT::InitAtlas(int size) {
     m_atlas->CreateEmptyToData(size, size, 1, 0, 1, false, true);
     if(!m_atlas->vkImage) { delete m_atlas; m_atlas = nullptr; return false; }
     m_atlas->texnum = 1;  // 单纹理图集 (非多帧)
+    m_atlas->skipDefer = true;  // 字体atlas需即时上传(每帧新增字形)
     m_atlasSize = size;
     m_cursorX = 1; m_cursorY = 1; m_rowH = 0;
     return true;
@@ -119,6 +120,7 @@ bool cFREETYPE_FONT::GrowAtlas() {
     m_atlas->vkImageView = newAtlas->vkImageView;
     m_atlas->vkSampler = newAtlas->vkSampler;
     m_atlas->vkDescriptorSet = newAtlas->vkDescriptorSet;
+    m_atlas->skipDefer = newAtlas->skipDefer;  // 保持即时上传标志
     m_atlas->width = newSize; m_atlas->height = newSize;
     m_atlas->uRange = 1.0f; m_atlas->vRange = 1.0f;
     m_atlasSize = newSize;

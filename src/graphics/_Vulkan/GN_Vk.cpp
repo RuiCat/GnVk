@@ -1391,8 +1391,9 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         } else { memcpy(d, data, dstSz); }
 
         // pass内: 延迟上传到帧首 (must copy before unmap!)
-    if(s_inRenderPass && s_pendingUploadCnt < 256){
-        s_pendingUploads[s_pendingUploadCnt].img = this;
+        // skipDefer: FreeType字体atlas等需即时更新的纹理不走延迟
+        if(s_inRenderPass && s_pendingUploadCnt < 256 && !skipDefer){
+            s_pendingUploads[s_pendingUploadCnt].img = this;
         s_pendingUploads[s_pendingUploadCnt].data = new uint8[dstSz];
         memcpy(s_pendingUploads[s_pendingUploadCnt].data, d, dstSz);
         s_pendingUploads[s_pendingUploadCnt].w = w;
@@ -1491,7 +1492,7 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         memcpy(d, data, dstSz);
     }
     // pass内延迟: 新纹理创建也需要避免pass内queue submit
-    if(s_inRenderPass && s_pendingUploadCnt < 256){
+    if(s_inRenderPass && s_pendingUploadCnt < 256 && !skipDefer){
         s_pendingUploads[s_pendingUploadCnt].img = this;
         s_pendingUploads[s_pendingUploadCnt].data = new uint8[dstSz];
         memcpy(s_pendingUploads[s_pendingUploadCnt].data, d, dstSz);
