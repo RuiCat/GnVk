@@ -23,37 +23,37 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
  THE SOFTWARE.
  ****************************************************************************/
 
-#include"GN.h"
+#include "GN.h"
 #ifdef _GN_H_
-GN_API GT_sMEMORY_TABLE GT_UsMemTable;  //这内存表一定要放在最头定义 否侧用安全指针分配的时会崩
+GN_API GT_sMEMORY_TABLE GT_UsMemTable; //这内存表一定要放在最头定义 否侧用安全指针分配的时会崩
 
-GN_API unsigned int  GT_SystemInited = 0;
+GN_API unsigned int GT_SystemInited = 0;
 
-GN_API char *const GN_GetInterfaceVersion(){
+GN_API char *const GN_GetInterfaceVersion() {
     static const char GN_interface_Version[] = GN_INTERFACE_VERSION;
-	return (char *const)GN_interface_Version;
+    return (char *const)GN_interface_Version;
 }
-GN_API char *const GN_GetVersion(){
+GN_API char *const GN_GetVersion() {
     static const char GN_Version[] = GN_VERSION;
-	return (char *const)GN_Version; 
+    return (char *const)GN_Version;
 }
-GN_API unsigned int  GN_GetModuleConstitute(){
+GN_API unsigned int GN_GetModuleConstitute() {
     return 0
-   #ifdef GN_USING_UTILITY_LIB
-    | GN_USING_UTILITY_LIB
-   #endif
-   #ifdef GN_USING_2D
-    | GN_USING_2D
-   #endif
-   #ifdef GN_USING_AUDIO
-    | GN_USING_AUDIO
-   #endif
-   #ifdef GN_USING_NET
-    | GN_USING_NET
-   #endif
-   #ifdef GN_USING_UNZIP
-    | GN_USING_UNZIP
-   #endif
-	;
+#ifdef GN_USING_UTILITY_LIB
+           | GN_USING_UTILITY_LIB
+#endif
+#ifdef GN_USING_2D
+           | GN_USING_2D
+#endif
+#ifdef GN_USING_AUDIO
+           | GN_USING_AUDIO
+#endif
+#ifdef GN_USING_NET
+           | GN_USING_NET
+#endif
+#ifdef GN_USING_UNZIP
+           | GN_USING_UNZIP
+#endif
+        ;
 }
 #endif

@@ -31,6 +31,15 @@ make
 # 调试版本
 make debug
 
+# 单元测试（纯逻辑，无需 GPU）
+make unit
+
+# ASan/UBSan 单元测试（独立构建，不覆盖 release 产物）
+make asan
+
+# 构建 + 单元测试 + 全部示例编译
+make check
+
 # 着色器编译
 make shaders
 

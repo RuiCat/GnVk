@@ -1,16 +1,14 @@
-# ╔══════════════════════════════════════════════════════════╗
-# ║  GN_mini Engine — Cross-Platform Makefile               ║
-# ║                                                          ║
-# ║  Usage:                                                  ║
-# ║    make                  auto-detect → build for host    ║
-# ║    make PLATFORM=linux   explicit Linux (GLUT)           ║
-# ║    make PLATFORM=macos   macOS (GLUT+OpenGL.framework)   ║
-# ║    make PLATFORM=windows cross-compile MinGW-w64 → .dll  ║
-# ║    make PLATFORM=android cross-compile Android → .so     ║
-# ║    make CROSS=arm-linux-gnueabihf-  custom cross prefix  ║
-# ║                                                          ║
-# ║  Targets: all / debug / samples / clean / help           ║
-# ╚══════════════════════════════════════════════════════════╝
+# GN_mini Engine — Cross-Platform Makefile
+#
+# 用法:
+#   make                     自动检测平台，构建引擎库
+#   make PLATFORM=linux      Linux (Vulkan + GLFW)
+#   make PLATFORM=macos      macOS（未验证，OpenGL 遗留）
+#   make PLATFORM=windows    MinGW-w64 交叉编译 → .dll（未验证）
+#   make PLATFORM=android    Android NDK 交叉编译 → .so（未验证）
+#   make CROSS=<prefix>      自定义交叉编译前缀
+#
+# 目标: all / debug / test / tests / unit / asan / check / shaders / clean / help / info
 
 # ═══════════════════════════════════════════════════════════
 #  0. 平台自动检测
@@ -42,14 +40,14 @@ CROSS ?=
 #  2. 每平台配置矩阵
 # ═══════════════════════════════════════════════════════════
 
-# --- Linux (GLUT + OpenGL) ---
+# --- Linux (Vulkan + GLFW) ---
 ifeq ($(PLATFORM),linux)
   TARGET_EXT     := so
   DEFINES        := -DGN_USING_VULKAN_GLFW_LINUX
   LIBS           := -lglfw -lvulkan -lpng -lopenal -lz
   CXX             = g++
   CXXFLAGS_BASE  := -O3 -std=c++11 -fpermissive -fPIC -Wall -Wextra
-  CXXFLAGS_EXTRA := -msse2 -DGL_GLEXT_PROTOTYPES -include cctype -include GL/freeglut_std.h
+  CXXFLAGS_EXTRA := -msse2 -include cctype
   LDFLAGS        := -shared
   RUN_PREFIX     := LD_LIBRARY_PATH=.
 endif
@@ -148,8 +146,9 @@ endif
 # ═══════════════════════════════════════════════════════════
 #  3. 通用设置
 # ═══════════════════════════════════════════════════════════
-TARGET     := libGN_mini.$(TARGET_EXT)
-BUILD_DIR  := build/obj
+LIB_STEM   ?= GN_mini
+TARGET     := lib$(LIB_STEM).$(TARGET_EXT)
+BUILD_DIR  ?= build/obj
 CXX        := $(CROSS)$(CXX)
 CXXFLAGS   := $(CXXFLAGS_BASE) $(CXXFLAGS_EXTRA)
 DEFINES    := $(DEFINES) $(MODULE_DEFINES)
@@ -215,10 +214,40 @@ $(BUILD_DIR)/%.o: src/%.cpp
 # ═══════════════════════════════════════════════════════════
 TEST_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) \
               -Isamples -Isamples/common $(INCLUDES)
-TEST_LIBS  := -L. -lGN_mini $(LIBS)
+TEST_LIBS  := -L. -l$(LIB_STEM) $(LIBS)
+
+# ── 单元测试（纯逻辑，无 GPU/窗口依赖）──────────────────
+UNIT_DIR   := tests/unit
+UNIT_SRC   := $(wildcard $(UNIT_DIR)/*.cpp)
+UNIT_BIN   := build/unit_tests
+UNIT_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) -I$(UNIT_DIR) $(INCLUDES)
+
+.PHONY: unit
+unit: $(TARGET)
+	@echo "$(YELLOW)🧪 编译并运行单元测试...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(UNIT_FLAGS) $(UNIT_SRC) $(TEST_LIBS) -o $(UNIT_BIN)
+	@LD_LIBRARY_PATH=. ./$(UNIT_BIN)
+
+.PHONY: check
+check: all unit tests
+	@echo "$(GREEN)✅ check 通过: 构建 + 单元测试 + 示例编译$(RESET)"
+
+# ── ASan/UBSan 单元测试（独立构建目录与库名，不污染 release 产物）──
+.PHONY: asan
+asan:
+	@echo "$(YELLOW)🧪 ASan/UBSan 构建 + 单元测试...$(RESET)"
+	$(MAKE) BUILD_DIR=build/obj-asan LIB_STEM=GN_mini_asan \
+		CXXFLAGS_BASE="-g -O1 -std=c++11 -fpermissive -fPIC -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer" \
+		LDFLAGS="-shared -fsanitize=address,undefined" \
+		libGN_mini_asan.$(TARGET_EXT)
+	@mkdir -p build
+	$(CXX) $(UNIT_FLAGS) -g -fsanitize=address,undefined -fno-omit-frame-pointer \
+		$(UNIT_SRC) -L. -lGN_mini_asan $(LIBS) -o build/unit_tests_asan
+	@LD_LIBRARY_PATH=. ./build/unit_tests_asan
 
 .PHONY: test
-test:
+test: $(TARGET)
 ifndef N
 	@echo "用法: make test N=<编号>"
 	@echo "  01=hello  02=texture  03=atlas  04=font"
@@ -228,19 +257,20 @@ ifndef N
 	@echo "  13=button 14=list 15=dialog 16=scene"
 	@exit 1
 endif
-	@NUM=$$(printf "%02d" $(N)); \
+	@mkdir -p build; \
+	NUM=$$(printf "%02d" $(N)); \
 	echo "$(YELLOW)🔨 编译 Test $$NUM ...$(RESET)"; \
-	g++ $(TEST_FLAGS) -DTEST_$$NUM samples/main.cpp $(TEST_LIBS) -o build/test_$$NUM; \
+	$(CXX) $(TEST_FLAGS) -DTEST_$$NUM samples/main.cpp $(TEST_LIBS) -o build/test_$$NUM; \
 	echo "$(GREEN)   → build/test_$$NUM$(RESET)"
 
 .PHONY: tests
-tests:
+tests: $(TARGET)
 	@echo "$(YELLOW)🔨 编译所有测试...$(RESET)"
-	@c=0; for n in $$(seq -w 1 16); do \
-		if g++ $(TEST_FLAGS) -DTEST_$$n samples/main.cpp $(TEST_LIBS) -o build/test_$$n 2>/dev/null; then \
+	@mkdir -p build; c=0; f=0; for n in $$(seq -w 1 16); do \
+		if $(CXX) $(TEST_FLAGS) -DTEST_$$n samples/main.cpp $(TEST_LIBS) -o build/test_$$n; then \
 			c=$$((c+1)); echo " ✅ test_$$n"; \
-		else echo " ❌ test_$$n"; fi; \
-	done; echo "$(GREEN)✅ $$c/16 个测试$(RESET)"
+		else f=$$((f+1)); echo " ❌ test_$$n"; fi; \
+	done; echo "$(GREEN)✅ $$c/16 通过, ❌ $$f 失败$(RESET)"; test $$f -eq 0
 
 # ═══════════════════════════════════════════════════════════
 #  6. 调试版本
@@ -257,7 +287,7 @@ debug: clean all
 .PHONY: clean
 clean:
 	@echo "$(YELLOW)🧹 清理编译产物...$(RESET)"
-	rm -rf $(BUILD_DIR) libGN_mini.* build/sample_*
+	rm -rf $(BUILD_DIR) build/obj-asan libGN_mini*.* build/test_* build/unit_tests*
 	@echo "$(GREEN)✅ 清理完成$(RESET)"
 
 # ═══════════════════════════════════════════════════════════
@@ -285,7 +315,7 @@ help:
 	@echo "║                                                  ║"
 	@echo "║  🎯 目标平台选择                                 ║"
 	@echo "║    make                     自动检测 → $(PLATFORM)$(shell printf '%*s' $$((24 - $(shell printf '%s' $(PLATFORM) | wc -c))) '')║"
-	@echo "║    make PLATFORM=linux      Linux (GLUT+OpenGL)  ║"
+	@echo "║    make PLATFORM=linux      Linux (Vulkan+GLFW)  ║"
 	@echo "║    make PLATFORM=macos      macOS (GLUT+GL)      ║"
 	@echo "║    make PLATFORM=windows    Win (MinGW-w64)      ║"
 	@echo "║    make PLATFORM=android    Android (NDK)        ║"
@@ -297,13 +327,17 @@ help:
 	@echo "║  📦 构建目标                                     ║"
 	@echo "║    make / make all          编译引擎库           ║"
 	@echo "║    make debug               调试版本 (-g -O0)    ║"
-	@echo "║    make samples             编译所有示例         ║"
-	@echo "║    make sample N=base/1     编译单个示例         ║"
+	@echo "║    make test N=01           编译单个示例         ║"
+	@echo "║    make tests               编译全部 16 个示例   ║"
+	@echo "║    make unit                编译并运行单元测试   ║"
+	@echo "║    make asan                ASan/UBSan 单测      ║"
+	@echo "║    make check               构建+单测+示例编译   ║"
+	@echo "║    make shaders             编译 GLSL → SPIR-V   ║"
 	@echo "║    make clean               清理                 ║"
 	@echo "║    make help                此帮助               ║"
 	@echo "║                                                  ║"
 	@echo "║  🚀 运行示例                                     ║"
-	@echo "║    $(RUN_PREFIX) ./build/sample_Sample1              ║"
+	@echo "║    ./run.sh 1               运行 build/test_01   ║"
 	@echo "║                                                  ║"
 	@echo "╚══════════════════════════════════════════════════╝$(RESET)"
 

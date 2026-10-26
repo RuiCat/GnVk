@@ -23,14 +23,14 @@ layout(push_constant) uniform ModelPC {
 layout(location = 0) out vec3 fragWorldPos;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragUV;
+layout(location = 3) out float fragWorldY;
 
 void main() {
     vec4 worldPos = pc.model * vec4(inPos, 1.0);
     gl_Position = scene.viewProj * worldPos;
     fragWorldPos = worldPos.xyz;
+    fragWorldY = worldPos.y;
 
-    // 世界空间法线 — 用 model 矩阵 3×3 部分变换 (正确处理非均匀缩放)
     fragNormal = normalize(mat3(pc.model) * inNormal);
-
     fragUV = inUV;
 }

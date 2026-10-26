@@ -5,9 +5,10 @@
 // ╚══════════════════════════════════════════════════════════╝
 #define MAX_LIGHTS 8
 
-layout(location = 0) in vec3 fragWorldPos;   // 世界空间位置 (顶点着色器插值)
-layout(location = 1) in vec3 fragNormal;     // 世界空间法线 (mat3(model)变换后)
-layout(location = 2) in vec2 fragUV;         // 纹理坐标
+layout(location = 0) in vec3 fragWorldPos;
+layout(location = 1) in vec3 fragNormal;
+layout(location = 2) in vec2 fragUV;
+layout(location = 3) in float fragWorldY;
 
 // ── UBO + 纹理 ──────────────────────────────────────
 layout(binding = 0, set = 0) uniform SceneUBO {
@@ -47,11 +48,46 @@ void main() {
     vec3 V = normalize(scene.cameraPos.xyz - fragWorldPos);
 
     // ── 材质颜色 ────────────────────────────────────
-    // 纹理采样 × diffuse 颜色 → 最终漫反射颜色
     vec3 texColor = texture(texSampler, fragUV).rgb;
-    vec3 Kd = texColor * pc.diffuse.rgb;       // 漫反射颜色
-    vec3 Ks = pc.specular.rgb;                 // 镜面反射颜色
-    float shininess = pc.specular.a;           // 光泽度 (值越大高光越集中)
+    vec3 Kd = texColor * pc.diffuse.rgb;
+    vec3 Ks = pc.specular.rgb;
+    float shininess = pc.specular.a;
+
+    // ── 生物群系: 高程+坡度 → 颜色 ─────────────────
+    float h = fragWorldY;
+    float slope = 1.0 - abs(fragNormal.y);  // 0=平, 1=垂直
+
+    // 各生物群系基色
+    vec3 water    = vec3(0.08, 0.20, 0.50);
+    vec3 beach    = vec3(0.72, 0.66, 0.45);
+    vec3 grassland= vec3(0.25, 0.52, 0.15);
+    vec3 forest   = vec3(0.08, 0.32, 0.06);
+    vec3 shrubland= vec3(0.42, 0.38, 0.18);
+    vec3 rock     = vec3(0.38, 0.35, 0.33);
+    vec3 snow     = vec3(0.94, 0.94, 0.97);
+
+    // 高程阈值 (0~8 均匀分布, 低gain抑制了尖峰)
+    float t0 = smoothstep(-0.2, 0.2, h);
+    float t1 = smoothstep(0.5, 1.5, h);
+    float t2 = smoothstep(1.5, 3.0, h);
+    float t3 = smoothstep(3.0, 5.0, h);
+    float t4 = smoothstep(5.0, 6.5, h);
+    float t5 = smoothstep(6.5, 7.5, h);
+
+    vec3 color = water;
+    color = mix(color, beach,     t0);
+    color = mix(color, grassland, t1);
+    color = mix(color, forest,    t2);
+    color = mix(color, shrubland, t3);
+    color = mix(color, rock,      t4);
+    color = mix(color, snow,      t5);
+
+    // 坡度覆盖: 陡坡→岩石
+    float rocky = smoothstep(0.3, 0.6, slope);
+    vec3 slopeRock = vec3(0.35, 0.33, 0.30);
+    color = mix(color, slopeRock, rocky * 0.7);
+
+    Kd = color;
 
     // ── 环境光 ─────────────────────────────────────
     // 场景环境光 × 光源环境光 × 漫反射颜色

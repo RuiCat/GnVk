@@ -1,6 +1,6 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-TEST="${1:-01}"
+TEST=$(printf "%02d" "${1:-1}")
 EXE="build/test_${TEST}"
 
 if [ ! -f "$EXE" ]; then

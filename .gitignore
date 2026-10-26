@@ -1,5 +1,5 @@
 build/
-libGN_mini.*
+libGN_mini*.*
 *.o
 *.d
 RunLog.txt

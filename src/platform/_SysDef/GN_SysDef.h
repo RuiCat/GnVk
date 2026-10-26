@@ -36,142 +36,142 @@
 |	                                                                                                                |
 \*-----------------------------------------------------------------------------------------------------------------*/
 #ifdef GN_USING_OPENGL_WINDOW
-  #define GT_USING_OPENGL 1            //该宏可以调大为3以使用更高版本 OpenGL
-  #define _WIN32_
+#define GT_USING_OPENGL 1 //该宏可以调大为3以使用更高版本 OpenGL
+#define _WIN32_
 #elif defined GN_USING_OPENGL_SDL_WINDOWMODE
-  #define GT_USING_OPENGL 1
-  #define GT_USING_GLsdl
-  #define GT_USING_WINDOW_MODE         //捆绑 Windows 窗口模式
-  #define _WIN32_
+#define GT_USING_OPENGL 1
+#define GT_USING_GLsdl
+#define GT_USING_WINDOW_MODE //捆绑 Windows 窗口模式
+#define _WIN32_
 #elif defined GN_USING_OPENGL_GLUT
-  #define GT_USING_OPENGL 1
-  #define GT_USING_GLUT
-  #define _WIN32_
+#define GT_USING_OPENGL 1
+#define GT_USING_GLUT
+#define _WIN32_
 #elif defined GN_USING_OPENGLes_GLUT
-  #define GT_USING_OPENGL 1
-  #define GT_USING_GLes
-  #define GT_USING_GLUT
-  #define _WIN32_
+#define GT_USING_OPENGL 1
+#define GT_USING_GLes
+#define GT_USING_GLUT
+#define _WIN32_
 #elif defined GN_USING_DIRECTX9_WINDOW
-  #define GT_USING_DIRECT3D9
-  #define _WIN32_
+#define GT_USING_DIRECT3D9
+#define _WIN32_
 #elif defined GN_USING_DIRECTDRAW_WINDOW
-  #define GT_USING_DDRAW
-  #define _WIN32_
+#define GT_USING_DDRAW
+#define _WIN32_
 #elif defined GN_USING_DIRECTDRAW_WINCE
-  #define GT_USING_DDRAW
-  #ifndef _WIN32_WCE
-    #define _WIN32_WCE
-  #endif
+#define GT_USING_DDRAW
+#ifndef _WIN32_WCE
+#define _WIN32_WCE
+#endif
 #elif defined GN_USING_VULKAN_GLFW_LINUX
-  #define GT_USING_VULKAN 1
-  #define _LINUX_
+#define GT_USING_VULKAN 1
+#define _LINUX_
 #elif defined GN_USING_OPENGL_SDL_LINUX
-  #define GT_USING_OPENGL 1
-  #define GT_USING_GLsdl
-  #define _LINUX_
+#define GT_USING_OPENGL 1
+#define GT_USING_GLsdl
+#define _LINUX_
 #elif defined GN_USING_OPENGL_GLUT_LINUX
-  #define GT_USING_OPENGL 1
-  #define GT_USING_GLUT
-  #define _LINUX_
+#define GT_USING_OPENGL 1
+#define GT_USING_GLUT
+#define _LINUX_
 #elif defined GN_USING_OPENGL_GLUT_MAC
-  #define GT_USING_OPENGL 1
-  #define GT_USING_GLUT
-  #define _MAC_
-  #define HAVE_NANOSLEEP   1
+#define GT_USING_OPENGL 1
+#define GT_USING_GLUT
+#define _MAC_
+#define HAVE_NANOSLEEP 1
 #elif defined GN_USING_OPENGL_SDL_MAC
-  #define GT_USING_OPENGL 1
-  #define GT_USING_GLsdl
-  #define _MAC_
+#define GT_USING_OPENGL 1
+#define GT_USING_GLsdl
+#define _MAC_
 #elif defined GN_USING_OPENGLes_IOS
-  #define GT_USING_OPENGL 1
-  #define GT_USING_GLes
-  #define GT_USING_IOS
+#define GT_USING_OPENGL 1
+#define GT_USING_GLes
+#define GT_USING_IOS
 #elif defined GN_USING_OPENGLes_ANDROID_JAVA
-  #define GT_USING_OPENGL 1
-  #define GT_USING_GLes
-  #define GT_USING_ANDROID_JNI
-  #define _LINUX_
-  #ifndef GN_USING_UNZIP
-    #define GN_USING_UNZIP
-  #endif
+#define GT_USING_OPENGL 1
+#define GT_USING_GLes
+#define GT_USING_ANDROID_JNI
+#define _LINUX_
+#ifndef GN_USING_UNZIP
+#define GN_USING_UNZIP
+#endif
 #endif
 #if defined _MAC_ || defined GT_USING_IOS
- #ifndef  _APPLE_
-  #define _APPLE_
- #endif
+#ifndef _APPLE_
+#define _APPLE_
+#endif
 #endif
 
 //预包含标准头文件
 #ifndef _INC_MATH
- #include<math.h>
+#include <math.h>
 #endif
 #ifndef _INC_STDIO
- #include<stdio.h>
- #ifndef _IOEOF
-  #define _IOEOF 0x0010
- #endif
+#include <stdio.h>
+#ifndef _IOEOF
+#define _IOEOF 0x0010
+#endif
 #endif
 #ifndef _INC_STDLIB
- #include<stdlib.h>
+#include <stdlib.h>
 #endif
 #ifndef _INC_STRING
- #include<string.h>
+#include <string.h>
 #endif
 #if !defined(_ALGORITHM_) && !defined(_GLIBCXX_ALGORITHM) && !defined(_LIBCPP_ALGORITHM)
-#include<algorithm>
+#include <algorithm>
 #endif
 #ifndef _VECTOR_
 //#include<vector>
 #endif
 #ifndef _LIST_
-#include<list>
+#include <list>
 #endif
-#if defined(_INC_STDIO)||defined(_INC_IO)||defined(_ALGORITHM_)||defined(_INC_STDARG)||defined(_INC_STRING)
-#pragma warning(disable:4996)
+#if defined(_INC_STDIO) || defined(_INC_IO) || defined(_ALGORITHM_) || defined(_INC_STDARG) || defined(_INC_STRING)
+#pragma warning(disable : 4996)
 #endif
 #if defined _WIN32_ || defined _WIN32_WCE
- //#define GT_TMP_COMPATI_DX_DDRAW  //在WINDOW时 同时兼容动态库里可用 DX 和 DDRAW API
- #ifdef _MSC_VER
-  #if !defined(_GN_H_) || defined _WIN64
-   #ifdef _WIN64
-    #define __LP64__ 1
-   #endif
-   #include<windows.h>
-  #endif
- #else
-  #include<windows.h>
-  #include<emmintrin.h>
- #endif
- typedef volatile long    GT_sATOMIC;
+//#define GT_TMP_COMPATI_DX_DDRAW  //在WINDOW时 同时兼容动态库里可用 DX 和 DDRAW API
+#ifdef _MSC_VER
+#if !defined(_GN_H_) || defined _WIN64
+#ifdef _WIN64
+#define __LP64__ 1
+#endif
+#include <windows.h>
+#endif
 #else
- #include<atomic>
- typedef std::atomic<int> GT_sATOMIC;
+#include <windows.h>
+#include <emmintrin.h>
+#endif
+typedef volatile long GT_sATOMIC;
+#else
+#include <atomic>
+typedef std::atomic<int> GT_sATOMIC;
 #endif
 
-#ifdef GN_USING_SOURCE_CODE          //源代码编辑
+#ifdef GN_USING_SOURCE_CODE //源代码编辑
 #define GN_API
 #define GN_CALL
-#elif defined GN_USING_LIB_EXPORTS   //动态库导出
- #if defined _WIN32_ || defined _WIN32_WCE
-  #define GN_API      __declspec(dllexport)
-  #define GN_CALL     __declspec(dllimport)
- #else
-  #define GN_API      extern
-  #define GN_CALL     extern
- #endif
+#elif defined GN_USING_LIB_EXPORTS //动态库导出
+#if defined _WIN32_ || defined _WIN32_WCE
+#define GN_API __declspec(dllexport)
+#define GN_CALL __declspec(dllimport)
+#else
+#define GN_API extern
+#define GN_CALL extern
+#endif
 #else //---------------------------- //SDK方式使用
- #if defined _WIN32_ || defined _WIN32_WCE
-  #define GN_API      __declspec(dllimport)
-  #define GN_CALL     __declspec(dllexport)
- #else
-  #define GN_API
-  #define GN_CALL
- #endif
+#if defined _WIN32_ || defined _WIN32_WCE
+#define GN_API __declspec(dllimport)
+#define GN_CALL __declspec(dllexport)
+#else
+#define GN_API
+#define GN_CALL
+#endif
 #endif
 #ifdef _MSC_VER
-#define TMPVAR( TYPEV )
+#define TMPVAR(TYPEV)
 #else
-#define TMPVAR( TYPEV ) TYPEV
+#define TMPVAR(TYPEV) TYPEV
 #endif
 #endif //endif _GN_SYSDEF_H_

@@ -186,7 +186,7 @@ GN_API P<char*>	GN_StrSplit(char *pstr, char split_key){
 }
 GN_API char *GN_StrUnSplitToData(const char **strs, unsigned int strn, char split_key){
 	unsigned int i = 1, len = strlen(strs[0]);
-	for(; i < strn; ++i)len = 1 + strlen(strs[i]);
+	for(; i < strn; ++i)len += 1 + strlen(strs[i]);
 	char *str_out = new char[len+1];
 	GN_StrUnSplit(str_out, strs, strn, split_key);
 	return str_out;
@@ -477,8 +477,10 @@ GN_API void GN_StrReplace(char *str, char key, char rep, int len){
 	}
 }
 GN_API char* GN_StrCutSpaceFL(char *str){
+	if(!str || !*str) return str;
 	char *pstr = str;
     while(isspace(*pstr ))++pstr; //跳过头空段
+	if(!*pstr){ *str = 0; return str; }
 	char *pstr2 = pstr + (strlen(pstr) - 1);
 	while(isspace(*pstr2))--pstr2;
     pstr2[1] = 0; //断开尾空段

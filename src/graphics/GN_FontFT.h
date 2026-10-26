@@ -14,17 +14,17 @@ namespace GNg {
 
 // 单个字形在图集中的缓存条目
 struct FT_GlyphEntry {
-    float u0, v0, u1, v1;   // 在图集中的 UV 坐标
-    short w, h;              // 字形像素尺寸
-    short bearingX, bearingY;// 方位偏移 (相对基线)
-    short advance;            // 水平步进宽度
+    float u0, v0, u1, v1; // 在图集中的 UV 坐标
+    short w, h; // 字形像素尺寸
+    short bearingX, bearingY; // 方位偏移 (相对基线)
+    short advance; // 水平步进宽度
 };
 
 // ═══════════════════════════════════════════════════════════
 //  FreeType 字形缓存 — 动态图集 + 按需光栅化
 // ═══════════════════════════════════════════════════════════
 class cFREETYPE_FONT {
-public:
+  public:
     cFREETYPE_FONT();
     ~cFREETYPE_FONT();
 
@@ -38,20 +38,20 @@ public:
     struct sIMAGE *GetAtlas() { return m_atlas; }
 
     // 获取字体度量
-    int  GetAscender()  const;
-    int  GetDescender() const;
-    int  GetLineHeight() const;
-    int  GetFontSize()  const { return m_fontSize; }
+    int GetAscender() const;
+    int GetDescender() const;
+    int GetLineHeight() const;
+    int GetFontSize() const { return m_fontSize; }
 
     void Release();
 
-private:
-    FT_Library    m_ftLib;
-    FT_Face       m_ftFace;
-    sIMAGE       *m_atlas;
-    int           m_atlasSize;
-    int           m_fontSize;
-    int           m_cursorX, m_cursorY, m_rowH;
+  private:
+    FT_Library m_ftLib;
+    FT_Face m_ftFace;
+    sIMAGE *m_atlas;
+    int m_atlasSize;
+    int m_fontSize;
+    int m_cursorX, m_cursorY, m_rowH;
 
     std::unordered_map<uint32_t, FT_GlyphEntry> m_cache;
 

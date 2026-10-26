@@ -2,7 +2,7 @@
 
 > ⚠️ **历史文档** — 部分内容描述 OpenGL 架构，Vulkan 后端架构见 `VULKAN_MIGRATION.md`
 
-> **版本**: Interface 2.2.0 / Engine 2026.06.25  
+> **版本**: 以 `src/core/GN.h` 的 `GN_INTERFACE_VERSION` / `GN_VERSION` 为准（当前 Interface 2.2.0）  
 > **平台**: Linux (Vulkan+GLFW) | macOS | Android (可扩展)
 
 ## 一、设计哲学

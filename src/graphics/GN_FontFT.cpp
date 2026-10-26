@@ -34,16 +34,16 @@ static const char *kSystemFontPaths[] = {
     // Windows (MinGW 交叉编译时)
     "C:/Windows/Fonts/msyh.ttc",
     "C:/Windows/Fonts/simsun.ttc",
-    nullptr
-};
+    nullptr};
 
 bool FT_LoadSystemFont(int fontSizePx) {
     if(FT_FontSys && FT_FontSys->GetAtlas() && FT_FontSys->GetAtlas()->vkImage) return true;
     if(!FT_FontSys) FT_FontSys = new cFREETYPE_FONT();
     for(int i = 0; kSystemFontPaths[i]; i++) {
         FILE *fp = fopen(kSystemFontPaths[i], "rb");
-        if(fp) { fclose(fp); }
-        else continue;
+        if(fp) {
+            fclose(fp);
+        } else continue;
         if(FT_FontSys->Load(kSystemFontPaths[i], fontSizePx))
             return true;
     }
@@ -55,16 +55,25 @@ bool FT_LoadSystemFont(int fontSizePx) {
 // ═══════════════════════════════════════════════════════════
 
 cFREETYPE_FONT::cFREETYPE_FONT()
-    : m_ftLib(nullptr), m_ftFace(nullptr), m_atlas(nullptr)
-    , m_atlasSize(0), m_fontSize(0)
-    , m_cursorX(0), m_cursorY(0), m_rowH(0) {}
+    : m_ftLib(nullptr), m_ftFace(nullptr), m_atlas(nullptr), m_atlasSize(0), m_fontSize(0), m_cursorX(0), m_cursorY(0), m_rowH(0) {}
 
-cFREETYPE_FONT::~cFREETYPE_FONT() { Release(); }
+cFREETYPE_FONT::~cFREETYPE_FONT() {
+    Release();
+}
 
 void cFREETYPE_FONT::Release() {
-    if(m_ftFace) { FT_Done_Face(m_ftFace); m_ftFace = nullptr; }
-    if(m_ftLib)  { FT_Done_FreeType(m_ftLib); m_ftLib = nullptr; }
-    if(m_atlas)  { m_atlas->Release(); m_atlas = nullptr; }
+    if(m_ftFace) {
+        FT_Done_Face(m_ftFace);
+        m_ftFace = nullptr;
+    }
+    if(m_ftLib) {
+        FT_Done_FreeType(m_ftLib);
+        m_ftLib = nullptr;
+    }
+    if(m_atlas) {
+        m_atlas->Release();
+        m_atlas = nullptr;
+    }
     m_cache.clear();
     m_atlasSize = 0;
 }
@@ -73,24 +82,34 @@ bool cFREETYPE_FONT::Load(const char *ttfPath, int fontSizePx) {
     Release();
     if(FT_Init_FreeType(&m_ftLib) != 0) return false;
     if(FT_New_Face(m_ftLib, ttfPath, 0, &m_ftFace) != 0) {
-        FT_Done_FreeType(m_ftLib); m_ftLib = nullptr;
+        FT_Done_FreeType(m_ftLib);
+        m_ftLib = nullptr;
         return false;
     }
     FT_Set_Pixel_Sizes(m_ftFace, 0, fontSizePx);
     m_fontSize = fontSizePx;
     // 初始图集 1024×1024 (按需扩容)
-    if(!InitAtlas(1024)) { Release(); return false; }
+    if(!InitAtlas(1024)) {
+        Release();
+        return false;
+    }
     return true;
 }
 
 bool cFREETYPE_FONT::InitAtlas(int size) {
     m_atlas = new sIMAGE();
     m_atlas->CreateEmptyToData(size, size, 1, 0, 1, false, true);
-    if(!m_atlas->vkImage) { delete m_atlas; m_atlas = nullptr; return false; }
-    m_atlas->texnum = 1;  // 单纹理图集 (非多帧)
-    m_atlas->skipDefer = true;  // 字体atlas需即时上传(每帧新增字形)
+    if(!m_atlas->vkImage) {
+        delete m_atlas;
+        m_atlas = nullptr;
+        return false;
+    }
+    m_atlas->texnum = 1; // 单纹理图集 (非多帧)
+    m_atlas->skipDefer = true; // 字体atlas需即时上传(每帧新增字形)
     m_atlasSize = size;
-    m_cursorX = 1; m_cursorY = 1; m_rowH = 0;
+    m_cursorX = 1;
+    m_cursorY = 1;
+    m_rowH = 0;
     return true;
 }
 
@@ -110,7 +129,8 @@ bool cFREETYPE_FONT::GrowAtlas() {
     for(int r = 0; r < m_atlasSize; r++)
         memcpy(newPx + r * newSize * 4, oldPx + r * m_atlasSize * 4, m_atlasSize * 4);
     newAtlas->DataFill(newPx, CR_RGBA, newSize, newSize, 0, 0, nullptr, false);
-    delete[] newPx; delete[] oldPx;
+    delete[] newPx;
+    delete[] oldPx;
     // 更新 UV (新图集尺寸变了，但 UV 是归一化的 0~1，自动适配)
     m_atlas->Release();
     *m_atlas = *newAtlas; // 注意：这里用了浅拷贝，Vulkan 资源需要手动处理
@@ -120,12 +140,15 @@ bool cFREETYPE_FONT::GrowAtlas() {
     m_atlas->vkImageView = newAtlas->vkImageView;
     m_atlas->vkSampler = newAtlas->vkSampler;
     m_atlas->vkDescriptorSet = newAtlas->vkDescriptorSet;
-    m_atlas->skipDefer = newAtlas->skipDefer;  // 保持即时上传标志
-    m_atlas->width = newSize; m_atlas->height = newSize;
-    m_atlas->uRange = 1.0f; m_atlas->vRange = 1.0f;
+    m_atlas->skipDefer = newAtlas->skipDefer; // 保持即时上传标志
+    m_atlas->width = newSize;
+    m_atlas->height = newSize;
+    m_atlas->uRange = 1.0f;
+    m_atlas->vRange = 1.0f;
     m_atlasSize = newSize;
     // 重置打包游标
-    m_cursorX = 1; m_cursorY = m_atlasSize/2; // 从中间开始（旧数据在上半）
+    m_cursorX = 1;
+    m_cursorY = m_atlasSize / 2; // 从中间开始（旧数据在上半）
     m_rowH = 0;
     // 清除缓存 (旧 UV 已失效)
     m_cache.clear();
@@ -133,7 +156,7 @@ bool cFREETYPE_FONT::GrowAtlas() {
 }
 
 bool cFREETYPE_FONT::PackIntoAtlas(int w, int h, const unsigned char *bitmap,
-                                    FT_GlyphEntry *out) {
+                                   FT_GlyphEntry *out) {
     // 加 1 像素间距避免纹理采样溢出
     int pw = w + 1, ph = h + 1;
     // 检查当前行
@@ -156,12 +179,17 @@ bool cFREETYPE_FONT::PackIntoAtlas(int w, int h, const unsigned char *bitmap,
         for(int c = 0; c < w; c++) {
             int idx = (r * pw + c) * 4;
             unsigned char a = bitmap[r * w + c];
-            row[idx+0] = 255; row[idx+1] = 255;
-            row[idx+2] = 255; row[idx+3] = a;
+            row[idx + 0] = 255;
+            row[idx + 1] = 255;
+            row[idx + 2] = 255;
+            row[idx + 3] = a;
         }
         // 间距列填透明
         int gapIdx = (r * pw + w) * 4;
-        row[gapIdx+0]=255; row[gapIdx+1]=255; row[gapIdx+2]=255; row[gapIdx+3]=0;
+        row[gapIdx + 0] = 255;
+        row[gapIdx + 1] = 255;
+        row[gapIdx + 2] = 255;
+        row[gapIdx + 3] = 0;
     }
     // 间距行填透明
     memset(row + h * pw * 4, 0, pw * 4);
@@ -172,7 +200,8 @@ bool cFREETYPE_FONT::PackIntoAtlas(int w, int h, const unsigned char *bitmap,
     out->v0 = (float)m_cursorY / (float)m_atlasSize;
     out->u1 = (float)(m_cursorX + w) / (float)m_atlasSize;
     out->v1 = (float)(m_cursorY + h) / (float)m_atlasSize;
-    out->w = w; out->h = h;
+    out->w = w;
+    out->h = h;
     // 更新游标
     m_cursorX += pw;
     if(ph > m_rowH) m_rowH = ph;
@@ -208,8 +237,9 @@ bool cFREETYPE_FONT::GetGlyph(uint32_t charCode, FT_GlyphEntry *out) {
         FT_GlyphEntry entry = {};
         entry.bearingX = (short)(slot->bitmap_left);
         entry.bearingY = (short)(slot->bitmap_top);
-        entry.advance  = (short)(slot->advance.x >> 6);
-        entry.w = 0; entry.h = 0;
+        entry.advance = (short)(slot->advance.x >> 6);
+        entry.w = 0;
+        entry.h = 0;
         entry.u0 = entry.v0 = entry.u1 = entry.v1 = 0;
         m_cache[charCode] = entry;
         *out = entry;
@@ -224,7 +254,7 @@ bool cFREETYPE_FONT::GetGlyph(uint32_t charCode, FT_GlyphEntry *out) {
 
     entry.bearingX = (short)(slot->bitmap_left);
     entry.bearingY = (short)(slot->bitmap_top);
-    entry.advance  = (short)(slot->advance.x >> 6);
+    entry.advance = (short)(slot->advance.x >> 6);
 
     m_cache[charCode] = entry;
     *out = entry;
@@ -261,15 +291,17 @@ int GNg::FT_ComputeArrangeData(
     int text_ofs_x, int text_ofs_y,
     const sARRANGE_FMT *parm,
     unsigned short *row_hids_out, unsigned char *row_count_out,
-    short *text_w_out, short *text_h_out)
-{
+    short *text_w_out, short *text_h_out) {
     if(!FT_FontSys || !FT_FontSys->GetAtlas()) return -1;
     (void)row_hids_out;
 
     // ── 计算总字符数 ──────────────────────────────
     unsigned short t_count = count;
     if(!t_count) t_count = (unsigned short)strlen(text);
-    if(t_count == 0) { *row_count_out = 0; return 0; }
+    if(t_count == 0) {
+        *row_count_out = 0;
+        return 0;
+    }
 
     // ── 分配/扩展缓冲区 ──────────────────────────
     if(!*data_out || buf_count < (int)t_count + 64) {
@@ -284,7 +316,7 @@ int GNg::FT_ComputeArrangeData(
     int penX = x + text_ofs_x;
     int penY = y + text_ofs_y;
     int lineHeight = FT_FontSys->GetLineHeight();
-    int ascender   = FT_FontSys->GetAscender();
+    int ascender = FT_FontSys->GetAscender();
     int maxW = w ? w : 32767;
     int maxH = h ? h : 32767;
     bool erect = parm->erect_print;
@@ -298,7 +330,7 @@ int GNg::FT_ComputeArrangeData(
     int maxRowW = 0, totalH = lineHeight;
 
     // ── 逐字符排版 ────────────────────────────────
-    for(unsigned short ti = 0; ti < t_count; ) {
+    for(unsigned short ti = 0; ti < t_count;) {
         char c = text[ti];
         if(c == '\n') {
             penX = rowStartX;
@@ -315,20 +347,20 @@ int GNg::FT_ComputeArrangeData(
         int adv = 1;
         unsigned char uc = (unsigned char)c;
         if(uc < 0x80) {
-            cp = uc; adv = 1;
+            cp = uc;
+            adv = 1;
         } else if((uc & 0xE0) == 0xC0 && ti + 1 < t_count) {
-            cp = ((uc & 0x1F) << 6) | ((unsigned char)text[ti+1] & 0x3F);
+            cp = ((uc & 0x1F) << 6) | ((unsigned char)text[ti + 1] & 0x3F);
             adv = 2;
         } else if((uc & 0xF0) == 0xE0 && ti + 2 < t_count) {
-            cp = ((uc & 0x0F) << 12) | (((unsigned char)text[ti+1] & 0x3F) << 6)
-               | ((unsigned char)text[ti+2] & 0x3F);
+            cp = ((uc & 0x0F) << 12) | (((unsigned char)text[ti + 1] & 0x3F) << 6) | ((unsigned char)text[ti + 2] & 0x3F);
             adv = 3;
         } else if((uc & 0xF8) == 0xF0 && ti + 3 < t_count) {
-            cp = ((uc & 0x07) << 18) | (((unsigned char)text[ti+1] & 0x3F) << 12)
-               | (((unsigned char)text[ti+2] & 0x3F) << 6) | ((unsigned char)text[ti+3] & 0x3F);
+            cp = ((uc & 0x07) << 18) | (((unsigned char)text[ti + 1] & 0x3F) << 12) | (((unsigned char)text[ti + 2] & 0x3F) << 6) | ((unsigned char)text[ti + 3] & 0x3F);
             adv = 4;
         } else {
-            ti++; continue; // 无效 UTF-8，跳过
+            ti++;
+            continue; // 无效 UTF-8，跳过
         }
 
         FT_GlyphEntry glyph;
@@ -357,14 +389,14 @@ int GNg::FT_ComputeArrangeData(
                 // 竖排：交换 x/y
             }
 
-            rng[id].x   = (float)dx;
-            rng[id].y   = (float)dy;
-            rng[id].w   = (float)gW;
-            rng[id].h   = (float)gH;
-            rng[id].u1  = glyph.u0;
-            rng[id].v1  = glyph.v0;
-            rng[id].u2  = glyph.u1;
-            rng[id].v2  = glyph.v1;
+            rng[id].x = (float)dx;
+            rng[id].y = (float)dy;
+            rng[id].w = (float)gW;
+            rng[id].h = (float)gH;
+            rng[id].u1 = glyph.u0;
+            rng[id].v1 = glyph.v0;
+            rng[id].u2 = glyph.u1;
+            rng[id].v2 = glyph.v1;
             rng[id].tid = 0;
             id++;
         }
@@ -375,8 +407,8 @@ int GNg::FT_ComputeArrangeData(
     }
 
     *row_count_out = jnum + 1;
-    if(text_w_out)  *text_w_out  = (short)maxRowW;
-    if(text_h_out)  *text_h_out  = (short)totalH;
+    if(text_w_out) *text_w_out = (short)maxRowW;
+    if(text_h_out) *text_h_out = (short)totalH;
 
     return (int)id;
 }
