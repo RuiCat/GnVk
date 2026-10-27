@@ -20,7 +20,7 @@ const float kSleepAngularSpeed = 0.08f; // rad/s
 const float kSleepDelaySeconds = 0.5f;
 const float kMaxFrameDt = 0.25f;
 const float kMaxRayT = 1e30f;
-const uint32_t kVelocityIterations = 20;
+const uint32_t kVelocityIterations = 30;
 const uint32_t kPositionIterations = 4;
 const float kWarmStartMatchDistance = 0.05f; // 接触点跨步匹配半径（m）
 

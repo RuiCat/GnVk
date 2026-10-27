@@ -76,13 +76,13 @@ TEST_CASE(physicsBoxStackStable) {
     CHECK(low->aSleeping);
 }
 
-// 5 层堆叠：warm starting 后更深堆叠也能稳定入睡（无 warm start 时 5 层会侧滑坍塌）。
+// 6 层堆叠：warm starting + 30 次速度迭代后能稳定入睡（20 次迭代时 6 层会缓慢下沉坍塌）。
 TEST_CASE(physicsTallStackStable) {
     cPHYSICS_WORLD world;
     AddGround(world);
     const GNg::sVEC3 half{0.5f, 0.5f, 0.5f};
-    uint32_t handles[5];
-    for(int i = 0; i < 5; ++i) {
+    uint32_t handles[6];
+    for(int i = 0; i < 6; ++i) {
         handles[i] = world.AddBody(
             MakeBoxBody(eBODY_DYNAMIC, GNg::sVEC3{0.0f, 0.5f + (float)i, 0.0f}, half, 1.0f));
         CHECK(handles[i] != cPHYSICS_WORLD::INVALID_HANDLE);
@@ -90,7 +90,7 @@ TEST_CASE(physicsTallStackStable) {
 
     for(int i = 0; i < 300; ++i) world.Step(1.0f / 60.0f); // 5 秒
 
-    for(int i = 0; i < 5; ++i) {
+    for(int i = 0; i < 6; ++i) {
         const sRIGID_BODY *body = world.GetBody(handles[i]);
         CHECK(body != 0);
         if(!body) continue;

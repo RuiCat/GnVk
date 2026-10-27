@@ -298,8 +298,8 @@ struct sANIM_STATE {
 | P1b 契约补充 | ✅ | `aDepthBiasEnable/Constant/Slope`（阴影 1.25/1.75）；`aColorAttachmentCount==0` = 深度专用（无 FS、subpass 0、颜色混合 0 附件） |
 | P1c | ⏳ 未开始 | GPU 材质实例（管线 + 描述符集 + UBO/纹理） |
 | P4 | ✅ 完成 | `GN_Spatial.cpp`（AABB/射线/视锥）、`GN_SpatialBVH.cpp`、`GN_SpatialTree.cpp`、`testSpatial`（11 用例）；有效行 219/167/241/499 |
-| P5 | ✅ v1 + 胶囊 + warm start + CCD v1 | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线/warm start 缓存，484）、`GN_PhysicsCollision.cpp`（dispatch，376）、`GN_PhysicsCollisionCapsule.cpp`（球/胶囊/盒-胶囊，319）、`GN_PhysicsBody.cpp`（构造/惯量/AABB，196）、`GN_PhysicsCcd.cpp`（扫掠 TOI，112）、`GN_PhysicsSolver.cpp`（265）；`testPhysics` 19 + `testPhysicsCollision` 10 + `testPhysicsSolver` 14 + `testPhysicsCapsule` 12 = 55 用例 |
-| P5 剩余 | ⏳ | 关节/约束、`AddStaticMesh` 三角网、`DebugDraw` 线框；P5b。**已知限制**：6 层及以上堆叠持续下沉（3s 内顶层下沉约 1m），约 10s 内坍塌；5 层以内稳定入睡 |
+| P5 | ✅ v1 + 胶囊 + warm start + CCD v1 | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线/warm start 缓存，迭代 30 次，484）、`GN_PhysicsCollision.cpp`（dispatch，376）、`GN_PhysicsCollisionCapsule.cpp`（球/胶囊/盒-胶囊，319）、`GN_PhysicsBody.cpp`（构造/惯量/AABB，196）、`GN_PhysicsCcd.cpp`（扫掠 TOI，112）、`GN_PhysicsSolver.cpp`（265）；`testPhysics` 19 + `testPhysicsCollision` 10 + `testPhysicsSolver` 14 + `testPhysicsCapsule` 12 = 55 用例 |
+| P5 剩余 | ⏳ | 关节/约束、`AddStaticMesh` 三角网、`DebugDraw` 线框；P5b。**已知限制**：7 层及以上堆叠坍塌（30/40 次速度迭代都复现）；6 层以内稳定入睡 |
 | P2/P3/P6–P9 | ⏳ 未开始 | —— |
 
 P4 的"剔除结果与暴力测试一致"验收已通过：BVH 512 盒 40 次 AABB 查询与暴力集合逐元素相等；射线 20 条与暴力最小 t 对照；
@@ -316,14 +316,15 @@ P5b 已验收部分（2026-10-27）：
   射线近似（沿轴 17 球采样，`GN_Physics.cpp:121` 注明误差）；`testPhysicsCapsule` 12 用例 + `testPhysics` 3 例。
 - **warm starting**：`sCONTACT_CONSTRAINT::aAccNormal/aAccTangent` 由世界按"刚体对 + 接触点 5cm 就近匹配"
   从上一步缓存预填（`GN_Physics.cpp` `seedWarmStart`/`cacheContacts`），求解器先重放这些冲量再迭代；
-  实测 3/4/5 层堆叠入睡步数 91/塌/塌 → **29/29/63 步**，5 层堆叠 5s 内稳定入睡（`physicsTallStackStable`）。
+  速度迭代由 20 提到 **30** 后，3/4/5/6 层堆叠入睡步数 **29/29/29/29**；同配置关闭 warm start 为
+  **60/29/125/塌**。6 层堆叠 5s 内稳定入睡（`physicsTallStackStable`）。
   `RemoveBody` 清空缓存（句柄复用）。缓存为空时与冷启动逐位一致（`testWarmStartEmptyCacheMatchesColdStart`）。
 - **CCD v1**：`setContinuousCollision(true)`（默认关闭）时按「上一位置 → 目标位置」线段扫掠静态/运动学刚体的
   世界 AABB（按本刚体包围半径扩展），在最早 TOI 处钳住并清零进入方向的法向速度（`GN_PhysicsCcd.cpp`，112 行）。
   `testPhysics` 3 例：120 m/s 小球不穿 0.1m 薄地面、90 m/s 胶囊被拦、常速下落仍正常入睡；
   对照组（不开 CCD）同速小球一步穿到地面顶面以下。近似边界见 §3.3。
-- **仍不稳**：6 层及以上堆叠持续下沉（3s 内顶层下沉约 1m、约 10s 坍塌）——位置修正每步只消 20% 超容差穿透，
-  深堆叠累积穿透追不上；需在 P5b 下一项（CCD/约束）或专门求解器迭代里处理，当前不冒充已解决。
+- **仍不稳**：7 层及以上堆叠坍塌（30/40 次迭代都复现）。定位：每步强制唤醒的 6 层对照仍坍塌 ⇒ 排除休眠路径，
+  是速度迭代预算/收敛不足；6 层在 20 次迭代下会下沉、30 次迭代后稳定（本项已把上限由 5 层提到 6 层）。
 
 ### 3.2 P1b 的契约演进与剩余缺口（2026-10-27 更新）
 
