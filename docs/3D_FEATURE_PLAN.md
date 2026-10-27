@@ -11,7 +11,7 @@
 > 仅剩既有 `GN_2Dmath.cpp` 超限与既有 `gn3d_pbr_frag_spv.h` 告警，新增文件 0 违规 0 告警。
 > **重要边界**：本机无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）⇒ Vulkan 创建路径
 > （`cSHADER_CACHE` / `cPIPELINE_CACHE` 的 `vkCreate*` 调用）**只做了编译验证，未做运行时验证**；
-> P1b 已接入的 11 条管线必须在有 GPU 的桌面用 `./run.sh 01..10` 人工对照后才能算验收通过（2D 四条/前向/PBR/阴影/延迟/天空盒/G-Buffer）。
+> P1b 已接入的 11 条管线必须在有 GPU 的桌面用**重新设计的测试体系**对照后才能算验收通过（原 `samples/` + `run.sh` 已移除，见 CHANGELOG 2026-10-27）。
 
 ## 1. 现状与差距
 
@@ -47,8 +47,8 @@ src/graphics/
   _Vulkan/vkCloth.cpp        布料动态缓冲上传/绘制；后续 compute
   _Vulkan/vkParticle.cpp     粒子实例缓冲/绘制
   _Vulkan/vkDebugDraw.cpp    物理/空间划分线框调试
-samples/
-  11_skinned.cpp / 12_cloth.cpp / 13_physics.cpp / 14_particles.cpp
+（测试程序待重新设计；原 samples/ 已移除）
+  计划中的示例：skinned / cloth / physics / particles
 tests/unit/
   testSkeleton.cpp / testAnimation.cpp / testCloth.cpp
   testSpatial.cpp / testPhysics.cpp / testParticle.cpp / testPipeline.cpp
@@ -341,7 +341,7 @@ P5 v1 的验收：球从 2m 下落停在地面（y=r±0.05，静止后入睡）�
 - 描述符池按旧管线尺寸配置，新增材质/蒙皮/粒子需扩容；P1 一并调整 `descriptorPool`。
 - 关节 UBO 每 draw 更新会阻塞；P2 用 per-frame 环形 UBO，P9 改 SSBO。
 - 布料/粒子/蒙皮都依赖动态顶点/实例上传；复用 `Ensure3DBufferCapacity` 思路，避免每帧销毁重建。
-- 无 GPU 的 CI 只能验证 CPU 数学/构建；渲染正确性由桌面 `./run.sh 11..14` 人工确认。
+- 无 GPU 的 CI 只能验证 CPU 数学/构建；渲染正确性由桌面 GPU 测试确认（旧 `run.sh` 已移除，测试待重新设计）。
 - cgltf 为第三方头文件，需登记 `external/README.md` 并在 `make` 中只编译一次实现。
 
 ## 6. 建议的首个可交付
@@ -350,7 +350,7 @@ P5 v1 的验收：球从 2m 下落停在地面（y=r±0.05，静止后入睡）�
 
 **执行结果（2026-10-27）**：P1 拆成 P1a/P1b/P1c 后，P1a + P1b + P4 已完成并可无 GPU 验证；P1b 覆盖全部 11 条既有管线
 （2D 四条混合、3D 前向、PBR、阴影、合成、天空盒、G-Buffer(3 附件)、延迟光照），描述字段按站点逐项对齐旧 `VkPipelineCreateInfo`。
-1. **桌面验收（必须先做，GPU 环境才能做）**：`./run.sh 01`（2D 四混合）、`08`（前向）、`09/10`（PBR/场景）逐项对照；
+1. **桌面验收（必须先做，GPU 环境才能做）**：用重新设计的 GPU 测试逐项对照（2D 四混合、前向、PBR/场景、阴影/延迟/天空盒/G-Buffer）；旧 `run.sh` 已移除；
    失败时按站点回滚（每站点内注释给出 desc 与旧状态的对应关系）。GPU 不可用的环境无法代替这一步。
 2. **P1c**：GPU 材质实例（管线 + 描述符集 + UBO/纹理），把 `GN3d::sMATERIAL`（CPU 属性）与 GPU 资源绑定分离。
 3. **P4 接入渲染**（P8 的前半）：`cMODEL` 增加世界 AABB + 可见列表，`GN_VkDraw3D` 前做 `sFRUSTUM::IntersectsAABB` 剔除；

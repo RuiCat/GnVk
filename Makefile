@@ -8,7 +8,7 @@
 #   make PLATFORM=android    Android NDK 交叉编译 → .so（未验证）
 #   make CROSS=<prefix>      自定义交叉编译前缀
 #
-# 目标: all / debug / test / tests / unit / asan / check / shaders / clean / help / info
+# 目标: all / debug / unit / asan / check / shaders / clean / help / info
 
 # ═══════════════════════════════════════════════════════════
 #  0. 平台自动检测
@@ -210,10 +210,8 @@ $(BUILD_DIR)/%.o: src/%.cpp
 	$(COMPILE.cc)
 
 # ═══════════════════════════════════════════════════════════
-#  5. 测试程序 (新框架)
+#  5. 单元测试（示例测试已移除，待重新设计）
 # ═══════════════════════════════════════════════════════════
-TEST_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) \
-              -Isamples -Isamples/common $(INCLUDES)
 TEST_LIBS  := -L. -l$(LIB_STEM) $(LIBS)
 
 # ── 单元测试（纯逻辑，无 GPU/窗口依赖）──────────────────
@@ -230,8 +228,8 @@ unit: $(TARGET)
 	@LD_LIBRARY_PATH=. ./$(UNIT_BIN)
 
 .PHONY: check
-check: all unit tests
-	@echo "$(GREEN)✅ check 通过: 构建 + 单元测试 + 示例编译$(RESET)"
+check: all unit
+	@echo "$(GREEN)✅ check 通过: 构建 + 单元测试$(RESET)"
 
 # ── ASan/UBSan 单元测试（独立构建目录与库名，不污染 release 产物）──
 .PHONY: asan
@@ -245,32 +243,6 @@ asan:
 	$(CXX) $(UNIT_FLAGS) -g -fsanitize=address,undefined -fno-omit-frame-pointer \
 		$(UNIT_SRC) -L. -lGN_mini_asan $(LIBS) -o build/unit_tests_asan
 	@LD_LIBRARY_PATH=. ./build/unit_tests_asan
-
-.PHONY: test
-test: $(TARGET)
-ifndef N
-	@echo "用法: make test N=<编号>"
-	@echo "  01=hello  02=texture  03=atlas  04=font"
-	@echo "  05=input  06=particle 07=scroll"
-	@echo "  08=cube3d 09=model3d 10=scene3d"
-	@echo "  11=audio  12=video"
-	@echo "  13=button 14=list 15=dialog 16=scene"
-	@exit 1
-endif
-	@mkdir -p build; \
-	NUM=$$(printf "%02d" $(N)); \
-	echo "$(YELLOW)🔨 编译 Test $$NUM ...$(RESET)"; \
-	$(CXX) $(TEST_FLAGS) -DTEST_$$NUM samples/main.cpp $(TEST_LIBS) -o build/test_$$NUM; \
-	echo "$(GREEN)   → build/test_$$NUM$(RESET)"
-
-.PHONY: tests
-tests: $(TARGET)
-	@echo "$(YELLOW)🔨 编译所有测试...$(RESET)"
-	@mkdir -p build; c=0; f=0; for n in $$(seq -w 1 16); do \
-		if $(CXX) $(TEST_FLAGS) -DTEST_$$n samples/main.cpp $(TEST_LIBS) -o build/test_$$n; then \
-			c=$$((c+1)); echo " ✅ test_$$n"; \
-		else f=$$((f+1)); echo " ❌ test_$$n"; fi; \
-	done; echo "$(GREEN)✅ $$c/16 通过, ❌ $$f 失败$(RESET)"; test $$f -eq 0
 
 # ═══════════════════════════════════════════════════════════
 #  6. 调试版本
@@ -327,17 +299,12 @@ help:
 	@echo "║  📦 构建目标                                     ║"
 	@echo "║    make / make all          编译引擎库           ║"
 	@echo "║    make debug               调试版本 (-g -O0)    ║"
-	@echo "║    make test N=01           编译单个示例         ║"
-	@echo "║    make tests               编译全部 16 个示例   ║"
 	@echo "║    make unit                编译并运行单元测试   ║"
 	@echo "║    make asan                ASan/UBSan 单测      ║"
-	@echo "║    make check               构建+单测+示例编译   ║"
+	@echo "║    make check               构建+单元测试        ║"
 	@echo "║    make shaders             编译 GLSL → SPIR-V   ║"
 	@echo "║    make clean               清理                 ║"
 	@echo "║    make help                此帮助               ║"
-	@echo "║                                                  ║"
-	@echo "║  🚀 运行示例                                     ║"
-	@echo "║    ./run.sh 1               运行 build/test_01   ║"
 	@echo "║                                                  ║"
 	@echo "╚══════════════════════════════════════════════════╝$(RESET)"
 

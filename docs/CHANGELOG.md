@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-27 — 移除旧示例测试与旧资源（测试体系待重新设计）
+
+- 删除 `samples/`（16 个示例测试，其中 05/06/07/09/11~16 长期为 TODO 占位页）与 `run.sh`；
+  旧测试资源 `assets/ui`、`assets/axis`、`assets/fileicon`、`assets/effects`（62 文件）一并删除。
+- `Makefile`：移除 `test` / `tests` 目标与示例编译段；`make check` = 构建 + 单元测试（`make unit` 保留，134 用例）。
+- 保留：`assets/shaders/`（渲染必需）、`external/`（编译必需）、`docs/`、`tests/unit/`（本工程验收用例）。
+- 后续测试代码（含 GPU 验收）按新体系重新设计，不再恢复 `run.sh`。
+
 ## 2026-10-27 — 恢复引擎默认资源（修复资源加载全失败）
 
 - 根因：`701828d 清理原始例子` 把 `assets/` 下除 `shaders/` 外的资源整批删除，而引擎与测试仍按 `GN_SysDir()`（根目录 = `assets/`）加载：
