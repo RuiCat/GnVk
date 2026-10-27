@@ -131,6 +131,26 @@ void SolveVelocities(sCONTACT_CONSTRAINT *constraints, uint32_t count, float dt,
 void SolvePositions(sCONTACT_CONSTRAINT *constraints, uint32_t count, uint32_t iterations);
 
 // ═══════════════════════════════════════════════════════════
+//  调试绘制（CPU 线段收集，渲染器消费；P8 接入 vkDebugDraw）
+// ═══════════════════════════════════════════════════════════
+struct sDEBUG_LINE {
+    GNg::sVEC3 aStart;
+    GNg::sVEC3 aEnd;
+};
+
+struct sDEBUG_DRAW {
+    std::vector<sDEBUG_LINE> aLines;
+
+    void clear() { aLines.clear(); }
+    void addLine(const GNg::sVEC3 &start, const GNg::sVEC3 &end) {
+        sDEBUG_LINE line;
+        line.aStart = start;
+        line.aEnd = end;
+        aLines.push_back(line);
+    }
+};
+
+// ═══════════════════════════════════════════════════════════
 //  cPHYSICS_WORLD — 物理世界
 // ═══════════════════════════════════════════════════════════
 class cPHYSICS_WORLD {
@@ -167,6 +187,10 @@ class cPHYSICS_WORLD {
     // 不施加恢复系数、只处理动态且醒着的刚体）。
     void setContinuousCollision(bool enabled);
     bool getContinuousCollision() const { return aContinuousCollision; }
+
+    // 物理调试线框：所有刚体的形状线框 + 上一步接触点/法线。draw 会先被清空。
+    // 线数量口径：球 = 3×24，盒 = 12，胶囊 = 2×24 + 4；每个接触点额外 4 条（十字 + 法线）。
+    void DebugDraw(sDEBUG_DRAW &draw) const;
 
   private:
     // 上一步的接触冲量缓存（warm start）：按刚体对 + 接触点位置匹配到本步的新流形。

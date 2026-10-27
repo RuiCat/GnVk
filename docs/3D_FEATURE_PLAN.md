@@ -1,17 +1,18 @@
 # 3D 能力扩展规划：空间划分 / 物理 / 粒子 / 动画 / 骨骼 / 布料 / 通用管线
 
 > 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存**）+ P4（空间划分）+
-> P5 v1（球/盒刚体物理）+ P5b 前三项（胶囊形状、warm starting、CCD v1）已落地（2026-10-27）；
-> P1c、P5 剩余能力（关节/静态三角网/DebugDraw）与 P2+ 未开始。
+> P5 v1（球/盒刚体物理）+ P5b 前四项（胶囊形状、warm starting、CCD v1、DebugDraw）已落地（2026-10-27）；
+> P1c、P5 剩余能力（关节/静态三角网）与 P2+ 未开始。
 > 基线：C++11、Vulkan 1.4、Makefile 单一构建入口；现有 3D 为静态网格 + Blinn-Phong/PBR + 阴影/延迟/天空盒。
 > 约束：不破坏现有 `GN_VkDraw3D`/`GN_VkDrawPBR`/`cMODEL` API；新文件 camelCase，单功能 <500 有效行、多功能 <1000 有效行。
 > 2D 侧现有的 `GN_2DArea` 碰撞与 `cFRAME_LAUNCHER` 动画图筐发射器**保持不变**，新系统只服务 3D。
 >
-> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **155 cases, 0 failed, 0 assertions failed**
-> （基线 67 + P1a/P1b 22 + P4 11 + P5 55）；`lintCodeModularity src/graphics tests/unit --naming --comments`
+> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **160 cases, 0 failed, 0 assertions failed**
+> （基线 67 + P1a/P1b 22 + P4 11 + P5 60）；`lintCodeModularity src/graphics tests/unit --naming --comments`
 > 仅剩既有 `GN_2Dmath.cpp` 超限与既有 `gn3d_pbr_frag_spv.h` 告警，新增/改动文件 0 违规 0 告警。
 > 物理新增文件有效行：`GN_Physics.cpp` 484、`GN_PhysicsSolver.cpp` 265、`GN_PhysicsCcd.cpp` 112、
-> `GN_PhysicsBody.cpp` 196、`GN_PhysicsCollision.cpp` 376、`GN_PhysicsCollisionCapsule.cpp` 319（均 <500）。
+> `GN_PhysicsDebug.cpp` 108、`GN_PhysicsBody.cpp` 196、`GN_PhysicsCollision.cpp` 376、
+> `GN_PhysicsCollisionCapsule.cpp` 319（均 <500）。
 > **重要边界**：本机无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）⇒ Vulkan 创建路径
 > （`cSHADER_CACHE` / `cPIPELINE_CACHE` 的 `vkCreate*` 调用）**只做了编译验证，未做运行时验证**；
 > P1b 已接入的 11 条管线必须在有 GPU 的桌面用**重新设计的测试体系**对照后才能算验收通过（原 `samples/` + `run.sh` 已移除，见 CHANGELOG 2026-10-27）。
@@ -298,8 +299,8 @@ struct sANIM_STATE {
 | P1b 契约补充 | ✅ | `aDepthBiasEnable/Constant/Slope`（阴影 1.25/1.75）；`aColorAttachmentCount==0` = 深度专用（无 FS、subpass 0、颜色混合 0 附件） |
 | P1c | ⏳ 未开始 | GPU 材质实例（管线 + 描述符集 + UBO/纹理） |
 | P4 | ✅ 完成 | `GN_Spatial.cpp`（AABB/射线/视锥）、`GN_SpatialBVH.cpp`、`GN_SpatialTree.cpp`、`testSpatial`（11 用例）；有效行 219/167/241/499 |
-| P5 | ✅ v1 + 胶囊 + warm start + CCD v1 | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线/warm start 缓存，迭代 30 次，484）、`GN_PhysicsCollision.cpp`（dispatch，376）、`GN_PhysicsCollisionCapsule.cpp`（球/胶囊/盒-胶囊，319）、`GN_PhysicsBody.cpp`（构造/惯量/AABB，196）、`GN_PhysicsCcd.cpp`（扫掠 TOI，112）、`GN_PhysicsSolver.cpp`（265）；`testPhysics` 19 + `testPhysicsCollision` 10 + `testPhysicsSolver` 14 + `testPhysicsCapsule` 12 = 55 用例 |
-| P5 剩余 | ⏳ | 关节/约束、`AddStaticMesh` 三角网、`DebugDraw` 线框；P5b。**已知限制**：7 层及以上堆叠坍塌（30/40 次速度迭代都复现）；6 层以内稳定入睡 |
+| P5 | ✅ v1 + 胶囊 + warm start + CCD + DebugDraw | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线/warm start 缓存，迭代 30 次，484）、`GN_PhysicsCollision.cpp`（dispatch，376）、`GN_PhysicsCollisionCapsule.cpp`（球/胶囊/盒-胶囊，319）、`GN_PhysicsBody.cpp`（构造/惯量/AABB，196）、`GN_PhysicsCcd.cpp`（扫掠 TOI，112）、`GN_PhysicsDebug.cpp`（线框/接触标记，108）、`GN_PhysicsSolver.cpp`（265）；`testPhysics` 19 + `testPhysicsCollision` 10 + `testPhysicsSolver` 14 + `testPhysicsCapsule` 12 + `testPhysicsDebug` 5 = 60 用例 |
+| P5 剩余 | ⏳ | 关节/约束、`AddStaticMesh` 三角网；P5b。**已知限制**：7 层及以上堆叠坍塌（30/40 次速度迭代都复现）；6 层以内稳定入睡 |
 | P2/P3/P6–P9 | ⏳ 未开始 | —— |
 
 P4 的"剔除结果与暴力测试一致"验收已通过：BVH 512 盒 40 次 AABB 查询与暴力集合逐元素相等；射线 20 条与暴力最小 t 对照；
@@ -323,6 +324,10 @@ P5b 已验收部分（2026-10-27）：
   世界 AABB（按本刚体包围半径扩展），在最早 TOI 处钳住并清零进入方向的法向速度（`GN_PhysicsCcd.cpp`，112 行）。
   `testPhysics` 3 例：120 m/s 小球不穿 0.1m 薄地面、90 m/s 胶囊被拦、常速下落仍正常入睡；
   对照组（不开 CCD）同速小球一步穿到地面顶面以下。近似边界见 §3.3。
+- **DebugDraw（CPU 线段）**：`DebugDraw(sDEBUG_DRAW&)` 输出所有刚体形状线框 + 上一步接触点/法线；
+  线数口径：球 3×24、盒 12、胶囊 2×24+4、每接触点 4（十字 + 0.2 长法线）；`GN_PhysicsDebug.cpp`（108）。
+  `testPhysicsDebug` 5 用例：空世界清空、盒包围盒=半尺寸、球端点距心=半径、胶囊端圆位置/半径、接触标记与法线长度。
+  v1 边界：胶囊线框只画圆柱端圆与侧线（半球顶不在线框里）；渲染器消费在 P8。
 - **仍不稳**：7 层及以上堆叠坍塌（30/40 次迭代都复现）。定位：每步强制唤醒的 6 层对照仍坍塌 ⇒ 排除休眠路径，
   是速度迭代预算/收敛不足；6 层在 20 次迭代下会下沉、30 次迭代后稳定（本项已把上限由 5 层提到 6 层）。
 
@@ -353,6 +358,8 @@ P5b 已验收部分（2026-10-27）：
 3. `sCONTACT_CONSTRAINT::aAccNormal/aAccTangent` 语义改为"世界可预填的累计冲量"；字段与布局未变。
 4. 新增 `cPHYSICS_WORLD::setContinuousCollision(bool)`（默认 false）+ 私有 `resolveContinuousCollisions`；
    CCD 状态不进入 `sRIGID_BODY` 布局，旧代码（含手工构造刚体的单测）无需改字段初始化。
+5. 新增 `sDEBUG_LINE` / `sDEBUG_DRAW`（纯 CPU 线段收集器）与 `cPHYSICS_WORLD::DebugDraw(sDEBUG_DRAW&)`；
+   本层不含颜色/线宽/句柄，渲染器消费在 P8（`_Vulkan/vkDebugDraw.cpp`）。
 
 **已知边界**：warm start 只重放**标量**冲量，切线方向按本步相对速度重算 ⇒ 高速滑动/旋转接触不保留历史切向
 （v1 近似）；接触点匹配半径 5cm，超出视为新接触（冷启动）；休眠体的接触不入缓存。
