@@ -2,17 +2,18 @@
 
 > 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存**）+ P4（空间划分）+
 > P5 v1（球/盒刚体物理）+ P5b 全部六项（胶囊、warm starting、CCD v1、DebugDraw、关节/约束、静态三角网）已落地；
-> P1c 与 P2+ 未开始；P5 的 7 层以上堆叠限制与三角网 v1 边界见 §3.1/§3.3。
+> P6 布料 XPBD 的 **CPU 模拟**已落地（GPU 上传/绘制留 P8/P9）；P1c 与 P2/P3/P7–P9 未开始。
 > 基线：C++11、Vulkan 1.4、Makefile 单一构建入口；现有 3D 为静态网格 + Blinn-Phong/PBR + 阴影/延迟/天空盒。
 > 约束：不破坏现有 `GN_VkDraw3D`/`GN_VkDrawPBR`/`cMODEL` API；新文件 camelCase，单功能 <500 有效行、多功能 <1000 有效行。
 > 2D 侧现有的 `GN_2DArea` 碰撞与 `cFRAME_LAUNCHER` 动画图筐发射器**保持不变**，新系统只服务 3D。
 >
-> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **170 cases, 0 failed, 0 assertions failed**
-> （基线 67 + P1a/P1b 22 + P4 11 + P5 70）；`lintCodeModularity src/graphics tests/unit --naming --comments`
+> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **176 cases, 0 failed, 0 assertions failed**
+> （基线 67 + P1a/P1b 22 + P4 11 + P5 70 + P6 6）；`lintCodeModularity src/graphics tests/unit --naming --comments`
 > 仅剩既有 `GN_2Dmath.cpp` 超限与既有 `gn3d_pbr_frag_spv.h` 告警，新增/改动文件 0 违规 0 告警。
 > 物理文件有效行：`GN_Physics.cpp` 498（只剩 2 行余量，再加逻辑必须迁出）、`GN_PhysicsSolver.cpp` 265、
 > `GN_PhysicsJoint.cpp` 380、`GN_PhysicsMesh.cpp` 212、`GN_PhysicsCcd.cpp` 112、`GN_PhysicsDebug.cpp` 108、
-> `GN_PhysicsBody.cpp` 196、`GN_PhysicsCollision.cpp` 376、`GN_PhysicsCollisionCapsule.cpp` 319（均 <500）。
+> `GN_PhysicsBody.cpp` 196、`GN_PhysicsCollision.cpp` 376、`GN_PhysicsCollisionCapsule.cpp` 319；
+> 布料 `GN_3Dcloth.cpp` 234（均 <500）。
 > **重要边界**：本机无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）⇒ Vulkan 创建路径
 > （`cSHADER_CACHE` / `cPIPELINE_CACHE` 的 `vkCreate*` 调用）**只做了编译验证，未做运行时验证**；
 > P1b 已接入的 11 条管线必须在有 GPU 的桌面用**重新设计的测试体系**对照后才能算验收通过（原 `samples/` + `run.sh` 已移除，见 CHANGELOG 2026-10-27）。
@@ -301,7 +302,8 @@ struct sANIM_STATE {
 | P4 | ✅ 完成 | `GN_Spatial.cpp`（AABB/射线/视锥）、`GN_SpatialBVH.cpp`、`GN_SpatialTree.cpp`、`testSpatial`（11 用例）；有效行 219/167/241/499 |
 | P5 | ✅ v1 + 胶囊 + warm start + CCD + DebugDraw + 关节 + 三角网 | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线/warm start 缓存，迭代 30 次，498）、`GN_PhysicsCollision.cpp`（dispatch，376）、`GN_PhysicsCollisionCapsule.cpp`（球/胶囊/盒-胶囊，319）、`GN_PhysicsBody.cpp`（构造/惯量/AABB，196）、`GN_PhysicsJoint.cpp`（距离/铰链/固定，380）、`GN_PhysicsMesh.cpp`（三角网+BVH，212）、`GN_PhysicsCcd.cpp`（扫掠 TOI，112）、`GN_PhysicsDebug.cpp`（线框/接触标记，108）、`GN_PhysicsSolver.cpp`（265）；`testPhysics` 19 + `testPhysicsCollision` 10 + `testPhysicsSolver` 14 + `testPhysicsCapsule` 12 + `testPhysicsDebug` 5 + `testPhysicsJoint` 6 + `testPhysicsMesh` 4 = 70 用例 |
 | P5 剩余 | ✅ 完成 | P5b 六项全部落地。**已知限制**：7 层及以上堆叠坍塌（30/40 次速度迭代都复现）；盒对静态三角网 v1 未实现（球/胶囊可用）；三角网接触不参与 warm start |
-| P2/P3/P6–P9 | ⏳ 未开始 | —— |
+| P6 | ✅ CPU 模拟（GPU 上传/绘制留 P8/P9） | `GN_3Dcloth.h`（58）/`GN_3Dcloth.cpp`（234）：规则网格、XPBD 距离约束（结构/剪切/弯曲）、球体碰撞、法线重建；`testCloth` 6 用例（参数/拓扑、固定角+下垂+侧风、球碰撞、确定性、Reset、法线） |
+| P2/P3/P7–P9 | ⏳ 未开始 | —— |
 
 P4 的"剔除结果与暴力测试一致"验收已通过：BVH 512 盒 40 次 AABB 查询与暴力集合逐元素相等；射线 20 条与暴力最小 t 对照；
 视锥 300 点/300 盒分别与"投影后 NDC 判定"和"8 角点全在外侧"暴力判据对照；动态树 350 步随机 Insert/Update/Remove
@@ -337,6 +339,10 @@ P5b 已验收部分（2026-10-27）：
   `cBVH` 宽相 + 球/胶囊窄相（球心/胶囊线段到三角形最近点），`GN_PhysicsMesh.cpp`（212）。
   边界：盒对三角网 v1 未实现（跳过）、三角网接触不参与 warm start、A 端为内部静态代理（不占刚体句柄）。
   `testPhysicsMesh` 4 用例：输入校验/退化剔除、球静止、横放胶囊静止、200 三角形 BVH 不漏。
+
+P6 v1 的验收（CPU）：5×5 软布四角固定后重力下垂、侧风把中间顶点吹离 z=0 平面、球体碰撞把顶点推到球面外、
+两次模拟逐位一致、`reset()` 回到初始网格、法线有限且单位长度。**边界**：只固定四角（不支持任意点集/整行固定）、
+风按加速度处理（不做面积/法线投影）、无自碰撞/摩擦、无 GPU 上传与绘制（P8/P9）。
 - **仍不稳**：7 层及以上堆叠坍塌（30/40 次迭代都复现）。定位：每步强制唤醒的 6 层对照仍坍塌 ⇒ 排除休眠路径，
   是速度迭代预算/收敛不足；6 层在 20 次迭代下会下沉、30 次迭代后稳定（本项已把上限由 5 层提到 6 层）。
 
@@ -374,6 +380,8 @@ P5b 已验收部分（2026-10-27）：
 7. 新增 `AddStaticMesh(const sMESH&)`（头文件只前向声明 `sMESH`，不把 GN_3Dmodel.h 拉进物理头）与
    `GetStaticTriangleCount()`；三角网数据 + BVH 存世界私有区，接触 A 端为内部静态代理（不入 `aBodies`），
    `Clear()` 一并清理。
+8. 新增 `GN_3Dcloth.h`（`sCLOTH_DESC` / `sCLOTH_COLLIDER` / `cCLOTH`）并接入 `GN.h`；纯 CPU 模拟，
+   GPU 上传/绘制未做（P8/P9）。
 
 **已知边界**：warm start 只重放**标量**冲量，切线方向按本步相对速度重算 ⇒ 高速滑动/旋转接触不保留历史切向
 （v1 近似）；接触点匹配半径 5cm，超出视为新接触（冷启动）；休眠体的接触不入缓存。
