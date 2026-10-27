@@ -2,19 +2,21 @@
 
 > 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存**）+ P4（空间划分）+
 > P5 v1（球/盒刚体物理）+ P5b 全部六项（胶囊、warm starting、CCD v1、DebugDraw、关节/约束、静态三角网）已落地；
-> P6 布料 XPBD、P7 3D 粒子、P3 动画与 P2 骨骼（世界矩阵/调色板）的 **CPU 部分**已落地；
-> P2 glTF 导入（需 `cgltf` 第三方头）、P1c 与 P8–P9 未开始（P4 空间划分已完成，接入渲染属 P8）。
+> P6 布料 XPBD、P7 3D 粒子、P3 动画、P2 骨骼（世界矩阵/调色板）与 P4→P8 的 CPU 侧（cMODEL 世界 AABB + 视锥剔除）已落地；
+> P2 glTF 导入（需 `cgltf` 第三方头）、P1c 与 P8 渲染接入/P9 未开始。
 > 基线：C++11、Vulkan 1.4、Makefile 单一构建入口；现有 3D 为静态网格 + Blinn-Phong/PBR + 阴影/延迟/天空盒。
 > 约束：不破坏现有 `GN_VkDraw3D`/`GN_VkDrawPBR`/`cMODEL` API；新文件 camelCase，单功能 <500 有效行、多功能 <1000 有效行。
 > 2D 侧现有的 `GN_2DArea` 碰撞与 `cFRAME_LAUNCHER` 动画图筐发射器**保持不变**，新系统只服务 3D。
 >
-> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **194 cases, 0 failed, 0 assertions failed**
-> （基线 67 + P1a/P1b 22 + P4 11 + P5 70 + P6 6 + P7 6 + P3 6 + P2 6）；`lintCodeModularity src/graphics tests/unit --naming --comments`
+> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **197 cases, 0 failed, 0 assertions failed**
+> （基线 67 + P1a/P1b 22 + P4 11 + P5 70 + P6 6 + P7 6 + P3 6 + P2 6 + P8-CPU 3）；
+> `lintCodeModularity src/graphics tests/unit --naming --comments`
 > 仅剩既有 `GN_2Dmath.cpp` 超限与既有 `gn3d_pbr_frag_spv.h` 告警，新增/改动文件 0 违规 0 告警。
 > 物理文件有效行：`GN_Physics.cpp` 498（只剩 2 行余量，再加逻辑必须迁出）、`GN_PhysicsSolver.cpp` 265、
 > `GN_PhysicsJoint.cpp` 380、`GN_PhysicsMesh.cpp` 212、`GN_PhysicsCcd.cpp` 112、`GN_PhysicsDebug.cpp` 108、
 > `GN_PhysicsBody.cpp` 196、`GN_PhysicsCollision.cpp` 376、`GN_PhysicsCollisionCapsule.cpp` 319；
-> 布料 `GN_3Dcloth.cpp` 234、粒子 `GN_3Dparticle.cpp` 170、动画 `GN_3Danim.cpp` 190、骨骼 `GN_3Dskeleton.cpp` 43（均 <500）。
+> 布料 `GN_3Dcloth.cpp` 234、粒子 `GN_3Dparticle.cpp` 170、动画 `GN_3Danim.cpp` 190、骨骼 `GN_3Dskeleton.cpp` 43、
+> 剔除 `GN_3Dcull.cpp` 61（均 <500）。
 > **重要边界**：本机无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）⇒ Vulkan 创建路径
 > （`cSHADER_CACHE` / `cPIPELINE_CACHE` 的 `vkCreate*` 调用）**只做了编译验证，未做运行时验证**；
 > P1b 已接入的 11 条管线必须在有 GPU 的桌面用**重新设计的测试体系**对照后才能算验收通过（原 `samples/` + `run.sh` 已移除，见 CHANGELOG 2026-10-27）。
@@ -307,7 +309,8 @@ struct sANIM_STATE {
 | P7 | ✅ CPU 模拟（实例上传/绘制留 P8） | `GN_3Dparticle.h`（59）/`GN_3Dparticle.cpp`（170）：固定池、按速率发射、圆锥随机方向（固定 xorshift 种子）、重力/阻尼、寿命回收、颜色插值；`testParticle` 6 用例（参数、发射/寿终、容量、重力、确定性、Reset） |
 | P3 | ✅ CPU（glTF 导入留 P2，GPU 蒙皮留 P8/P9） | `GN_3Danim.h`（56）/`GN_3Danim.cpp`（190）：通道采样 STEP/LINEAR + 旋转 slerp、clip duration、`cANIM_PLAYER` 的 loop/crossFade/非循环停住；`testAnimation` 6 用例（采样/STEP/slerp、未覆盖节点、loop、crossFade、非循环停住） |
 | P2（骨骼部分） | ✅ CPU（glTF 导入待第三方头） | `GN_3Dskeleton.h`（21）/`GN_3Dskeleton.cpp`（43）：关节父链世界矩阵、palette = world*inverseBind、坏父索引按根降级；`testSkeleton` 6 用例（空、单根、父链、绑定姿势恒等、坏父、长度不符） |
-| P2（glTF 导入）/P8–P9 | ⏳ 未开始 | —— |
+| P8（CPU 侧） | ✅ cMODEL 世界 AABB + 视锥剔除（渲染接入待 GPU） | `GN_3Dcull.cpp`（61）：顶点×变换求世界 AABB、`isVisibleIn`、`cullModels` 可见列表（上限/空指针安全）；`testCull` 3 用例（AABB/变换、视锥可见性、可见列表上限） |
+| P2（glTF 导入）/P1c/P8 渲染接入/P9 | ⏳ 未开始 | —— |
 
 P4 的"剔除结果与暴力测试一致"验收已通过：BVH 512 盒 40 次 AABB 查询与暴力集合逐元素相等；射线 20 条与暴力最小 t 对照；
 视锥 300 点/300 盒分别与"投影后 NDC 判定"和"8 角点全在外侧"暴力判据对照；动态树 350 步随机 Insert/Update/Remove
@@ -343,6 +346,8 @@ P5b 已验收部分（2026-10-27）：
   `cBVH` 宽相 + 球/胶囊窄相（球心/胶囊线段到三角形最近点），`GN_PhysicsMesh.cpp`（212）。
   边界：盒对三角网 v1 未实现（跳过）、三角网接触不参与 warm start、A 端为内部静态代理（不占刚体句柄）。
   `testPhysicsMesh` 4 用例：输入校验/退化剔除、球静止、横放胶囊静止、200 三角形 BVH 不漏。
+- **仍不稳**：7 层及以上堆叠坍塌（30/40 次迭代都复现）。定位：每步强制唤醒的 6 层对照仍坍塌 ⇒ 排除休眠路径，
+  是速度迭代预算/收敛不足；6 层在 20 次迭代下会下沉、30 次迭代后稳定（本项已把上限由 5 层提到 6 层）。
 
 P6 v1 的验收（CPU）：5×5 软布四角固定后重力下垂、侧风把中间顶点吹离 z=0 平面、球体碰撞把顶点推到球面外、
 两次模拟逐位一致、`reset()` 回到初始网格、法线有限且单位长度。**边界**：只固定四角（不支持任意点集/整行固定）、
@@ -360,8 +365,11 @@ P3 v1 的验收（CPU）：LINEAR 平移中点/STEP 取前一帧、旋转最短�
 P2 骨骼部分 v1 的验收（CPU）：单根世界平移 = 局部平移、两节父链叠加、绑定姿势下 palette ≈ identity、
 坏父索引（父 >= 自身）按根降级不崩溃、局部姿势数量不匹配返回 false。**边界**：glTF 导入（节点/网格/皮肤/
 动画）需引入 `cgltf` 并登记 `external/README.md`；蒙皮顶点混合与关节 UBO 留 P8/P9。
-- **仍不稳**：7 层及以上堆叠坍塌（30/40 次迭代都复现）。定位：每步强制唤醒的 6 层对照仍坍塌 ⇒ 排除休眠路径，
-  是速度迭代预算/收敛不足；6 层在 20 次迭代下会下沉、30 次迭代后稳定（本项已把上限由 5 层提到 6 层）。
+
+P8 CPU 侧 v1 的验收：`cMODEL::computeWorldAABB` 用顶点 × `aTransform` 得到世界包围盒（缩放/平移纳入）；
+`sFRUSTUM::FromViewProj` 下原点/平面内模型可见、远处/相机后方不可见、`aVisible=false` 不可见；
+`cullModels` 只写可见下标并尊重 `maxOut`/空指针。**边界**：尚未接入 `GN_VkDraw3D` 的绘制循环
+（draw 次数下降与逐像素一致需要 GPU 桌面验证）。
 
 ### 3.2 P1b 的契约演进与剩余缺口（2026-10-27 更新）
 
@@ -405,6 +413,8 @@ P2 骨骼部分 v1 的验收（CPU）：单根世界平移 = 局部平移、两�
     采样/混合/状态机纯 CPU，glTF 导入留 P2，GPU 蒙皮留 P8/P9。
 11. 新增 `GN_3Dskeleton.h`（`sJOINT` / `sSKIN` / `sSKELETON`）并接入 `GN.h`；世界矩阵与调色板纯 CPU，
     glTF 导入与 GPU 关节 UBO/蒙皮留 P2 后续/P8。
+12. `cMODEL` 新增 `aWorldAABB` / `computeWorldAABB()` / `isVisibleIn()`；新增 `cullModels()` 可见列表
+    （`GN_3Dcull.cpp`）。渲染循环接入仍待 P8 的 GPU 验证。
 
 **已知边界**：warm start 只重放**标量**冲量，切线方向按本步相对速度重算 ⇒ 高速滑动/旋转接触不保留历史切向
 （v1 近似）；接触点匹配半径 5cm，超出视为新接触（冷启动）；休眠体的接触不入缓存。

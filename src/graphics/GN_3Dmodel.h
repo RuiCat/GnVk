@@ -7,6 +7,7 @@
 // ╚══════════════════════════════════════════════════════════╝
 
 #include "GN_3Dmath.h"
+#include "GN_Spatial.h" // sAABB / sFRUSTUM（视锥剔除用）
 #ifdef GN_USING_3D
 #include "_Vulkan/GN_Vk.h"
 #endif
@@ -59,9 +60,15 @@ class cMODEL {
     GNg::sQUAT aRotation;
     GNg::sVEC3 aScale; // 默认 1,1,1
     bool aVisible;
+    sAABB aWorldAABB; // 由 computeWorldAABB() 刷新（世界坐标包围盒）
 
     cMODEL();
     ~cMODEL();
+
+    // 用网格顶点 × aTransform 计算世界 AABB；无网格/无顶点返回 false（aWorldAABB 保持为空盒）。
+    bool computeWorldAABB();
+    // 保守视锥剔除：aVisible && 世界 AABB 与视锥相交（空盒/未计算时为 false）。
+    bool isVisibleIn(const sFRUSTUM &frustum) const;
 
     bool LoadOBJ(const char *filename);
     void UploadAllToGPU();
@@ -97,6 +104,11 @@ cMODEL *CreateSphereModel(float radius = 1.0f, int segments = 16,
                           float r = 0.8f, float g = 0.8f, float b = 0.8f);
 cMODEL *CreatePlaneModel(float width = 1.0f, float depth = 1.0f,
                          float r = 0.8f, float g = 0.8f, float b = 0.8f);
+
+// 视锥剔除：把 models 中可见的下标写入 outIndices（最多 maxOut 个），返回写入数量。
+// models 里允许出现空指针（跳过）；不修改模型状态。
+uint32_t cullModels(const sFRUSTUM &frustum, const cMODEL *const *models, uint32_t count,
+                    uint32_t *outIndices, uint32_t maxOut);
 
 } // namespace GN3d
 #endif // _GN_3DMODEL_H_
