@@ -172,7 +172,9 @@ const uint32_t cPHYSICS_WORLD::INVALID_HANDLE;
 
 cPHYSICS_WORLD::cPHYSICS_WORLD()
     : aContinuousCollision(false), aGravity{0.0f, -9.81f, 0.0f}, aFixedStep(1.0f / 60.0f),
-      aAccumulator(0.0f), aMaxSubSteps(4), aBodyCount(0), aJointCount(0), aLastContactCount(0) {}
+      aAccumulator(0.0f), aMaxSubSteps(4), aBodyCount(0), aJointCount(0), aLastContactCount(0) {
+    resetMesh();
+}
 
 cPHYSICS_WORLD::~cPHYSICS_WORLD() {
     Clear();
@@ -276,6 +278,7 @@ void cPHYSICS_WORLD::Clear() {
     aWarmContacts.clear();
     aPreviousPositions.clear();
     resetJoints();
+    resetMesh();
     aAccumulator = 0.0f;
     aBodyCount = 0;
     aLastContactCount = 0;
@@ -321,6 +324,7 @@ void cPHYSICS_WORLD::cacheContacts() {
     aWarmContacts.reserve(aConstraints.size());
     for(size_t i = 0; i < aConstraints.size(); ++i) {
         const sCONTACT_CONSTRAINT &constraint = aConstraints[i];
+        if(aConstraintBodyLo[i] == INVALID_HANDLE) continue; // 三角网接触：不参与 warm start
         sWARM_CONTACT entry;
         entry.aBodyLo = aConstraintBodyLo[i];
         entry.aBodyHi = aConstraintBodyHi[i];
@@ -479,6 +483,7 @@ void cPHYSICS_WORLD::BuildContacts() {
         aConstraintBodyLo.push_back(lo);
         aConstraintBodyHi.push_back(hi);
     }
+    buildMeshContacts(); // 静态三角网接触（A 端为内部静态代理）
 }
 
 void cPHYSICS_WORLD::IntegratePositions(float dt) {

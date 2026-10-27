@@ -29,6 +29,10 @@
 
 namespace GN3d {
 
+// 前向声明：静态三角网入口读 sMESH（GN_3Dmodel.h）——顶点按 VkVertex3D 布局（11 floats），
+// 取前 3 个 float 作为位置，网格必须已是世界坐标。
+struct sMESH;
+
 enum eBODY_TYPE {
     eBODY_STATIC = 0, // 无限质量，不动
     eBODY_DYNAMIC = 1, // 受力/重力/碰撞
@@ -225,6 +229,11 @@ class cPHYSICS_WORLD {
     bool RemoveJoint(uint32_t handle);
     uint32_t GetJointCount() const { return aJointCount; }
 
+    // 静态三角网：追加网格三角形到世界碰撞（世界坐标）；空网格/越界索引/退化三角形被忽略。
+    // v1 只实现球/胶囊对三角网的接触（盒未实现，直接跳过）；三角网接触不参与 warm start。
+    void AddStaticMesh(const sMESH &mesh);
+    uint32_t GetStaticTriangleCount() const { return (uint32_t)aMeshTriangleBounds.size(); }
+
     // 连续碰撞（CCD v1）：默认关闭。开启后每个子步用「上一位置 → 目标位置」的线段扫掠
     // 静态/运动学刚体的世界 AABB（按本刚体包围半径扩展），在最早 TOI 处钳住并清零进入方向的
     // 法向速度。近似边界见 GN_PhysicsCcd.cpp 文件头（保守扩展、不扫掠运动学目标的步内运动、
@@ -270,6 +279,8 @@ class cPHYSICS_WORLD {
     void buildJoints();
     void resetJoints();
     void removeJointsOfBody(uint32_t handle);
+    void buildMeshContacts();
+    void resetMesh();
 
     std::vector<sRIGID_BODY> aBodies;
     std::vector<uint8_t> aUsed;
@@ -288,6 +299,10 @@ class cPHYSICS_WORLD {
     std::vector<uint32_t> aFreeJointHandles;
     std::vector<sJOINT_CONSTRAINT> aJointConstraints; // 本子步运行时关节
     uint32_t aJointCount;
+    sRIGID_BODY aMeshProxyBody; // 三角网接触的静态 A 端（不入 aBodies，不参与查询/绘制/计数）
+    std::vector<GNg::sVEC3> aMeshVertices; // 每 3 个 = 一个三角形（世界坐标）
+    std::vector<sAABB> aMeshTriangleBounds;
+    cBVH aMeshBvh;
     GNg::sVEC3 aGravity;
     float aFixedStep;
     float aAccumulator;
