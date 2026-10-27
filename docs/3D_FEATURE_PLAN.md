@@ -3,21 +3,22 @@
 > 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存**）+ P4（空间划分）+
 > P5 v1（球/盒刚体物理）+ P5b 全部六项（胶囊、warm starting、CCD v1、DebugDraw、关节/约束、静态三角网）已落地；
 > P6 布料 XPBD、P7 3D 粒子、P3 动画、P2 骨骼（世界矩阵/调色板）、P4→P8 的 CPU 侧（cMODEL 世界 AABB + 视锥剔除）
-> 与 P1c 材质实例 CPU 侧（描述/校验/去重键）已落地；
-> P2 glTF 导入（需 `cgltf` 第三方头）、P1c 的 GPU 描述符集创建与 P8 渲染接入/P9 未开始。
+> 与 P1c 材质实例 CPU 侧（描述/校验/去重键）已落地；**P2 glTF 导入 v1（节点/网格/皮肤/动画，CPU）已落地**；
+> P2 剩余（材质/纹理导入、GPU 蒙皮）、P1c GPU 侧、P8 渲染接入与 P9 未开始。
 > 基线：C++11、Vulkan 1.4、Makefile 单一构建入口；现有 3D 为静态网格 + Blinn-Phong/PBR + 阴影/延迟/天空盒。
 > 约束：不破坏现有 `GN_VkDraw3D`/`GN_VkDrawPBR`/`cMODEL` API；新文件 camelCase，单功能 <500 有效行、多功能 <1000 有效行。
 > 2D 侧现有的 `GN_2DArea` 碰撞与 `cFRAME_LAUNCHER` 动画图筐发射器**保持不变**，新系统只服务 3D。
 >
-> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **200 cases, 0 failed, 0 assertions failed**
-> （基线 67 + P1a/P1b 22 + P4 11 + P5 70 + P6 6 + P7 6 + P3 6 + P2 6 + P8-CPU 3 + P1c-CPU 3）；
+> **本轮验收证据**（2026-10-27，`make -j8 check`）：3D 规划内单元测试 **202 cases, 0 failed**（本规划口径）；
+> 全量 `unit_tests` 为 **212 cases, 0 failed**，其中 10 例来自并行的 MMD 工作流（非本规划项，未并入计数）。
+> 3D 口径：基线 67 + P1a/P1b 22 + P4 11 + P5 70 + P6 6 + P7 6 + P3 6 + P2 骨骼 6 + P2 glTF 2 + P8-CPU 3 + P1c-CPU 3。
 > `lintCodeModularity src/graphics tests/unit --naming --comments`
 > 仅剩既有 `GN_2Dmath.cpp` 超限与既有 `gn3d_pbr_frag_spv.h` 告警，新增/改动文件 0 违规 0 告警。
 > 物理文件有效行：`GN_Physics.cpp` 498（只剩 2 行余量，再加逻辑必须迁出）、`GN_PhysicsSolver.cpp` 265、
 > `GN_PhysicsJoint.cpp` 380、`GN_PhysicsMesh.cpp` 212、`GN_PhysicsCcd.cpp` 112、`GN_PhysicsDebug.cpp` 108、
 > `GN_PhysicsBody.cpp` 196、`GN_PhysicsCollision.cpp` 376、`GN_PhysicsCollisionCapsule.cpp` 319；
 > 布料 `GN_3Dcloth.cpp` 234、粒子 `GN_3Dparticle.cpp` 170、动画 `GN_3Danim.cpp` 190、骨骼 `GN_3Dskeleton.cpp` 43、
-> 剔除 `GN_3Dcull.cpp` 61、材质 `GN_Material.cpp` 82（均 <500）。
+> 剔除 `GN_3Dcull.cpp` 61、材质 `GN_Material.cpp` 82、资产 `GN_3Dasset.cpp` 232（均 <500）。
 > **重要边界**：本机无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）⇒ Vulkan 创建路径
 > （`cSHADER_CACHE` / `cPIPELINE_CACHE` 的 `vkCreate*` 调用）**只做了编译验证，未做运行时验证**；
 > P1b 已接入的 11 条管线必须在有 GPU 的桌面用**重新设计的测试体系**对照后才能算验收通过（原 `samples/` + `run.sh` 已移除，见 CHANGELOG 2026-10-27）。
@@ -312,7 +313,8 @@ struct sANIM_STATE {
 | P3 | ✅ CPU（glTF 导入留 P2，GPU 蒙皮留 P8/P9） | `GN_3Danim.h`（56）/`GN_3Danim.cpp`（190）：通道采样 STEP/LINEAR + 旋转 slerp、clip duration、`cANIM_PLAYER` 的 loop/crossFade/非循环停住；`testAnimation` 6 用例（采样/STEP/slerp、未覆盖节点、loop、crossFade、非循环停住） |
 | P2（骨骼部分） | ✅ CPU（glTF 导入待第三方头） | `GN_3Dskeleton.h`（21）/`GN_3Dskeleton.cpp`（43）：关节父链世界矩阵、palette = world*inverseBind、坏父索引按根降级；`testSkeleton` 6 用例（空、单根、父链、绑定姿势恒等、坏父、长度不符） |
 | P8（CPU 侧） | ✅ cMODEL 世界 AABB + 视锥剔除（渲染接入待 GPU） | `GN_3Dcull.cpp`（61）：顶点×变换求世界 AABB、`isVisibleIn`、`cullModels` 可见列表（上限/空指针安全）；`testCull` 3 用例（AABB/变换、视锥可见性、可见列表上限） |
-| P2（glTF 导入）/P1c/P8 渲染接入/P9 | ⏳ 未开始 | —— |
+| P2（glTF 导入） | ✅ CPU v1（材质/纹理与 GPU 蒙皮未做） | `GN_3Dasset.h`（43）/`GN_3Dasset.cpp`（232）：cgltf v1.15（外部头，已静态审计并登记 `external/README.md`）、节点父链与局部 TRS、primitive 顶点/法线/UV/4 关节权重/索引、skin 关节+逆绑定矩阵、动画 STEP/LINEAR → `sANIM_CLIP`；`testAsset` 2 用例（内存 fixture 全字段、非法输入） |
+| P2 剩余 / P1c GPU 侧 / P8 渲染接入 / P9 | ⏳ 未开始 | 材质/纹理导入、GPU 蒙皮与关节 UBO、VkDescriptorSet、绘制循环剔除接入、GPU 粒子/布料路径 |
 
 P4 的"剔除结果与暴力测试一致"验收已通过：BVH 512 盒 40 次 AABB 查询与暴力集合逐元素相等；射线 20 条与暴力最小 t 对照；
 视锥 300 点/300 盒分别与"投影后 NDC 判定"和"8 角点全在外侧"暴力判据对照；动态树 350 步随机 Insert/Update/Remove
@@ -378,6 +380,11 @@ P1c CPU 侧 v1 的验收：合法描述通过校验；管线键为 0、绑定数
 去重表对同描述返回同句柄、不同资源新建、非法描述拒绝、`Release` 清空。**边界**：VkDescriptorSet 创建/写入与
 UBO/纹理实际绑定留 P8（需要 GPU）。
 
+P2 glTF 导入 v1 的验收（CPU）：内存 fixture（1 三角形 + 2 节点 + 1 关节 skin + 1 条平移动画）导入后
+节点/网格/皮肤/动画字段正确（位置、索引、逆绑定矩阵、动画时长与 0.5s 采样值）；非 JSON/空指针/不存在文件
+返回 false 且不残留数据。**边界**：材质/纹理/相机/灯光不导入；CUBICSPLINE 与 morph 权重通道跳过；
+GPU 蒙皮、关节 UBO 与绘制留 P8/P9。
+
 ### 3.2 P1b 的契约演进与剩余缺口（2026-10-27 更新）
 
 **已解决**（契约扩展，`GN_Pipeline.h` 已冻结）：
@@ -424,6 +431,9 @@ UBO/纹理实际绑定留 P8（需要 GPU）。
     （`GN_3Dcull.cpp`）。渲染循环接入仍待 P8 的 GPU 验证。
 13. 新增 `GN_Material.h`（`sMATERIAL_BINDING` / `sMATERIAL_DESC` / `sMATERIAL_RES` / `cMATERIAL_CACHE`）并接入
     `GN.h`；CPU 侧校验/内容键/去重，VkDescriptorSet 创建与 UBO/纹理绑定留 P8。
+14. 新增 `external/include/cgltf.h`（jkuhlmann/cgltf **v1.15**，MIT，SHA-256 `e378a21c…11c6ec`；静态审查
+    无网络/子进程/凭据读取/写文件，仅 `fopen(path,"rb")` 读）与 `GN_3Dasset.h`（`sASSET` 等）并接入 `GN.h`；
+    导入节点/网格/皮肤/动画到 CPU 结构，材质/纹理与 GPU 蒙皮留 P2 后续/P8。
 
 **已知边界**：warm start 只重放**标量**冲量，切线方向按本步相对速度重算 ⇒ 高速滑动/旋转接触不保留历史切向
 （v1 近似）；接触点匹配半径 5cm，超出视为新接触（冷启动）；休眠体的接触不入缓存。

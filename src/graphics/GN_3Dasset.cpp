@@ -1,0 +1,265 @@
+// GN_3Dasset.cpp — glTF 2.0 导入（节点/网格/皮肤/动画）到引擎 CPU 结构。
+//
+// cgltf v1.15（MIT，external/include/cgltf.h，SHA-256 见 external/README.md）：
+// 实现宏只在本文件定义一次，其它文件只包含 GN_3Dasset.h。
+// v1 不导入材质/纹理/相机/灯光；CUBICSPLINE 与 morph 权重通道跳过。
+#include <GN.h>
+#include "GN_3Dasset.h"
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#define CGLTF_IMPLEMENTATION
+#include "cgltf.h"
+#pragma GCC diagnostic pop
+
+#include <cstring>
+
+namespace GN3d {
+
+namespace {
+
+GNg::sVEC3 makeVec3(float x, float y, float z) {
+    GNg::sVEC3 v = {x, y, z};
+    return v;
+}
+
+int32_t nodeIndexOf(const cgltf_data *data, const cgltf_node *node) {
+    if(node == 0 || data->nodes == 0) return -1;
+    return (int32_t)(node - data->nodes);
+}
+
+void importNodes(const cgltf_data *data, sASSET &out) {
+    out.aNodes.resize(data->nodes_count);
+    for(cgltf_size i = 0; i < data->nodes_count; ++i) {
+        const cgltf_node &node = data->nodes[i];
+        sASSET_NODE &target = out.aNodes[i];
+        target.aName = node.name ? node.name : "";
+        target.aParent = -1;
+        target.aTranslation = node.has_translation ? makeVec3(node.translation[0], node.translation[1],
+                                                              node.translation[2])
+                                                   : makeVec3(0.0f, 0.0f, 0.0f);
+        target.aRotation = node.has_rotation
+                               ? GNg::sQUAT(node.rotation[0], node.rotation[1], node.rotation[2],
+                                            node.rotation[3])
+                               : GNg::sQUAT();
+        target.aScale = node.has_scale
+                            ? makeVec3(node.scale[0], node.scale[1], node.scale[2])
+                            : makeVec3(1.0f, 1.0f, 1.0f);
+        target.aMesh = node.mesh ? (int32_t)cgltf_mesh_index(data, node.mesh) : -1;
+        target.aSkin = node.skin ? (int32_t)(node.skin - data->skins) : -1;
+    }
+    // 父索引：遍历每个节点的 children。
+    for(cgltf_size i = 0; i < data->nodes_count; ++i) {
+        const cgltf_node &node = data->nodes[i];
+        for(cgltf_size c = 0; c < node.children_count; ++c) {
+            const int32_t child = nodeIndexOf(data, node.children[c]);
+            if(child >= 0) out.aNodes[child].aParent = (int32_t)i;
+        }
+    }
+}
+
+bool readVec3(const cgltf_accessor *accessor, cgltf_size index, GNg::sVEC3 &out) {
+    if(accessor == 0) return false;
+    cgltf_float values[3];
+    if(!cgltf_accessor_read_float(accessor, index, values, 3)) return false;
+    out = makeVec3(values[0], values[1], values[2]);
+    return true;
+}
+
+void importMeshes(const cgltf_data *data, sASSET &out) {
+    out.aMeshes.resize(data->meshes_count);
+    for(cgltf_size m = 0; m < data->meshes_count; ++m) {
+        const cgltf_mesh &mesh = data->meshes[m];
+        sASSET_MESH &targetMesh = out.aMeshes[m];
+        targetMesh.aPrimitives.resize(mesh.primitives_count);
+        for(cgltf_size p = 0; p < mesh.primitives_count; ++p) {
+            const cgltf_primitive &primitive = mesh.primitives[p];
+            sASSET_PRIMITIVE &target = targetMesh.aPrimitives[p];
+            const cgltf_accessor *position =
+                cgltf_find_accessor(&primitive, cgltf_attribute_type_position, 0);
+            if(position == 0) continue;
+            const cgltf_accessor *normal =
+                cgltf_find_accessor(&primitive, cgltf_attribute_type_normal, 0);
+            const cgltf_accessor *uv = cgltf_find_accessor(&primitive, cgltf_attribute_type_texcoord, 0);
+            const cgltf_accessor *joints =
+                cgltf_find_accessor(&primitive, cgltf_attribute_type_joints, 0);
+            const cgltf_accessor *weights =
+                cgltf_find_accessor(&primitive, cgltf_attribute_type_weights, 0);
+            const cgltf_size vertexCount = position->count;
+            target.aVertices.resize(vertexCount);
+            for(cgltf_size v = 0; v < vertexCount; ++v) {
+                sASSET_VERTEX &vertex = target.aVertices[v];
+                vertex.aNormal = makeVec3(0.0f, 1.0f, 0.0f);
+                vertex.aUv[0] = 0.0f;
+                vertex.aUv[1] = 0.0f;
+                for(int k = 0; k < 4; ++k) {
+                    vertex.aJoints[k] = 0;
+                    vertex.aWeights[k] = 0.0f;
+                }
+                readVec3(position, v, vertex.aPosition);
+                readVec3(normal, v, vertex.aNormal);
+                if(uv) {
+                    cgltf_float uvValues[2];
+                    if(cgltf_accessor_read_float(uv, v, uvValues, 2)) {
+                        vertex.aUv[0] = uvValues[0];
+                        vertex.aUv[1] = uvValues[1];
+                    }
+                }
+                if(joints) {
+                    cgltf_uint jointValues[4] = {0, 0, 0, 0};
+                    if(cgltf_accessor_read_uint(joints, v, jointValues, 4)) {
+                        for(int k = 0; k < 4; ++k) vertex.aJoints[k] = (uint16_t)jointValues[k];
+                    }
+                }
+                if(weights) {
+                    cgltf_float weightValues[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                    if(cgltf_accessor_read_float(weights, v, weightValues, 4)) {
+                        for(int k = 0; k < 4; ++k) vertex.aWeights[k] = weightValues[k];
+                    }
+                }
+            }
+            if(primitive.indices) {
+                target.aIndices.resize(primitive.indices->count);
+                for(cgltf_size i = 0; i < primitive.indices->count; ++i) {
+                    target.aIndices[i] = (uint32_t)cgltf_accessor_read_index(primitive.indices, i);
+                }
+            } else {
+                target.aIndices.resize(vertexCount);
+                for(cgltf_size i = 0; i < vertexCount; ++i) target.aIndices[i] = (uint32_t)i;
+            }
+        }
+    }
+}
+
+void importSkins(const cgltf_data *data, sASSET &out) {
+    out.aSkins.resize(data->skins_count);
+    for(cgltf_size s = 0; s < data->skins_count; ++s) {
+        const cgltf_skin &skin = data->skins[s];
+        sASSET_SKIN &target = out.aSkins[s];
+        target.aJoints.resize(skin.joints_count);
+        for(cgltf_size j = 0; j < skin.joints_count; ++j) {
+            const int32_t index = nodeIndexOf(data, skin.joints[j]);
+            target.aJoints[j] = (index >= 0) ? (uint32_t)index : 0u;
+        }
+        target.aInverseBinds.resize(skin.joints_count);
+        for(cgltf_size j = 0; j < skin.joints_count; ++j) {
+            GNg::sMAT44 &matrix = target.aInverseBinds[j];
+            matrix.Init(true);
+            if(skin.inverse_bind_matrices) {
+                cgltf_float values[16];
+                if(cgltf_accessor_read_float(skin.inverse_bind_matrices, j, values, 16)) {
+                    for(int k = 0; k < 16; ++k) matrix.m[k] = values[k]; // glTF 与 sMAT44 都是列主序
+                }
+            }
+        }
+    }
+}
+
+void importAnimations(const cgltf_data *data, sASSET &out) {
+    out.aAnimations.resize(data->animations_count);
+    for(cgltf_size a = 0; a < data->animations_count; ++a) {
+        const cgltf_animation &animation = data->animations[a];
+        sASSET_ANIMATION &target = out.aAnimations[a];
+        target.aName = animation.name ? animation.name : "";
+        for(cgltf_size c = 0; c < animation.channels_count; ++c) {
+            const cgltf_animation_channel &channel = animation.channels[c];
+            if(channel.target_node == 0 || channel.sampler == 0) continue;
+            const cgltf_animation_path_type path = channel.target_path;
+            if(path != cgltf_animation_path_type_translation && path != cgltf_animation_path_type_rotation &&
+               path != cgltf_animation_path_type_scale) {
+                continue; // morph weights 等：v1 跳过
+            }
+            const cgltf_interpolation_type interp = channel.sampler->interpolation;
+            if(interp == cgltf_interpolation_type_cubic_spline) continue; // P2 v1 不支持
+            const cgltf_accessor *input = channel.sampler->input;
+            const cgltf_accessor *output = channel.sampler->output;
+            if(input == 0 || output == 0) continue;
+            sANIM_CHANNEL targetChannel;
+            targetChannel.aNode = (uint32_t)nodeIndexOf(data, channel.target_node);
+            targetChannel.aInterp = (interp == cgltf_interpolation_type_step) ? eANIM_STEP : eANIM_LINEAR;
+            if(path == cgltf_animation_path_type_translation) {
+                targetChannel.aPath = eANIM_TRANSLATION;
+            } else if(path == cgltf_animation_path_type_rotation) {
+                targetChannel.aPath = eANIM_ROTATION;
+            } else {
+                targetChannel.aPath = eANIM_SCALE;
+            }
+            targetChannel.aTimes.resize(input->count);
+            for(cgltf_size t = 0; t < input->count; ++t) {
+                cgltf_float time = 0.0f;
+                cgltf_accessor_read_float(input, t, &time, 1);
+                targetChannel.aTimes[t] = time;
+            }
+            if(path == cgltf_animation_path_type_rotation) {
+                targetChannel.aQuatValues.resize(input->count);
+                for(cgltf_size t = 0; t < input->count; ++t) {
+                    cgltf_float values[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+                    cgltf_accessor_read_float(output, t, values, 4);
+                    targetChannel.aQuatValues[t] =
+                        GNg::sQUAT(values[0], values[1], values[2], values[3]);
+                }
+            } else {
+                targetChannel.aVecValues.resize(input->count);
+                for(cgltf_size t = 0; t < input->count; ++t) {
+                    readVec3(output, t, targetChannel.aVecValues[t]);
+                }
+            }
+            target.aClip.aChannels.push_back(targetChannel);
+        }
+        target.aClip.updateDuration();
+    }
+}
+
+bool importGltf(const cgltf_data *data, sASSET &out) {
+    out.clear();
+    importNodes(data, out);
+    importMeshes(data, out);
+    importSkins(data, out);
+    importAnimations(data, out);
+    return true;
+}
+
+} // namespace
+
+void sASSET::clear() {
+    aMeshes.clear();
+    aNodes.clear();
+    aSkins.clear();
+    aAnimations.clear();
+}
+
+bool sASSET::loadFromFile(const char *path) {
+    if(path == 0) return false;
+    cgltf_options options;
+    std::memset(&options, 0, sizeof(options));
+    cgltf_data *data = 0;
+    if(cgltf_parse_file(&options, path, &data) != cgltf_result_success) {
+        clear();
+        return false;
+    }
+    const cgltf_result buffers = cgltf_load_buffers(&options, data, path);
+    const bool ok = (buffers == cgltf_result_success) && importGltf(data, *this);
+    cgltf_free(data);
+    if(!ok) clear();
+    return ok;
+}
+
+bool sASSET::loadFromMemory(const void *data, size_t size) {
+    if(data == 0 || size == 0) return false;
+    cgltf_options options;
+    std::memset(&options, 0, sizeof(options));
+    cgltf_data *gltf = 0;
+    if(cgltf_parse(&options, data, size, &gltf) != cgltf_result_success) {
+        clear();
+        return false;
+    }
+    const cgltf_result buffers = cgltf_load_buffers(&options, gltf, 0);
+    const bool ok = (buffers == cgltf_result_success) && importGltf(gltf, *this);
+    cgltf_free(gltf);
+    if(!ok) clear();
+    return ok;
+}
+
+} // namespace GN3d
