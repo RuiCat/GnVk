@@ -146,6 +146,7 @@ extern GN_API unsigned int GT_SystemInited; //标记引擎系统各部分是否�
 #include "GN_3Dmaterial.h" //3D材质系统
 #include "GN_Shader.h" //SPIR-V 加载与着色器模块缓存
 #include "GN_Pipeline.h" //通用图形/计算管线描述与缓存
+#include "GN_Material.h" //GPU 材质实例（描述/校验/去重键；Vulkan 创建留 P8）
 #include "GN_Spatial.h" //3D空间划分 AABB/BVH/动态AABB树/视锥/射线
 #include "GN_Physics.h" //3D刚体物理 球/盒/胶囊/关节/三角网
 #include "GN_3Dcloth.h" //布料 XPBD（CPU 模拟；GPU 上传留 P8/P9）

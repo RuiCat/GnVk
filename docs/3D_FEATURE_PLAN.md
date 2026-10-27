@@ -2,21 +2,22 @@
 
 > 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存**）+ P4（空间划分）+
 > P5 v1（球/盒刚体物理）+ P5b 全部六项（胶囊、warm starting、CCD v1、DebugDraw、关节/约束、静态三角网）已落地；
-> P6 布料 XPBD、P7 3D 粒子、P3 动画、P2 骨骼（世界矩阵/调色板）与 P4→P8 的 CPU 侧（cMODEL 世界 AABB + 视锥剔除）已落地；
-> P2 glTF 导入（需 `cgltf` 第三方头）、P1c 与 P8 渲染接入/P9 未开始。
+> P6 布料 XPBD、P7 3D 粒子、P3 动画、P2 骨骼（世界矩阵/调色板）、P4→P8 的 CPU 侧（cMODEL 世界 AABB + 视锥剔除）
+> 与 P1c 材质实例 CPU 侧（描述/校验/去重键）已落地；
+> P2 glTF 导入（需 `cgltf` 第三方头）、P1c 的 GPU 描述符集创建与 P8 渲染接入/P9 未开始。
 > 基线：C++11、Vulkan 1.4、Makefile 单一构建入口；现有 3D 为静态网格 + Blinn-Phong/PBR + 阴影/延迟/天空盒。
 > 约束：不破坏现有 `GN_VkDraw3D`/`GN_VkDrawPBR`/`cMODEL` API；新文件 camelCase，单功能 <500 有效行、多功能 <1000 有效行。
 > 2D 侧现有的 `GN_2DArea` 碰撞与 `cFRAME_LAUNCHER` 动画图筐发射器**保持不变**，新系统只服务 3D。
 >
-> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **197 cases, 0 failed, 0 assertions failed**
-> （基线 67 + P1a/P1b 22 + P4 11 + P5 70 + P6 6 + P7 6 + P3 6 + P2 6 + P8-CPU 3）；
+> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **200 cases, 0 failed, 0 assertions failed**
+> （基线 67 + P1a/P1b 22 + P4 11 + P5 70 + P6 6 + P7 6 + P3 6 + P2 6 + P8-CPU 3 + P1c-CPU 3）；
 > `lintCodeModularity src/graphics tests/unit --naming --comments`
 > 仅剩既有 `GN_2Dmath.cpp` 超限与既有 `gn3d_pbr_frag_spv.h` 告警，新增/改动文件 0 违规 0 告警。
 > 物理文件有效行：`GN_Physics.cpp` 498（只剩 2 行余量，再加逻辑必须迁出）、`GN_PhysicsSolver.cpp` 265、
 > `GN_PhysicsJoint.cpp` 380、`GN_PhysicsMesh.cpp` 212、`GN_PhysicsCcd.cpp` 112、`GN_PhysicsDebug.cpp` 108、
 > `GN_PhysicsBody.cpp` 196、`GN_PhysicsCollision.cpp` 376、`GN_PhysicsCollisionCapsule.cpp` 319；
 > 布料 `GN_3Dcloth.cpp` 234、粒子 `GN_3Dparticle.cpp` 170、动画 `GN_3Danim.cpp` 190、骨骼 `GN_3Dskeleton.cpp` 43、
-> 剔除 `GN_3Dcull.cpp` 61（均 <500）。
+> 剔除 `GN_3Dcull.cpp` 61、材质 `GN_Material.cpp` 82（均 <500）。
 > **重要边界**：本机无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）⇒ Vulkan 创建路径
 > （`cSHADER_CACHE` / `cPIPELINE_CACHE` 的 `vkCreate*` 调用）**只做了编译验证，未做运行时验证**；
 > P1b 已接入的 11 条管线必须在有 GPU 的桌面用**重新设计的测试体系**对照后才能算验收通过（原 `samples/` + `run.sh` 已移除，见 CHANGELOG 2026-10-27）。
@@ -301,7 +302,8 @@ struct sANIM_STATE {
 | P1a | ✅ 完成（库+单测） | `GN_Shader.*`、`GN_Pipeline.*`、`_Vulkan/vkShader.cpp`、`_Vulkan/vkPipeline.cpp`、`testPipeline`（17 用例）；有效行 39/303/62/262/497 |
 | P1b | ✅ 完成（11 条管线全部接入） | 2D 四条混合 + 3D 前向/PBR/阴影 + 合成 + 天空盒 + G-Buffer(3 附件) + 延迟光照；`GN_VkContext::aPipelineCache` 统一持有，`GN_VkShutdown` 先 Release 再销毁 renderPass。**GPU 运行时未验证** |
 | P1b 契约补充 | ✅ | `aDepthBiasEnable/Constant/Slope`（阴影 1.25/1.75）；`aColorAttachmentCount==0` = 深度专用（无 FS、subpass 0、颜色混合 0 附件） |
-| P1c | ⏳ 未开始 | GPU 材质实例（管线 + 描述符集 + UBO/纹理） |
+| P1c（CPU 侧） | ✅ 描述/校验/去重键（Vulkan 描述符集留 P8） | `GN_Material.h`（35）/`GN_Material.cpp`（82）：`sMATERIAL_DESC`/`sMATERIAL_RES`、`ValidateMaterialDesc`、FNV-1a 64 位内容键、`MaterialDescEqual`、`cMATERIAL_CACHE` 去重表（句柄槽 `aDescriptorSet` 留 P8）；`testMaterial` 3 用例 |
+| P1c（GPU 侧） | ⏳ 未开始 | VkDescriptorSet 创建/写入、UBO/纹理绑定、与管线布局合并（GPU 桌面验证） |
 | P4 | ✅ 完成 | `GN_Spatial.cpp`（AABB/射线/视锥）、`GN_SpatialBVH.cpp`、`GN_SpatialTree.cpp`、`testSpatial`（11 用例）；有效行 219/167/241/499 |
 | P5 | ✅ v1 + 胶囊 + warm start + CCD + DebugDraw + 关节 + 三角网 | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线/warm start 缓存，迭代 30 次，498）、`GN_PhysicsCollision.cpp`（dispatch，376）、`GN_PhysicsCollisionCapsule.cpp`（球/胶囊/盒-胶囊，319）、`GN_PhysicsBody.cpp`（构造/惯量/AABB，196）、`GN_PhysicsJoint.cpp`（距离/铰链/固定，380）、`GN_PhysicsMesh.cpp`（三角网+BVH，212）、`GN_PhysicsCcd.cpp`（扫掠 TOI，112）、`GN_PhysicsDebug.cpp`（线框/接触标记，108）、`GN_PhysicsSolver.cpp`（265）；`testPhysics` 19 + `testPhysicsCollision` 10 + `testPhysicsSolver` 14 + `testPhysicsCapsule` 12 + `testPhysicsDebug` 5 + `testPhysicsJoint` 6 + `testPhysicsMesh` 4 = 70 用例 |
 | P5 剩余 | ✅ 完成 | P5b 六项全部落地。**已知限制**：7 层及以上堆叠坍塌（30/40 次速度迭代都复现）；盒对静态三角网 v1 未实现（球/胶囊可用）；三角网接触不参与 warm start |
@@ -371,6 +373,11 @@ P8 CPU 侧 v1 的验收：`cMODEL::computeWorldAABB` 用顶点 × `aTransform` �
 `cullModels` 只写可见下标并尊重 `maxOut`/空指针。**边界**：尚未接入 `GN_VkDraw3D` 的绘制循环
 （draw 次数下降与逐像素一致需要 GPU 桌面验证）。
 
+P1c CPU 侧 v1 的验收：合法描述通过校验；管线键为 0、绑定数 >8、binding 重复/非递增、资源为空、种类非法、
+阶段位为 0 都被拒绝；内容相同（含资源地址）键相同且逐字段相等，任一字段变化键与相等性都变化；
+去重表对同描述返回同句柄、不同资源新建、非法描述拒绝、`Release` 清空。**边界**：VkDescriptorSet 创建/写入与
+UBO/纹理实际绑定留 P8（需要 GPU）。
+
 ### 3.2 P1b 的契约演进与剩余缺口（2026-10-27 更新）
 
 **已解决**（契约扩展，`GN_Pipeline.h` 已冻结）：
@@ -415,6 +422,8 @@ P8 CPU 侧 v1 的验收：`cMODEL::computeWorldAABB` 用顶点 × `aTransform` �
     glTF 导入与 GPU 关节 UBO/蒙皮留 P2 后续/P8。
 12. `cMODEL` 新增 `aWorldAABB` / `computeWorldAABB()` / `isVisibleIn()`；新增 `cullModels()` 可见列表
     （`GN_3Dcull.cpp`）。渲染循环接入仍待 P8 的 GPU 验证。
+13. 新增 `GN_Material.h`（`sMATERIAL_BINDING` / `sMATERIAL_DESC` / `sMATERIAL_RES` / `cMATERIAL_CACHE`）并接入
+    `GN.h`；CPU 侧校验/内容键/去重，VkDescriptorSet 创建与 UBO/纹理绑定留 P8。
 
 **已知边界**：warm start 只重放**标量**冲量，切线方向按本步相对速度重算 ⇒ 高速滑动/旋转接触不保留历史切向
 （v1 近似）；接触点匹配半径 5cm，超出视为新接触（冷启动）；休眠体的接触不入缓存。
