@@ -76,6 +76,10 @@ GN_VK_INTERNAL void CreateBuf(VkDeviceSize sz, VkBufferUsageFlags u,
 GN_VK_INTERNAL VkImageView MakeImageView(VkImage img, VkFormat fmt);
 void VkCheck(VkResult err, const char *msg);
 
+// 蒙皮关节调色板 UBO（P2-C，8KB：128 × mat4）；未初始化/失败返回 false。
+GN_VK_INTERNAL bool createSkinPaletteBuffer();
+GN_VK_INTERNAL void destroySkinPaletteBuffer();
+
 } // namespace GNg
 
 #endif // GN_VK_INTERNAL_H

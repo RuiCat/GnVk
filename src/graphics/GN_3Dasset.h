@@ -12,7 +12,9 @@
 //   * 皮肤：关节=节点索引数组，逆绑定矩阵与关节等长（缺失时为单位矩阵）。
 //   * 动画：仅 translation/rotation/scale 通道，STEP/LINEAR 映射到 `sANIM_CLIP`；
 //     CUBICSPLINE 通道与 morph 权重通道跳过（P2 v1 边界）。
-//   * 材质/纹理/相机/灯光不导入（渲染侧仍用 sMATERIAL 默认值）。
+//   * 材质/纹理只导入 CPU 描述（因子、贴图索引、来源 uri/mime/bufferView、sampler 的
+//     wrap/filter）；不读取图片字节、不解码、不接渲染侧的 sMATERIAL。
+//   * 相机/灯光不导入。
 #include "GN_3Dmath.h"
 #include "GN_3Danim.h"
 
@@ -34,6 +36,7 @@ struct sASSET_VERTEX {
 struct sASSET_PRIMITIVE {
     std::vector<sASSET_VERTEX> aVertices;
     std::vector<uint32_t> aIndices;
+    int32_t aMaterial; // 材质索引，-1 = 无
 };
 
 struct sASSET_MESH {
@@ -60,11 +63,37 @@ struct sASSET_ANIMATION {
     sANIM_CLIP aClip;
 };
 
+// 纹理来源描述（不读取图片字节）：image 的 uri/mime/bufferView + 其 sampler 的采样参数。
+// wrap/filter 用 glTF 原始枚举值，0 表示未指定（filter 无规范默认），wrap 缺省 10497(REPEAT)。
+struct sASSET_TEXTURE {
+    std::string aName;
+    std::string aUri; // image.uri，空 = 无外部 uri
+    std::string aMime; // image.mimeType，缺失为空
+    int32_t aBufferView; // image.bufferView 索引，-1 = 无
+    int32_t aWrapS;
+    int32_t aWrapT;
+    int32_t aMagFilter; // 9728/9729/9984..9987，0 = 未指定
+    int32_t aMinFilter;
+};
+
+// 材质 CPU 描述，默认值取 glTF 规范（baseColor=1,1,1,1；metallic=1；roughness=1；emissive=0,0,0）。
+struct sASSET_MATERIAL {
+    std::string aName;
+    float aBaseColorFactor[4];
+    float aMetallic;
+    float aRoughness;
+    float aEmissive[3];
+    int32_t aAlbedoTexture; // baseColorTexture 索引，-1 = 无
+    int32_t aNormalTexture; // normalTexture 索引，-1 = 无
+};
+
 struct sASSET {
     std::vector<sASSET_MESH> aMeshes;
     std::vector<sASSET_NODE> aNodes;
     std::vector<sASSET_SKIN> aSkins;
     std::vector<sASSET_ANIMATION> aAnimations;
+    std::vector<sASSET_MATERIAL> aMaterials;
+    std::vector<sASSET_TEXTURE> aTextures;
 
     bool loadFromFile(const char *path);
     bool loadFromMemory(const void *data, size_t size);

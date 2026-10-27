@@ -44,10 +44,10 @@ std::string base64Encode(const std::vector<unsigned char> &data) {
     return out;
 }
 
-// 最小 glTF：1 个三角形网格 + 2 个节点 + 1 关节 skin + 1 条平移动画。
-// buffer 布局：位置 0..35、索引 36..41、IBM 44..107、时间 108..115、平移 116..139。
+// 最小 glTF：1 个三角形网格 + 2 个节点 + 1 关节 skin + 1 条平移动画 + 2 材质 + 2 纹理。
+// buffer 布局：位置 0..35、索引 36..41、IBM 44..107、时间 108..115、平移 116..139、图片 140..147。
 std::string makeGltfFixture() {
-    std::vector<unsigned char> buffer(140, 0);
+    std::vector<unsigned char> buffer(148, 0);
     const float positions[9] = {-1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
     for(int i = 0; i < 9; ++i) writeFloat(buffer, (size_t)i * 4u, positions[i]);
     writeU16(buffer, 36, 0);
@@ -68,8 +68,19 @@ std::string makeGltfFixture() {
     json += "\"asset\":{\"version\":\"2.0\"},";
     json += "\"scene\":0,\"scenes\":[{\"nodes\":[0,1]}],";
     json += "\"nodes\":[{\"name\":\"meshNode\",\"mesh\":0},{\"name\":\"root\"}],";
-    json += "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1}]}],";
+    json += "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1,"
+            "\"material\":0}]}],";
     json += "\"skins\":[{\"joints\":[1],\"inverseBindMatrices\":2}],";
+    json += "\"materials\":[{\"name\":\"mat0\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.5,"
+            "0.25,0.125,1.0],\"metallicFactor\":0.25,\"roughnessFactor\":0.75,"
+            "\"baseColorTexture\":{\"index\":0}},\"normalTexture\":{\"index\":0},"
+            "\"emissiveFactor\":[0.1,0.2,0.3]},{\"name\":\"matDefault\"}],";
+    json += "\"images\":[{\"name\":\"img0\",\"bufferView\":5,\"mimeType\":\"image/png\"},"
+            "{\"name\":\"img1\",\"uri\":\"images/tex1.png\"}],";
+    json += "\"textures\":[{\"name\":\"tex0\",\"sampler\":0,\"source\":0},{\"name\":\"tex1\","
+            "\"source\":1}],";
+    json += "\"samplers\":[{\"magFilter\":9729,\"minFilter\":9987,\"wrapS\":33071,"
+            "\"wrapT\":33648}],";
     json += "\"animations\":[{\"name\":\"move\",\"channels\":[{\"sampler\":0,\"target\":{\"node\":1,"
             "\"path\":\"translation\"}}],\"samplers\":[{\"input\":3,\"output\":4,\"interpolation\":"
             "\"LINEAR\"}]}],";
@@ -85,8 +96,9 @@ std::string makeGltfFixture() {
     json += "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6},";
     json += "{\"buffer\":0,\"byteOffset\":44,\"byteLength\":64},";
     json += "{\"buffer\":0,\"byteOffset\":108,\"byteLength\":8},";
-    json += "{\"buffer\":0,\"byteOffset\":116,\"byteLength\":24}],";
-    json += "\"buffers\":[{\"byteLength\":140,\"uri\":\"data:application/octet-stream;base64,";
+    json += "{\"buffer\":0,\"byteOffset\":116,\"byteLength\":24},";
+    json += "{\"buffer\":0,\"byteOffset\":140,\"byteLength\":8}],";
+    json += "\"buffers\":[{\"byteLength\":148,\"uri\":\"data:application/octet-stream;base64,";
     json += encoded;
     json += "\"}]}";
     return json;
@@ -104,6 +116,8 @@ TEST_CASE(assetLoadFromMemory) {
     CHECK_EQ(asset.aMeshes.size(), 1u);
     CHECK_EQ(asset.aSkins.size(), 1u);
     CHECK_EQ(asset.aAnimations.size(), 1u);
+    CHECK_EQ(asset.aMaterials.size(), 2u);
+    CHECK_EQ(asset.aTextures.size(), 2u);
 
     CHECK_EQ(asset.aNodes[0].aMesh, 0);
     CHECK_EQ(asset.aNodes[0].aParent, -1);
@@ -120,6 +134,47 @@ TEST_CASE(assetLoadFromMemory) {
     CHECK_NEAR(primitive.aVertices[2].aPosition.y, 1.0f, 1e-6f);
     CHECK_NEAR(primitive.aVertices[0].aWeights[0], 0.0f, 1e-6f);
     CHECK_NEAR(primitive.aVertices[0].aNormal.y, 1.0f, 1e-6f); // 缺省法线
+    CHECK_EQ(primitive.aMaterial, 0);
+
+    // 材质：显式因子/贴图索引 + 规范默认值。
+    const sASSET_MATERIAL &material = asset.aMaterials[0];
+    CHECK_STREQ(material.aName.c_str(), "mat0");
+    CHECK_NEAR(material.aBaseColorFactor[0], 0.5f, 1e-6f);
+    CHECK_NEAR(material.aBaseColorFactor[2], 0.125f, 1e-6f);
+    CHECK_NEAR(material.aBaseColorFactor[3], 1.0f, 1e-6f);
+    CHECK_NEAR(material.aMetallic, 0.25f, 1e-6f);
+    CHECK_NEAR(material.aRoughness, 0.75f, 1e-6f);
+    CHECK_NEAR(material.aEmissive[0], 0.1f, 1e-6f);
+    CHECK_NEAR(material.aEmissive[2], 0.3f, 1e-6f);
+    CHECK_EQ(material.aAlbedoTexture, 0);
+    CHECK_EQ(material.aNormalTexture, 0);
+    const sASSET_MATERIAL &defaultMaterial = asset.aMaterials[1];
+    CHECK_NEAR(defaultMaterial.aBaseColorFactor[0], 1.0f, 1e-6f);
+    CHECK_NEAR(defaultMaterial.aBaseColorFactor[3], 1.0f, 1e-6f);
+    CHECK_NEAR(defaultMaterial.aMetallic, 1.0f, 1e-6f);
+    CHECK_NEAR(defaultMaterial.aRoughness, 1.0f, 1e-6f);
+    CHECK_NEAR(defaultMaterial.aEmissive[1], 0.0f, 1e-6f);
+    CHECK_EQ(defaultMaterial.aAlbedoTexture, -1);
+    CHECK_EQ(defaultMaterial.aNormalTexture, -1);
+
+    // 纹理：image 来源（bufferView/mime 与 uri）+ sampler 参数，缺 sampler 时用规范默认。
+    const sASSET_TEXTURE &texture = asset.aTextures[0];
+    CHECK_STREQ(texture.aName.c_str(), "tex0");
+    CHECK(texture.aUri.empty());
+    CHECK_STREQ(texture.aMime.c_str(), "image/png");
+    CHECK_EQ(texture.aBufferView, 5);
+    CHECK_EQ(texture.aWrapS, 33071);
+    CHECK_EQ(texture.aWrapT, 33648);
+    CHECK_EQ(texture.aMagFilter, 9729);
+    CHECK_EQ(texture.aMinFilter, 9987);
+    const sASSET_TEXTURE &defaultTexture = asset.aTextures[1];
+    CHECK_STREQ(defaultTexture.aUri.c_str(), "images/tex1.png");
+    CHECK(defaultTexture.aMime.empty());
+    CHECK_EQ(defaultTexture.aBufferView, -1);
+    CHECK_EQ(defaultTexture.aWrapS, 10497);
+    CHECK_EQ(defaultTexture.aWrapT, 10497);
+    CHECK_EQ(defaultTexture.aMagFilter, 0);
+    CHECK_EQ(defaultTexture.aMinFilter, 0);
 
     const sASSET_SKIN &skin = asset.aSkins[0];
     CHECK_EQ(skin.aJoints.size(), 1u);

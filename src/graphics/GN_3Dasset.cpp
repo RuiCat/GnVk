@@ -1,8 +1,8 @@
-// GN_3Dasset.cpp — glTF 2.0 导入（节点/网格/皮肤/动画）到引擎 CPU 结构。
+// GN_3Dasset.cpp — glTF 2.0 导入（节点/网格/皮肤/动画/材质/纹理）到引擎 CPU 结构。
 //
 // cgltf v1.15（MIT，external/include/cgltf.h，SHA-256 见 external/README.md）：
 // 实现宏只在本文件定义一次，其它文件只包含 GN_3Dasset.h。
-// v1 不导入材质/纹理/相机/灯光；CUBICSPLINE 与 morph 权重通道跳过。
+// 不导入相机/灯光；材质/纹理只做 CPU 描述（不读图片字节）；CUBICSPLINE 与 morph 权重通道跳过。
 #include <GN.h>
 #include "GN_3Dasset.h"
 
@@ -77,6 +77,9 @@ void importMeshes(const cgltf_data *data, sASSET &out) {
         for(cgltf_size p = 0; p < mesh.primitives_count; ++p) {
             const cgltf_primitive &primitive = mesh.primitives[p];
             sASSET_PRIMITIVE &target = targetMesh.aPrimitives[p];
+            target.aMaterial = primitive.material
+                                   ? (int32_t)cgltf_material_index(data, primitive.material)
+                                   : -1;
             const cgltf_accessor *position =
                 cgltf_find_accessor(&primitive, cgltf_attribute_type_position, 0);
             if(position == 0) continue;
@@ -157,6 +160,58 @@ void importSkins(const cgltf_data *data, sASSET &out) {
     }
 }
 
+void importTextures(const cgltf_data *data, sASSET &out) {
+    out.aTextures.resize(data->textures_count);
+    for(cgltf_size t = 0; t < data->textures_count; ++t) {
+        const cgltf_texture &texture = data->textures[t];
+        sASSET_TEXTURE &target = out.aTextures[t];
+        target.aName = texture.name ? texture.name : "";
+        target.aUri.clear();
+        target.aMime.clear();
+        target.aBufferView = -1;
+        // glTF 默认值：wrap=REPEAT；filter 无规范默认（记为 0=未指定）。
+        target.aWrapS = (int32_t)cgltf_wrap_mode_repeat;
+        target.aWrapT = (int32_t)cgltf_wrap_mode_repeat;
+        target.aMagFilter = (int32_t)cgltf_filter_type_undefined;
+        target.aMinFilter = (int32_t)cgltf_filter_type_undefined;
+        if(texture.image != 0) {
+            target.aUri = texture.image->uri ? texture.image->uri : "";
+            target.aMime = texture.image->mime_type ? texture.image->mime_type : "";
+            if(texture.image->buffer_view != 0 && data->buffer_views != 0) {
+                target.aBufferView = (int32_t)(texture.image->buffer_view - data->buffer_views);
+            }
+        }
+        if(texture.sampler != 0) {
+            target.aWrapS = (int32_t)texture.sampler->wrap_s;
+            target.aWrapT = (int32_t)texture.sampler->wrap_t;
+            target.aMagFilter = (int32_t)texture.sampler->mag_filter;
+            target.aMinFilter = (int32_t)texture.sampler->min_filter;
+        }
+    }
+}
+
+int32_t textureIndexOf(const cgltf_data *data, const cgltf_texture *texture) {
+    if(texture == 0 || data->textures == 0) return -1;
+    return (int32_t)cgltf_texture_index(data, texture);
+}
+
+void importMaterials(const cgltf_data *data, sASSET &out) {
+    out.aMaterials.resize(data->materials_count);
+    for(cgltf_size m = 0; m < data->materials_count; ++m) {
+        const cgltf_material &material = data->materials[m];
+        sASSET_MATERIAL &target = out.aMaterials[m];
+        // cgltf 解析时已按 glTF 规范填好 pbrMetallicRoughness 默认值，这里直接复制。
+        const cgltf_pbr_metallic_roughness &pbr = material.pbr_metallic_roughness;
+        target.aName = material.name ? material.name : "";
+        for(int k = 0; k < 4; ++k) target.aBaseColorFactor[k] = pbr.base_color_factor[k];
+        target.aMetallic = pbr.metallic_factor;
+        target.aRoughness = pbr.roughness_factor;
+        for(int k = 0; k < 3; ++k) target.aEmissive[k] = material.emissive_factor[k];
+        target.aAlbedoTexture = textureIndexOf(data, pbr.base_color_texture.texture);
+        target.aNormalTexture = textureIndexOf(data, material.normal_texture.texture);
+    }
+}
+
 void importAnimations(const cgltf_data *data, sASSET &out) {
     out.aAnimations.resize(data->animations_count);
     for(cgltf_size a = 0; a < data->animations_count; ++a) {
@@ -218,6 +273,8 @@ bool importGltf(const cgltf_data *data, sASSET &out) {
     importMeshes(data, out);
     importSkins(data, out);
     importAnimations(data, out);
+    importTextures(data, out);
+    importMaterials(data, out);
     return true;
 }
 
@@ -228,6 +285,8 @@ void sASSET::clear() {
     aNodes.clear();
     aSkins.clear();
     aAnimations.clear();
+    aMaterials.clear();
+    aTextures.clear();
 }
 
 bool sASSET::loadFromFile(const char *path) {
