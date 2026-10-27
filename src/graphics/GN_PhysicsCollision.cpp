@@ -1,5 +1,5 @@
-// GN_PhysicsCollision.cpp — 窄相碰撞与刚体状态辅助：球/盒初始化、惯量、世界 AABB/逆惯量，
-//   以及球-球、球-盒、盒-盒（OBB SAT + 面裁剪流形）接触流形；法线一律 A→B、穿透深度 >= 0。
+// GN_PhysicsCollision.cpp — 球 / 盒窄相碰撞：球-球、球-盒、盒-盒（OBB SAT + 面裁剪流形），
+//   以及各形状组合的统一入口 CollideBodies（胶囊实现见 GN_PhysicsCollisionCapsule.cpp）。
 //
 // 契约与语义见只读的 GN_Physics.h；本文件不依赖世界 / 宽相 / 求解器，可独立单测。
 // 退化策略：零半径、零/负半尺寸、非有限参数、同心球一律返回 false（不产生无意义法线）；
@@ -61,22 +61,6 @@ inline bool IsFiniteVec3(const GNg::sVEC3 &v) {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
-inline float SafeHalfExtent(float value) {
-    return (std::isfinite(value) && value > 0.0f) ? value : 0.0f;
-}
-
-inline void SetZeroMatrix(GNg::sMAT44 &matrix) {
-    matrix = GNg::sMAT44(false);
-}
-
-inline void SetDiagonalMatrix(GNg::sMAT44 &matrix, float x, float y, float z) {
-    SetZeroMatrix(matrix);
-    matrix.m[0] = x;
-    matrix.m[5] = y;
-    matrix.m[10] = z;
-    matrix.m[15] = 1.0f;
-}
-
 // 盒的三条世界局部轴（列向量），由四元数旋转矩阵取出。
 struct sBoxAxes {
     GNg::sVEC3 aAxis[3];
@@ -107,6 +91,10 @@ bool IsCollidable(const sRIGID_BODY &body) {
         const GNg::sVEC3 &half = body.aHalfExtent;
         return std::isfinite(half.x) && half.x > 0.0f && std::isfinite(half.y) && half.y > 0.0f &&
                std::isfinite(half.z) && half.z > 0.0f;
+    }
+    if(body.aShape == eSHAPE_CAPSULE) {
+        return std::isfinite(body.aRadius) && body.aRadius > 0.0f && std::isfinite(body.aHalfExtent.y) &&
+               body.aHalfExtent.y >= 0.0f;
     }
     return false;
 }
@@ -406,133 +394,21 @@ bool CollideBoxBox(const sRIGID_BODY &a, const sRIGID_BODY &b, sCONTACT_MANIFOLD
     return true;
 }
 
+// 把 manifold 的法线取反后拷到 out（用于 A/B 交换时的方向归一）。
+void FlipManifold(const sCONTACT_MANIFOLD &source, sCONTACT_MANIFOLD &out) {
+    out.aNormal = Neg(source.aNormal);
+    out.aCount = source.aCount;
+    for(uint32_t i = 0; i < source.aCount; ++i) {
+        out.aPoints[i] = source.aPoints[i];
+    }
+}
+
 } // namespace
 
-// ═══════════════════════════════════════════════════════════
-//  刚体辅助
-// ═══════════════════════════════════════════════════════════
-
-sRIGID_BODY MakeSphereBody(eBODY_TYPE type, const GNg::sVEC3 &pos, float radius, float mass) {
-    sRIGID_BODY body;
-    body.aType = type;
-    body.aShape = eSHAPE_SPHERE;
-    body.aMass = mass;
-    body.aInvMass = 0.0f;
-    body.aPos = pos;
-    body.aRot = GNg::sQUAT(); // 单位四元数
-    body.aLinVel = MakeVec3(0.0f, 0.0f, 0.0f);
-    body.aAngVel = MakeVec3(0.0f, 0.0f, 0.0f);
-    SetZeroMatrix(body.aInvInertiaLocal);
-    SetZeroMatrix(body.aInvInertiaWorld);
-    body.aFriction = 0.5f;
-    body.aRestitution = 0.0f;
-    body.aLinearDamping = 0.02f;
-    body.aAngularDamping = 0.05f;
-    body.aRadius = radius;
-    body.aHalfExtent = MakeVec3(0.0f, 0.0f, 0.0f);
-    body.aSleeping = false;
-    body.aSleepTime = 0.0f;
-    body.aWorldAABB = sAABB();
-    BodyUpdateInertia(body);
-    BodyUpdateWorldState(body);
-    return body;
-}
-
-sRIGID_BODY MakeBoxBody(eBODY_TYPE type, const GNg::sVEC3 &pos, const GNg::sVEC3 &halfExtent, float mass) {
-    sRIGID_BODY body;
-    body.aType = type;
-    body.aShape = eSHAPE_BOX;
-    body.aMass = mass;
-    body.aInvMass = 0.0f;
-    body.aPos = pos;
-    body.aRot = GNg::sQUAT(); // 单位四元数
-    body.aLinVel = MakeVec3(0.0f, 0.0f, 0.0f);
-    body.aAngVel = MakeVec3(0.0f, 0.0f, 0.0f);
-    SetZeroMatrix(body.aInvInertiaLocal);
-    SetZeroMatrix(body.aInvInertiaWorld);
-    body.aFriction = 0.5f;
-    body.aRestitution = 0.0f;
-    body.aLinearDamping = 0.02f;
-    body.aAngularDamping = 0.05f;
-    body.aRadius = 0.0f;
-    body.aHalfExtent = halfExtent;
-    body.aSleeping = false;
-    body.aSleepTime = 0.0f;
-    body.aWorldAABB = sAABB();
-    BodyUpdateInertia(body);
-    BodyUpdateWorldState(body);
-    return body;
-}
-
-void BodyUpdateInertia(sRIGID_BODY &body) {
-    body.aInvMass = 0.0f;
-    SetZeroMatrix(body.aInvInertiaLocal);
-    if(body.aType != eBODY_DYNAMIC) return; // 静态/运动学：无限质量
-    const float mass = body.aMass;
-    if(!std::isfinite(mass) || !(mass > 0.0f)) return; // 非法质量：降级为无限质量
-
-    float invIx;
-    float invIy;
-    float invIz;
-    if(body.aShape == eSHAPE_SPHERE) {
-        const float radius = body.aRadius;
-        if(!std::isfinite(radius) || !(radius > 0.0f)) return;
-        invIx = invIy = invIz = 1.0f / (0.4f * mass * radius * radius); // I = 2/5 m r²
-    } else if(body.aShape == eSHAPE_BOX) {
-        const GNg::sVEC3 &half = body.aHalfExtent;
-        if(!std::isfinite(half.x) || !std::isfinite(half.y) || !std::isfinite(half.z) || !(half.x > 0.0f) ||
-           !(half.y > 0.0f) || !(half.z > 0.0f)) {
-            return;
-        }
-        const float massThird = mass / 3.0f;
-        invIx = 1.0f / (massThird * (half.y * half.y + half.z * half.z));
-        invIy = 1.0f / (massThird * (half.x * half.x + half.z * half.z));
-        invIz = 1.0f / (massThird * (half.x * half.x + half.y * half.y));
-    } else {
-        return;
-    }
-    if(!std::isfinite(invIx) || !std::isfinite(invIy) || !std::isfinite(invIz)) return; // 参数极端：仍按无限质量
-    body.aInvMass = 1.0f / mass;
-    SetDiagonalMatrix(body.aInvInertiaLocal, invIx, invIy, invIz);
-}
-
-void BodyUpdateWorldState(sRIGID_BODY &body) {
-    if(body.aShape == eSHAPE_SPHERE) {
-        const float radius = SafeHalfExtent(body.aRadius);
-        body.aWorldAABB.aMin = MakeVec3(body.aPos.x - radius, body.aPos.y - radius, body.aPos.z - radius);
-        body.aWorldAABB.aMax = MakeVec3(body.aPos.x + radius, body.aPos.y + radius, body.aPos.z + radius);
-    } else if(body.aShape == eSHAPE_BOX) {
-        sBoxAxes axes;
-        GetBoxAxes(body, axes);
-        const float halfX = SafeHalfExtent(body.aHalfExtent.x);
-        const float halfY = SafeHalfExtent(body.aHalfExtent.y);
-        const float halfZ = SafeHalfExtent(body.aHalfExtent.z);
-        // OBB 的世界 AABB 轴向半径 = |R| * halfExtent（不能只取中心 ± 半尺寸）。
-        const float extentX = std::fabs(axes.aAxis[0].x) * halfX + std::fabs(axes.aAxis[1].x) * halfY +
-                              std::fabs(axes.aAxis[2].x) * halfZ;
-        const float extentY = std::fabs(axes.aAxis[0].y) * halfX + std::fabs(axes.aAxis[1].y) * halfY +
-                              std::fabs(axes.aAxis[2].y) * halfZ;
-        const float extentZ = std::fabs(axes.aAxis[0].z) * halfX + std::fabs(axes.aAxis[1].z) * halfY +
-                              std::fabs(axes.aAxis[2].z) * halfZ;
-        body.aWorldAABB.aMin = MakeVec3(body.aPos.x - extentX, body.aPos.y - extentY, body.aPos.z - extentZ);
-        body.aWorldAABB.aMax = MakeVec3(body.aPos.x + extentX, body.aPos.y + extentY, body.aPos.z + extentZ);
-    } else {
-        body.aWorldAABB.aMin = body.aPos; // 未知形状：退化为点盒
-        body.aWorldAABB.aMax = body.aPos;
-    }
-
-    if(body.aType != eBODY_DYNAMIC) {
-        SetZeroMatrix(body.aInvInertiaWorld);
-        return;
-    }
-    GNg::sMAT44 rotation;
-    GNg::sMAT44 rotationT;
-    GNg::sMAT44 temp;
-    GNg::QuatToMatrix44(&rotation, &body.aRot);
-    GNg::Mat44Transpose(&rotationT, &rotation);
-    GNg::Mat44Mul(&temp, &rotation, &body.aInvInertiaLocal);
-    GNg::Mat44Mul(&body.aInvInertiaWorld, &temp, &rotationT);
-}
+// 胶囊窄相（GN_PhysicsCollisionCapsule.cpp）：函数内法线按入参 A → B；交换由本文件 dispatch 处理。
+bool CollideSphereCapsule(const sRIGID_BODY &sphere, const sRIGID_BODY &capsule, sCONTACT_MANIFOLD &out);
+bool CollideCapsuleCapsule(const sRIGID_BODY &a, const sRIGID_BODY &b, sCONTACT_MANIFOLD &out);
+bool CollideBoxCapsule(const sRIGID_BODY &box, const sRIGID_BODY &capsule, sCONTACT_MANIFOLD &out);
 
 // ═══════════════════════════════════════════════════════════
 //  窄相碰撞入口
@@ -546,12 +422,26 @@ bool CollideBodies(const sRIGID_BODY &a, const sRIGID_BODY &b, sCONTACT_MANIFOLD
     if(a.aShape == eSHAPE_BOX && b.aShape == eSHAPE_SPHERE) {
         sCONTACT_MANIFOLD flipped;
         if(!CollideSphereBox(b, a, flipped)) return false;
-        out.aNormal = Neg(flipped.aNormal);
-        out.aCount = flipped.aCount;
-        for(uint32_t i = 0; i < flipped.aCount; ++i) out.aPoints[i] = flipped.aPoints[i];
+        FlipManifold(flipped, out);
         return true;
     }
-    return CollideBoxBox(a, b, out);
+    if(a.aShape == eSHAPE_BOX && b.aShape == eSHAPE_BOX) return CollideBoxBox(a, b, out);
+    if(a.aShape == eSHAPE_SPHERE && b.aShape == eSHAPE_CAPSULE) return CollideSphereCapsule(a, b, out);
+    if(a.aShape == eSHAPE_CAPSULE && b.aShape == eSHAPE_SPHERE) {
+        sCONTACT_MANIFOLD flipped;
+        if(!CollideSphereCapsule(b, a, flipped)) return false;
+        FlipManifold(flipped, out);
+        return true;
+    }
+    if(a.aShape == eSHAPE_CAPSULE && b.aShape == eSHAPE_CAPSULE) return CollideCapsuleCapsule(a, b, out);
+    if(a.aShape == eSHAPE_BOX && b.aShape == eSHAPE_CAPSULE) return CollideBoxCapsule(a, b, out);
+    if(a.aShape == eSHAPE_CAPSULE && b.aShape == eSHAPE_BOX) {
+        sCONTACT_MANIFOLD flipped;
+        if(!CollideBoxCapsule(b, a, flipped)) return false;
+        FlipManifold(flipped, out);
+        return true;
+    }
+    return false;
 }
 
 } // namespace GN3d

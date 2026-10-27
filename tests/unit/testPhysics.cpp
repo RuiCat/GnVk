@@ -76,6 +76,32 @@ TEST_CASE(physicsBoxStackStable) {
     CHECK(low->aSleeping);
 }
 
+// 5 层堆叠：warm starting 后更深堆叠也能稳定入睡（无 warm start 时 5 层会侧滑坍塌）。
+TEST_CASE(physicsTallStackStable) {
+    cPHYSICS_WORLD world;
+    AddGround(world);
+    const GNg::sVEC3 half{0.5f, 0.5f, 0.5f};
+    uint32_t handles[5];
+    for(int i = 0; i < 5; ++i) {
+        handles[i] = world.AddBody(
+            MakeBoxBody(eBODY_DYNAMIC, GNg::sVEC3{0.0f, 0.5f + (float)i, 0.0f}, half, 1.0f));
+        CHECK(handles[i] != cPHYSICS_WORLD::INVALID_HANDLE);
+    }
+
+    for(int i = 0; i < 300; ++i) world.Step(1.0f / 60.0f); // 5 秒
+
+    for(int i = 0; i < 5; ++i) {
+        const sRIGID_BODY *body = world.GetBody(handles[i]);
+        CHECK(body != 0);
+        if(!body) continue;
+        CHECK(AllFinite(body->aPos));
+        CHECK_NEAR(body->aPos.y, 0.5f + (float)i, 0.15f);
+        CHECK(std::fabs(body->aPos.x) < 0.2f);
+        CHECK(std::fabs(body->aPos.z) < 0.2f);
+        CHECK(body->aSleeping);
+    }
+}
+
 TEST_CASE(physicsHeadOnSpheresSeparate) {
     cPHYSICS_WORLD world;
     world.SetGravity(GNg::sVEC3{0.0f, 0.0f, 0.0f});
@@ -256,4 +282,65 @@ TEST_CASE(physicsRestitutionBounce) {
         if(body && body->aLinVel.y > maxUpSpeed) maxUpSpeed = body->aLinVel.y;
     }
     CHECK(maxUpSpeed > 1.0f); // 撞地后确实弹起
+}
+
+// ═══════════════════════════════════════════════════════════
+//  胶囊（v1 第三形状）
+// ═══════════════════════════════════════════════════════════
+
+TEST_CASE(physicsCapsuleLiesOnGround) {
+    cPHYSICS_WORLD world;
+    AddGround(world);
+    sRIGID_BODY capsule = MakeCapsuleBody(eBODY_DYNAMIC, GNg::sVEC3{0.0f, 1.2f, 0.0f}, 0.5f, 1.0f, 1.0f);
+    GNg::sVEC3 zAxis{0.0f, 0.0f, 1.0f};
+    GNg::QuatFromAxisAngle(&capsule.aRot, &zAxis, 1.5707963f); // 绕 Z 转 90°：轴变为水平（X 方向）
+    const uint32_t handle = world.AddBody(capsule);
+    CHECK(handle != cPHYSICS_WORLD::INVALID_HANDLE);
+
+    for(int i = 0; i < 240; ++i) world.Step(1.0f / 60.0f);
+
+    const sRIGID_BODY *body = world.GetBody(handle);
+    CHECK(body != 0);
+    if(!body) return;
+    CHECK(AllFinite(body->aPos));
+    CHECK_NEAR(body->aPos.y, 0.5f, 0.08f); // 水平躺倒时质心离地 = 半径
+    CHECK(body->aSleeping);
+}
+
+TEST_CASE(physicsCapsuleDropsAndSettles) {
+    cPHYSICS_WORLD world;
+    AddGround(world);
+    const uint32_t handle = world.AddBody(
+        MakeCapsuleBody(eBODY_DYNAMIC, GNg::sVEC3{0.0f, 3.0f, 0.0f}, 0.3f, 0.8f, 1.0f));
+    CHECK(handle != cPHYSICS_WORLD::INVALID_HANDLE);
+    for(int i = 0; i < 300; ++i) world.Step(1.0f / 60.0f);
+    const sRIGID_BODY *body = world.GetBody(handle);
+    CHECK(body != 0);
+    if(!body) return;
+    CHECK(AllFinite(body->aPos));
+    // 竖直站立时质心 1.1；倒下时 0.3；两者之间都算稳定落地
+    CHECK(body->aPos.y > 0.25f && body->aPos.y < 1.2f);
+    CHECK(std::fabs(body->aLinVel.y) < 0.1f);
+}
+
+TEST_CASE(physicsCapsuleRaycast) {
+    cPHYSICS_WORLD world;
+    const uint32_t handle =
+        world.AddBody(MakeCapsuleBody(eBODY_STATIC, GNg::sVEC3{0.0f, 2.0f, 0.0f}, 0.3f, 0.8f, 0.0f));
+    CHECK(handle != cPHYSICS_WORLD::INVALID_HANDLE);
+    sRAY_HIT hit;
+    CHECK(world.Raycast(GNg::sVEC3{0.0f, 10.0f, 0.0f}, GNg::sVEC3{0.0f, -1.0f, 0.0f}, 100.0f, hit));
+    CHECK_EQ(hit.aIndex, handle);
+    CHECK_NEAR(hit.aT, 10.0f - (2.0f + 0.8f + 0.3f), 0.1f); // 顶端半球
+}
+
+TEST_CASE(physicsCapsuleInvalidInput) {
+    cPHYSICS_WORLD world;
+    CHECK_EQ(world.AddBody(MakeCapsuleBody(eBODY_DYNAMIC, GNg::sVEC3{0, 1, 0}, 0.0f, 0.5f, 1.0f)),
+             cPHYSICS_WORLD::INVALID_HANDLE);
+    CHECK_EQ(world.AddBody(MakeCapsuleBody(eBODY_DYNAMIC, GNg::sVEC3{0, 1, 0}, 0.5f, -0.5f, 1.0f)),
+             cPHYSICS_WORLD::INVALID_HANDLE);
+    // halfHeight = 0：退化成球，合法
+    CHECK(world.AddBody(MakeCapsuleBody(eBODY_DYNAMIC, GNg::sVEC3{0, 1, 0}, 0.5f, 0.0f, 1.0f)) !=
+          cPHYSICS_WORLD::INVALID_HANDLE);
 }

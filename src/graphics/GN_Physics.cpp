@@ -22,6 +22,7 @@ const float kMaxFrameDt = 0.25f;
 const float kMaxRayT = 1e30f;
 const uint32_t kVelocityIterations = 20;
 const uint32_t kPositionIterations = 4;
+const float kWarmStartMatchDistance = 0.05f; // 接触点跨步匹配半径（m）
 
 bool IsDynamicBody(const sRIGID_BODY &body) {
     return body.aType == eBODY_DYNAMIC;
@@ -104,6 +105,48 @@ bool RayBox(const GNg::sVEC3 &origin, const GNg::sVEC3 &dir, const sRIGID_BODY &
     return true;
 }
 
+// 胶囊两端球心（局部 Y 轴线段绕朝向旋转后平移到世界）
+void CapsuleEndpoints(const sRIGID_BODY &body, GNg::sVEC3 &outA, GNg::sVEC3 &outB) {
+    GNg::sVEC3 up{0.0f, 1.0f, 0.0f};
+    GNg::sVEC3 axis;
+    GNg::QuatRotateVec3(&axis, &up, &body.aRot);
+    const float halfHeight = body.aHalfExtent.y;
+    outA.x = body.aPos.x - axis.x * halfHeight;
+    outA.y = body.aPos.y - axis.y * halfHeight;
+    outA.z = body.aPos.z - axis.z * halfHeight;
+    outB.x = body.aPos.x + axis.x * halfHeight;
+    outB.y = body.aPos.y + axis.y * halfHeight;
+    outB.z = body.aPos.z + axis.z * halfHeight;
+}
+
+// 射线-胶囊：沿轴采样若干球做求交（近似；17 个采样点在 r=0.5、h=1 时误差 <1mm，
+// 契约未要求解析解，先按近似实现并在此注明）。
+bool RayCapsule(const GNg::sVEC3 &origin, const GNg::sVEC3 &dir, const sRIGID_BODY &body,
+                float maxT, float &outT) {
+    GNg::sVEC3 a;
+    GNg::sVEC3 b;
+    CapsuleEndpoints(body, a, b);
+    const int kSamples = 16;
+    bool hit = false;
+    float bestT = FLT_MAX;
+    for(int i = 0; i <= kSamples; ++i) {
+        const float u = (float)i / (float)kSamples;
+        GNg::sVEC3 center;
+        center.x = a.x + (b.x - a.x) * u;
+        center.y = a.y + (b.y - a.y) * u;
+        center.z = a.z + (b.z - a.z) * u;
+        float t = 0.0f;
+        if(!RaySphere(origin, dir, center, body.aRadius, maxT, t)) continue;
+        if(t < bestT) {
+            bestT = t;
+            hit = true;
+        }
+    }
+    if(!hit) return false;
+    outT = bestT;
+    return true;
+}
+
 bool RayBody(const GNg::sVEC3 &origin, const GNg::sVEC3 &dir, const sRIGID_BODY &body, float maxT,
              float &outT) {
     if(body.aShape == eSHAPE_SPHERE) {
@@ -111,6 +154,9 @@ bool RayBody(const GNg::sVEC3 &origin, const GNg::sVEC3 &dir, const sRIGID_BODY 
     }
     if(body.aShape == eSHAPE_BOX) {
         return RayBox(origin, dir, body, maxT, outT);
+    }
+    if(body.aShape == eSHAPE_CAPSULE) {
+        return RayCapsule(origin, dir, body, maxT, outT);
     }
     return false;
 }
@@ -146,13 +192,17 @@ uint32_t cPHYSICS_WORLD::AddBody(const sRIGID_BODY &body) {
     if(body.aType != eBODY_STATIC && body.aType != eBODY_DYNAMIC && body.aType != eBODY_KINEMATIC) {
         return INVALID_HANDLE;
     }
-    if(body.aShape != eSHAPE_SPHERE && body.aShape != eSHAPE_BOX) return INVALID_HANDLE;
+    if(body.aShape != eSHAPE_SPHERE && body.aShape != eSHAPE_BOX &&
+       body.aShape != eSHAPE_CAPSULE) return INVALID_HANDLE;
     if(body.aShape == eSHAPE_SPHERE && !(body.aRadius > 0.0f)) return INVALID_HANDLE;
     if(body.aShape == eSHAPE_BOX) {
         if(!(body.aHalfExtent.x > 0.0f) || !(body.aHalfExtent.y > 0.0f) ||
            !(body.aHalfExtent.z > 0.0f)) {
             return INVALID_HANDLE;
         }
+    }
+    if(body.aShape == eSHAPE_CAPSULE) {
+        if(!(body.aRadius > 0.0f) || !(body.aHalfExtent.y >= 0.0f)) return INVALID_HANDLE;
     }
     if(body.aType == eBODY_DYNAMIC && !(body.aMass > 0.0f)) return INVALID_HANDLE;
 
@@ -197,6 +247,7 @@ bool cPHYSICS_WORLD::RemoveBody(uint32_t handle) {
     aUsed[handle] = 0;
     aBodies[handle].aSleeping = true;
     aFreeHandles.push_back(handle);
+    aWarmContacts.clear(); // 句柄可能被复用，旧接触冲量不再对应当前刚体
     if(aBodyCount > 0) --aBodyCount;
     return true;
 }
@@ -219,9 +270,71 @@ void cPHYSICS_WORLD::Clear() {
     aBodyOfTreeSlot.clear();
     aBroadphase.Clear();
     aConstraints.clear();
+    aConstraintBodyLo.clear();
+    aConstraintBodyHi.clear();
+    aWarmContacts.clear();
     aAccumulator = 0.0f;
     aBodyCount = 0;
     aLastContactCount = 0;
+}
+
+// 用上一步的接触冲量预填本步约束：按刚体对匹配，再按接触点世界位置就近匹配（阈值 5cm）。
+// 找不到对应点就保持 0（该点冷启动）；刚体对无缓存时不预填。
+void cPHYSICS_WORLD::seedWarmStart(uint32_t bodyLo, uint32_t bodyHi, sCONTACT_CONSTRAINT &constraint) {
+    const uint32_t pointCount = constraint.aManifold.aCount > 4u ? 4u : constraint.aManifold.aCount;
+    for(uint32_t pi = 0; pi < 4; ++pi) {
+        constraint.aAccNormal[pi] = 0.0f;
+        constraint.aAccTangent[pi] = 0.0f;
+    }
+    for(size_t entry = 0; entry < aWarmContacts.size(); ++entry) {
+        const sWARM_CONTACT &cached = aWarmContacts[entry];
+        if(cached.aBodyLo != bodyLo || cached.aBodyHi != bodyHi) continue;
+        for(uint32_t pi = 0; pi < pointCount; ++pi) {
+            const GNg::sVEC3 &point = constraint.aManifold.aPoints[pi].aPoint;
+            float bestDistanceSq = kWarmStartMatchDistance * kWarmStartMatchDistance;
+            uint32_t matchIndex = 0xFFFFFFFFu;
+            for(uint32_t ci = 0; ci < cached.aPointCount; ++ci) {
+                const float dx = point.x - cached.aPoints[ci].x;
+                const float dy = point.y - cached.aPoints[ci].y;
+                const float dz = point.z - cached.aPoints[ci].z;
+                const float distanceSq = dx * dx + dy * dy + dz * dz;
+                if(distanceSq <= bestDistanceSq) {
+                    bestDistanceSq = distanceSq;
+                    matchIndex = ci;
+                }
+            }
+            if(matchIndex == 0xFFFFFFFFu) continue;
+            constraint.aAccNormal[pi] = cached.aAccNormal[matchIndex];
+            constraint.aAccTangent[pi] = cached.aAccTangent[matchIndex];
+        }
+        return; // 每对刚体最多一条缓存
+    }
+}
+
+// 把本子步求解后的累计冲量写入缓存，供下一子步 warm start。
+void cPHYSICS_WORLD::cacheContacts() {
+    aWarmContacts.clear();
+    if(aConstraints.empty()) return;
+    aWarmContacts.reserve(aConstraints.size());
+    for(size_t i = 0; i < aConstraints.size(); ++i) {
+        const sCONTACT_CONSTRAINT &constraint = aConstraints[i];
+        sWARM_CONTACT entry;
+        entry.aBodyLo = aConstraintBodyLo[i];
+        entry.aBodyHi = aConstraintBodyHi[i];
+        entry.aPointCount = constraint.aManifold.aCount > 4u ? 4u : constraint.aManifold.aCount;
+        for(uint32_t pi = 0; pi < 4; ++pi) {
+            if(pi < entry.aPointCount) {
+                entry.aPoints[pi] = constraint.aManifold.aPoints[pi].aPoint;
+            } else {
+                entry.aPoints[pi].x = 0.0f;
+                entry.aPoints[pi].y = 0.0f;
+                entry.aPoints[pi].z = 0.0f;
+            }
+            entry.aAccNormal[pi] = constraint.aAccNormal[pi];
+            entry.aAccTangent[pi] = constraint.aAccTangent[pi];
+        }
+        aWarmContacts.push_back(entry);
+    }
 }
 
 void cPHYSICS_WORLD::WakeBody(uint32_t handle) {
@@ -257,9 +370,10 @@ void cPHYSICS_WORLD::StepOnce(float dt) {
     IntegrateVelocities(dt);
     BuildContacts();
     if(!aConstraints.empty()) {
-        SolveVelocities(&aConstraints[0], (uint32_t)aConstraints.size(), dt, kVelocityIterations);
+        SolveVelocities(&aConstraints[0], (uint32_t)aConstraints.size(), dt, kVelocityIterations, true);
         SolvePositions(&aConstraints[0], (uint32_t)aConstraints.size(), kPositionIterations);
     }
+    cacheContacts(); // 本子步的累计冲量留给下一子步 warm start
     IntegratePositions(dt);
     UpdateSleep(dt);
     aLastContactCount = (uint32_t)aConstraints.size();
@@ -292,6 +406,8 @@ void cPHYSICS_WORLD::IntegrateVelocities(float dt) {
 
 void cPHYSICS_WORLD::BuildContacts() {
     aConstraints.clear();
+    aConstraintBodyLo.clear();
+    aConstraintBodyHi.clear();
 
     std::vector<uint32_t> candidates;
     std::vector<uint64_t> pairs;
@@ -341,11 +457,10 @@ void cPHYSICS_WORLD::BuildContacts() {
         constraint.aBodyA = &A;
         constraint.aBodyB = &B;
         constraint.aManifold = manifold;
-        for(int k = 0; k < 4; ++k) {
-            constraint.aAccNormal[k] = 0.0f;
-            constraint.aAccTangent[k] = 0.0f;
-        }
+        seedWarmStart(lo, hi, constraint); // 从上一子步的累计冲量预填（无匹配则清零）
         aConstraints.push_back(constraint);
+        aConstraintBodyLo.push_back(lo);
+        aConstraintBodyHi.push_back(hi);
     }
 }
 

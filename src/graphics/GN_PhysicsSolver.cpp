@@ -12,8 +12,8 @@
 //   * 摩擦：mu = sqrt(aFrictionA * aFrictionB)，库仑锥按接触点累计冲量钳制
 //     |jt| <= mu * jn（jn 为同一接触点的累计法向冲量）。
 //   * 位置修正：穿透超出 0.005 m 容差的部分乘 0.2，按有效质量分配，迭代 iterations 次。
-//   * 每个接触点的 aAccNormal/aAccTangent 在本次 SolveVelocities 开始时清零后累计
-//     （warm start 预留给后续版本，v1 每步清零）。
+//   * warm starting：调用方预填 aAccNormal/aAccTangent 时（warmStart=true），求解器先把这些
+//     累计冲量沿当前法线/切线施加到刚体速度，再以该累计值为起点迭代；否则起始清零。
 // 隔离编译链（任务指定）只提供 -Isrc/core、-Isrc/graphics 等目录，缺 GN.h 依赖的
 // src/file 等目录，无法引入整个 GN.h；这里补齐 GN_2Dmath.h 实际依赖的最小前置定义。
 // 整库构建中这些类型/宏分别来自 GN.h 与 GN_Base.h（重复 typedef 在 C++ 中合法，值一致）。
@@ -177,7 +177,8 @@ inline uint32_t clampPointCount(uint32_t count) {
 
 } // namespace
 
-void SolveVelocities(sCONTACT_CONSTRAINT *constraints, uint32_t count, float dt, uint32_t iterations) {
+void SolveVelocities(sCONTACT_CONSTRAINT *constraints, uint32_t count, float dt, uint32_t iterations,
+                     bool warmStart) {
     (void)dt; // 顺序冲量速度求解不直接使用步长（重力/积分由世界负责）。
     if(constraints == 0 || count == 0 || iterations == 0) return;
 
@@ -220,10 +221,35 @@ void SolveVelocities(sCONTACT_CONSTRAINT *constraints, uint32_t count, float dt,
                                                    cache.aRB[pi], cache.aTangent[pi]);
             const float normalSpeed = vec3Dot(relVel, normal);
             cache.aRestBias[pi] = (normalSpeed < -kRestThreshold) ? (-restitution * normalSpeed) : 0.0f;
-            constraint.aAccNormal[pi] = 0.0f;
-            constraint.aAccTangent[pi] = 0.0f;
+            if(!warmStart) {
+                constraint.aAccNormal[pi] = 0.0f;
+                constraint.aAccTangent[pi] = 0.0f;
+            }
         }
         cache.aPointCount = pointCount;
+    }
+
+    // warm start：沿本步的法线/切线重放上一步累计冲量（重放后迭代从该累计值继续）。
+    if(warmStart) {
+        for(uint32_t ci = 0; ci < count; ++ci) {
+            sCONTACT_CONSTRAINT &constraint = constraints[ci];
+            sVelocityCache &cache = caches[ci];
+            if(cache.aPointCount == 0) continue;
+            sRIGID_BODY *a = constraint.aBodyA;
+            sRIGID_BODY *b = constraint.aBodyB;
+            const bool movableA = bodyMovable(a);
+            const bool movableB = bodyMovable(b);
+            if(!movableA && !movableB) continue;
+            const GNg::sVEC3 normal = constraint.aManifold.aNormal;
+            for(uint32_t pi = 0; pi < cache.aPointCount; ++pi) {
+                const float accNormal = constraint.aAccNormal[pi];
+                const float accTangent = constraint.aAccTangent[pi];
+                if(accNormal == 0.0f && accTangent == 0.0f) continue;
+                const GNg::sVEC3 impulse = vec3Add(vec3Scale(normal, accNormal),
+                                                   vec3Scale(cache.aTangent[pi], accTangent));
+                applyPairImpulse(a, b, movableA, movableB, cache.aRA[pi], cache.aRB[pi], impulse);
+            }
+        }
     }
 
     for(uint32_t it = 0; it < iterations; ++it) {

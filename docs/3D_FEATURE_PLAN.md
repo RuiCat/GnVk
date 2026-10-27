@@ -1,14 +1,17 @@
 # 3D 能力扩展规划：空间划分 / 物理 / 粒子 / 动画 / 骨骼 / 布料 / 通用管线
 
 > 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存**）+ P4（空间划分）+
-> P5 v1（球/盒刚体物理）已落地（2026-10-27）；P1c、P5 剩余能力（胶囊/CCD/关节/warm start）与 P2+ 未开始。
+> P5 v1（球/盒刚体物理）+ P5b 前两项（胶囊形状、warm starting）已落地（2026-10-27）；
+> P1c、P5 剩余能力（CCD/关节/静态三角网/DebugDraw）与 P2+ 未开始。
 > 基线：C++11、Vulkan 1.4、Makefile 单一构建入口；现有 3D 为静态网格 + Blinn-Phong/PBR + 阴影/延迟/天空盒。
 > 约束：不破坏现有 `GN_VkDraw3D`/`GN_VkDrawPBR`/`cMODEL` API；新文件 camelCase，单功能 <500 有效行、多功能 <1000 有效行。
 > 2D 侧现有的 `GN_2DArea` 碰撞与 `cFRAME_LAUNCHER` 动画图筐发射器**保持不变**，新系统只服务 3D。
 >
-> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **134 cases, 0 failed, 0 assertions failed**
-> （基线 67 + P1a/P1b 22 + P4 11 + P5 34）；16/16 示例编译通过；`lintCodeModularity src/graphics --naming --comments`
-> 仅剩既有 `GN_2Dmath.cpp` 超限与既有 `gn3d_pbr_frag_spv.h` 告警，新增文件 0 违规 0 告警。
+> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **152 cases, 0 failed, 0 assertions failed**
+> （基线 67 + P1a/P1b 22 + P4 11 + P5 52）；`lintCodeModularity src/graphics tests/unit --naming --comments`
+> 仅剩既有 `GN_2Dmath.cpp` 超限与既有 `gn3d_pbr_frag_spv.h` 告警，新增/改动文件 0 违规 0 告警。
+> 物理新增文件有效行：`GN_Physics.cpp` 476、`GN_PhysicsSolver.cpp` 265、`GN_PhysicsBody.cpp` 196、
+> `GN_PhysicsCollision.cpp` 376、`GN_PhysicsCollisionCapsule.cpp` 319（均 <500）。
 > **重要边界**：本机无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）⇒ Vulkan 创建路径
 > （`cSHADER_CACHE` / `cPIPELINE_CACHE` 的 `vkCreate*` 调用）**只做了编译验证，未做运行时验证**；
 > P1b 已接入的 11 条管线必须在有 GPU 的桌面用**重新设计的测试体系**对照后才能算验收通过（原 `samples/` + `run.sh` 已移除，见 CHANGELOG 2026-10-27）。
@@ -295,8 +298,8 @@ struct sANIM_STATE {
 | P1b 契约补充 | ✅ | `aDepthBiasEnable/Constant/Slope`（阴影 1.25/1.75）；`aColorAttachmentCount==0` = 深度专用（无 FS、subpass 0、颜色混合 0 附件） |
 | P1c | ⏳ 未开始 | GPU 材质实例（管线 + 描述符集 + UBO/纹理） |
 | P4 | ✅ 完成 | `GN_Spatial.cpp`（AABB/射线/视锥）、`GN_SpatialBVH.cpp`、`GN_SpatialTree.cpp`、`testSpatial`（11 用例）；有效行 219/167/241/499 |
-| P5 | ✅ v1 完成（球/盒） | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线，371）、`GN_PhysicsCollision.cpp`（476）、`GN_PhysicsSolver.cpp`（241）；`testPhysics` 11 + `testPhysicsCollision` 10 + `testPhysicsSolver` 13 = 34 用例 |
-| P5 剩余 | ⏳ | 胶囊形状、warm starting、CCD、关节/约束、`AddStaticMesh` 三角网、`DebugDraw` 线框；P5b |
+| P5 | ✅ v1 + 胶囊 + warm start | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线/warm start 缓存，476）、`GN_PhysicsCollision.cpp`（dispatch，376）、`GN_PhysicsCollisionCapsule.cpp`（球/胶囊/盒-胶囊，319）、`GN_PhysicsBody.cpp`（构造/惯量/AABB，196）、`GN_PhysicsSolver.cpp`（265）；`testPhysics` 16 + `testPhysicsCollision` 10 + `testPhysicsSolver` 14 + `testPhysicsCapsule` 12 = 52 用例 |
+| P5 剩余 | ⏳ | CCD、关节/约束、`AddStaticMesh` 三角网、`DebugDraw` 线框；P5b。**已知限制**：6 层及以上堆叠持续下沉（3s 内顶层下沉约 1m），约 10s 内坍塌；5 层以内稳定入睡 |
 | P2/P3/P6–P9 | ⏳ 未开始 | —— |
 
 P4 的"剔除结果与暴力测试一致"验收已通过：BVH 512 盒 40 次 AABB 查询与暴力集合逐元素相等；射线 20 条与暴力最小 t 对照；
@@ -307,6 +310,16 @@ P5 v1 的验收：球从 2m 下落停在地面（y=r±0.05，静止后入睡）�
 两球对撞分离、运动学盒推动态球、射线命中最近刚体、休眠/唤醒、确定性（两次运行位差 bitwise 相等）、
 非法输入不崩溃。**修复记录**：位置修正原先按"接触点数 × 迭代次数"重复施加固定穿透（4×4≈3.2 倍），
 三层堆叠会被顶散；改为按 `pointCount × iterations` 均摊后稳定（`GN_PhysicsSolver.cpp:296-301`）。
+
+P5b 已验收部分（2026-10-27）：
+- **胶囊**：球/盒/胶囊两两窄相（`CollideBoxCapsule` 用线段-盒三分法 + 面流形 4 采样）、胶囊惯量/世界 AABB、
+  射线近似（沿轴 17 球采样，`GN_Physics.cpp:121` 注明误差）；`testPhysicsCapsule` 12 用例 + `testPhysics` 3 例。
+- **warm starting**：`sCONTACT_CONSTRAINT::aAccNormal/aAccTangent` 由世界按"刚体对 + 接触点 5cm 就近匹配"
+  从上一步缓存预填（`GN_Physics.cpp` `seedWarmStart`/`cacheContacts`），求解器先重放这些冲量再迭代；
+  实测 3/4/5 层堆叠入睡步数 91/塌/塌 → **29/29/63 步**，5 层堆叠 5s 内稳定入睡（`physicsTallStackStable`）。
+  `RemoveBody` 清空缓存（句柄复用）。缓存为空时与冷启动逐位一致（`testWarmStartEmptyCacheMatchesColdStart`）。
+- **仍不稳**：6 层及以上堆叠持续下沉（3s 内顶层下沉约 1m、约 10s 坍塌）——位置修正每步只消 20% 超容差穿透，
+  深堆叠累积穿透追不上；需在 P5b 下一项（CCD/约束）或专门求解器迭代里处理，当前不冒充已解决。
 
 ### 3.2 P1b 的契约演进与剩余缺口（2026-10-27 更新）
 
@@ -325,6 +338,17 @@ P5 v1 的验收：球从 2m 下落停在地面（y=r±0.05，静止后入睡）�
 3. 深度专用描述若误设 `aCustomBlend=true`，因子仍参与键与校验（虽然用不到）。
 4. 动态开关为 true 时 viewport/scissor 数值仍参与缓存键（站点统一留默认值；差异只多一次 miss，不影响正确性）。
 5. `Raycast` 要求 `dir` 已归一化；平行轴判定依赖 IEEE `1/0 = ±inf`（构建不得开 `-ffast-math`）。
+
+### 3.3 P5b 的契约演进（胶囊 / warm starting，2026-10-27）
+
+**头文件变更**（`GN_Physics.h`，均为新增，不破坏既有 4 参数调用）：
+1. `SolveVelocities(..., uint32_t iterations, bool warmStart = false)`；默认 false 时求解器仍清零后迭代。
+2. `cPHYSICS_WORLD` 私有区新增 `sWARM_CONTACT` 缓存、刚体对索引与 `seedWarmStart`/`cacheContacts`；
+   缓存不跨 `RemoveBody` / `Clear` 保值（句柄复用会清空）。
+3. `sCONTACT_CONSTRAINT::aAccNormal/aAccTangent` 语义改为"世界可预填的累计冲量"；字段与布局未变。
+
+**已知边界**：warm start 只重放**标量**冲量，切线方向按本步相对速度重算 ⇒ 高速滑动/旋转接触不保留历史切向
+（v1 近似）；接触点匹配半径 5cm，超出视为新接触（冷启动）；休眠体的接触不入缓存。
 
 ## 4. 关键决策（需拍板）
 

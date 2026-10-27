@@ -409,3 +409,23 @@ TEST_CASE(testDegenerateInputs) {
     SolvePositions(&array[0], 1, 0);
     CHECK(vecEquals(staticB.aPos, vec(1.0f, 0.0f, 0.0f)));
 }
+
+// warm start 在缓存为空（累计冲量全 0）时必须与冷启动逐位一致：新路径不引入额外偏差。
+TEST_CASE(testWarmStartEmptyCacheMatchesColdStart) {
+    sRIGID_BODY a1 = makeDynamicSphere(vec(0.0f, 0.0f, 0.0f), 1.0f, 1.0f);
+    sRIGID_BODY b1 = makeStaticBox(vec(2.0f, 0.0f, 0.0f), vec(1.0f, 1.0f, 1.0f));
+    a1.aLinVel = vec(1.0f, 0.0f, 0.0f);
+    sRIGID_BODY a2 = a1;
+    sRIGID_BODY b2 = b1;
+    const GNg::sVEC3 normal = vec(1.0f, 0.0f, 0.0f);
+    sCONTACT_CONSTRAINT cold = makeConstraint(&a1, &b1, normal, vec(1.0f, 0.0f, 0.0f), 0.05f);
+    sCONTACT_CONSTRAINT warm = makeConstraint(&a2, &b2, normal, vec(1.0f, 0.0f, 0.0f), 0.05f);
+
+    SolveVelocities(&cold, 1, kDt, 12);
+    SolveVelocities(&warm, 1, kDt, 12, true);
+
+    CHECK(std::memcmp(&a1.aLinVel, &a2.aLinVel, sizeof(GNg::sVEC3)) == 0);
+    CHECK(std::memcmp(&a1.aAngVel, &a2.aAngVel, sizeof(GNg::sVEC3)) == 0);
+    CHECK(cold.aAccNormal[0] == warm.aAccNormal[0]);
+    CHECK(cold.aAccTangent[0] == warm.aAccTangent[0]);
+}

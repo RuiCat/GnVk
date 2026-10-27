@@ -3,12 +3,13 @@
 #define _GN_PHYSICS_H_
 // ╔══════════════════════════════════════════════════════════╗
 // ║  GN_mini — 3D 刚体物理（自研最小实现，C++11，无新依赖）    ║
-// ║  v1 范围：球 / 盒，静态 / 动态 / 运动学，顺序冲量 + 位置修正 ║
+// ║  v1 范围：球 / 盒 / 胶囊，静态 / 动态 / 运动学，顺序冲量 + 位置修正 ║
 // ╚══════════════════════════════════════════════════════════╝
 //
 // 契约（冻结）：
 //   * 碰撞法线约定：`CollideBodies(A, B, out)` 的 `out.aNormal` **由 A 指向 B**，
 //     穿透深度 >= 0（=0 表示仅接触）；A/B 的世界状态必须已由 `BodyUpdateWorldState` 更新。
+//   * 形状（v1）：球 / 盒 / 胶囊；胶囊沿局部 Y 轴，质心在中点，aHalfExtent.y 为圆柱段半长。
 //   * 刚体质量：`aType != eBODY_DYNAMIC` 时 `aInvMass = 0`、`aInvInertiaLocal/World` 全零；
 //     运动学（kinematic）刚体的速度由调用方设置，世界按速度积分其位姿（也可直接改位姿），
 //     物理只推动态刚体。
@@ -36,7 +37,8 @@ enum eBODY_TYPE {
 
 enum eSHAPE_TYPE {
     eSHAPE_SPHERE = 0,
-    eSHAPE_BOX = 1
+    eSHAPE_BOX = 1,
+    eSHAPE_CAPSULE = 2 // 沿局部 Y 轴的胶囊：线段半长 aHalfExtent.y + 半径 aRadius
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -62,8 +64,10 @@ struct sRIGID_BODY {
     float aLinearDamping; // 每步速度衰减系数（默认 0.02）
     float aAngularDamping; // 默认 0.05
 
-    float aRadius; // 球半径（eSHAPE_SPHERE）
-    GNg::sVEC3 aHalfExtent; // 盒半尺寸（eSHAPE_BOX，各分量 > 0）
+    float aRadius; // 球/胶囊半径（eSHAPE_SPHERE / eSHAPE_CAPSULE，> 0）
+    // 盒半尺寸（eSHAPE_BOX，各分量 > 0）；胶囊只用 aHalfExtent.y 作为圆柱段半长（>= 0），
+    // 胶囊总半高 = aHalfExtent.y + aRadius，质心在胶囊中点。
+    GNg::sVEC3 aHalfExtent;
 
     bool aSleeping;
     float aSleepTime; // 连续低速累计秒数
@@ -89,7 +93,9 @@ struct sCONTACT_CONSTRAINT {
     sRIGID_BODY *aBodyA;
     sRIGID_BODY *aBodyB;
     sCONTACT_MANIFOLD aManifold;
-    float aAccNormal[4]; // 法向累计冲量（warm start 预留；v1 每步清零）
+    // 累计冲量：warm start 时由世界预填上一步的值，求解器沿新法线/切线重放后继续迭代；
+    // 冷启动（warmStart=false）由求解器清零。
+    float aAccNormal[4]; // 法向累计冲量
     float aAccTangent[4]; // 切向累计冲量
 };
 
@@ -99,6 +105,9 @@ struct sCONTACT_CONSTRAINT {
 sRIGID_BODY MakeSphereBody(eBODY_TYPE type, const GNg::sVEC3 &pos, float radius, float mass = 1.0f);
 sRIGID_BODY MakeBoxBody(eBODY_TYPE type, const GNg::sVEC3 &pos, const GNg::sVEC3 &halfExtent,
                         float mass = 1.0f);
+// 胶囊：沿局部 Y 轴，圆柱段半长 halfHeight，两端半球半径 radius
+sRIGID_BODY MakeCapsuleBody(eBODY_TYPE type, const GNg::sVEC3 &pos, float radius, float halfHeight,
+                            float mass = 1.0f);
 
 // 由 shape + mass 计算 aInvMass / aInvInertiaLocal（会按 shape 校验参数）
 void BodyUpdateInertia(sRIGID_BODY &body);
@@ -113,9 +122,11 @@ bool CollideBodies(const sRIGID_BODY &a, const sRIGID_BODY &b, sCONTACT_MANIFOLD
 // ═══════════════════════════════════════════════════════════
 //  求解器（无世界依赖，可单测）
 // ═══════════════════════════════════════════════════════════
-// 顺序冲量：法向 + 摩擦，iterations 次迭代；不改位置
-void SolveVelocities(sCONTACT_CONSTRAINT *constraints, uint32_t count, float dt,
-                     uint32_t iterations);
+// 顺序冲量：法向 + 摩擦，iterations 次迭代；不改位置。
+// warmStart=true 表示调用方已把上一步的累计冲量预填到 aAccNormal/aAccTangent：
+// 求解器先沿当前法线/切线施加这些冲量，再以该累计值继续迭代（不清零）。
+void SolveVelocities(sCONTACT_CONSTRAINT *constraints, uint32_t count, float dt, uint32_t iterations,
+                     bool warmStart = false);
 // 位置修正（Baumgarte/伪速度式，只推位置，不改速度）
 void SolvePositions(sCONTACT_CONSTRAINT *constraints, uint32_t count, uint32_t iterations);
 
@@ -151,11 +162,23 @@ class cPHYSICS_WORLD {
     void WakeBody(uint32_t handle);
 
   private:
+    // 上一步的接触冲量缓存（warm start）：按刚体对 + 接触点位置匹配到本步的新流形。
+    struct sWARM_CONTACT {
+        uint32_t aBodyLo;
+        uint32_t aBodyHi;
+        uint32_t aPointCount;
+        GNg::sVEC3 aPoints[4];
+        float aAccNormal[4];
+        float aAccTangent[4];
+    };
+
     void StepOnce(float fixedDt);
     void IntegrateVelocities(float fixedDt);
     void IntegratePositions(float fixedDt);
     void BuildContacts();
     void UpdateSleep(float fixedDt);
+    void seedWarmStart(uint32_t bodyLo, uint32_t bodyHi, sCONTACT_CONSTRAINT &constraint);
+    void cacheContacts();
 
     std::vector<sRIGID_BODY> aBodies;
     std::vector<uint8_t> aUsed;
@@ -164,6 +187,9 @@ class cPHYSICS_WORLD {
     std::vector<uint32_t> aBodyOfTreeSlot; // broadphase 槽位 → 句柄
     cDYNAMIC_AABB_TREE aBroadphase;
     std::vector<sCONTACT_CONSTRAINT> aConstraints;
+    std::vector<uint32_t> aConstraintBodyLo; // 与 aConstraints 同索引的刚体对（小/大句柄）
+    std::vector<uint32_t> aConstraintBodyHi;
+    std::vector<sWARM_CONTACT> aWarmContacts; // 上一步接触冲量（本步 warm start 的输入）
     GNg::sVEC3 aGravity;
     float aFixedStep;
     float aAccumulator;
