@@ -150,6 +150,7 @@ extern GN_API unsigned int GT_SystemInited; //标记引擎系统各部分是否�
 #include "GN_Physics.h" //3D刚体物理 球/盒/胶囊/关节/三角网
 #include "GN_3Dcloth.h" //布料 XPBD（CPU 模拟；GPU 上传留 P8/P9）
 #include "GN_3Dparticle.h" //3D 粒子池/发射器（CPU 模拟；实例上传留 P8）
+#include "GN_3Danim.h" //3D 动画 clip 采样/混合/状态机（CPU）
 #endif
 #include "GN_Linear.h" //线性插值与曲线插值等功能
 #include "GN_2DArea.h" //2D空间区域构造与2D碰撞检测等功能

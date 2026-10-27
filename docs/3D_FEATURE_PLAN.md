@@ -2,19 +2,19 @@
 
 > 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存**）+ P4（空间划分）+
 > P5 v1（球/盒刚体物理）+ P5b 全部六项（胶囊、warm starting、CCD v1、DebugDraw、关节/约束、静态三角网）已落地；
-> P6 布料 XPBD 与 P7 3D 粒子的 **CPU 模拟**已落地（GPU 上传/绘制留 P8/P9）；P1c 与 P2/P3/P8–P9 未开始
->（P4 空间划分已完成，接入渲染属 P8）。
+> P6 布料 XPBD、P7 3D 粒子与 P3 动画（clip/混合/状态机）的 **CPU 部分**已落地（GPU 上传/绘制留 P8/P9）；
+> P2 glTF+骨骼、P1c 与 P8–P9 未开始（P4 空间划分已完成，接入渲染属 P8）。
 > 基线：C++11、Vulkan 1.4、Makefile 单一构建入口；现有 3D 为静态网格 + Blinn-Phong/PBR + 阴影/延迟/天空盒。
 > 约束：不破坏现有 `GN_VkDraw3D`/`GN_VkDrawPBR`/`cMODEL` API；新文件 camelCase，单功能 <500 有效行、多功能 <1000 有效行。
 > 2D 侧现有的 `GN_2DArea` 碰撞与 `cFRAME_LAUNCHER` 动画图筐发射器**保持不变**，新系统只服务 3D。
 >
-> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **182 cases, 0 failed, 0 assertions failed**
-> （基线 67 + P1a/P1b 22 + P4 11 + P5 70 + P6 6 + P7 6）；`lintCodeModularity src/graphics tests/unit --naming --comments`
+> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **188 cases, 0 failed, 0 assertions failed**
+> （基线 67 + P1a/P1b 22 + P4 11 + P5 70 + P6 6 + P7 6 + P3 6）；`lintCodeModularity src/graphics tests/unit --naming --comments`
 > 仅剩既有 `GN_2Dmath.cpp` 超限与既有 `gn3d_pbr_frag_spv.h` 告警，新增/改动文件 0 违规 0 告警。
 > 物理文件有效行：`GN_Physics.cpp` 498（只剩 2 行余量，再加逻辑必须迁出）、`GN_PhysicsSolver.cpp` 265、
 > `GN_PhysicsJoint.cpp` 380、`GN_PhysicsMesh.cpp` 212、`GN_PhysicsCcd.cpp` 112、`GN_PhysicsDebug.cpp` 108、
 > `GN_PhysicsBody.cpp` 196、`GN_PhysicsCollision.cpp` 376、`GN_PhysicsCollisionCapsule.cpp` 319；
-> 布料 `GN_3Dcloth.cpp` 234、粒子 `GN_3Dparticle.cpp` 170（均 <500）。
+> 布料 `GN_3Dcloth.cpp` 234、粒子 `GN_3Dparticle.cpp` 170、动画 `GN_3Danim.cpp` 190（均 <500）。
 > **重要边界**：本机无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）⇒ Vulkan 创建路径
 > （`cSHADER_CACHE` / `cPIPELINE_CACHE` 的 `vkCreate*` 调用）**只做了编译验证，未做运行时验证**；
 > P1b 已接入的 11 条管线必须在有 GPU 的桌面用**重新设计的测试体系**对照后才能算验收通过（原 `samples/` + `run.sh` 已移除，见 CHANGELOG 2026-10-27）。
@@ -305,7 +305,8 @@ struct sANIM_STATE {
 | P5 剩余 | ✅ 完成 | P5b 六项全部落地。**已知限制**：7 层及以上堆叠坍塌（30/40 次速度迭代都复现）；盒对静态三角网 v1 未实现（球/胶囊可用）；三角网接触不参与 warm start |
 | P6 | ✅ CPU 模拟（GPU 上传/绘制留 P8/P9） | `GN_3Dcloth.h`（58）/`GN_3Dcloth.cpp`（234）：规则网格、XPBD 距离约束（结构/剪切/弯曲）、球体碰撞、法线重建；`testCloth` 6 用例（参数/拓扑、固定角+下垂+侧风、球碰撞、确定性、Reset、法线） |
 | P7 | ✅ CPU 模拟（实例上传/绘制留 P8） | `GN_3Dparticle.h`（59）/`GN_3Dparticle.cpp`（170）：固定池、按速率发射、圆锥随机方向（固定 xorshift 种子）、重力/阻尼、寿命回收、颜色插值；`testParticle` 6 用例（参数、发射/寿终、容量、重力、确定性、Reset） |
-| P2/P3/P8–P9 | ⏳ 未开始 | —— |
+| P3 | ✅ CPU（glTF 导入留 P2，GPU 蒙皮留 P8/P9） | `GN_3Danim.h`（56）/`GN_3Danim.cpp`（190）：通道采样 STEP/LINEAR + 旋转 slerp、clip duration、`cANIM_PLAYER` 的 loop/crossFade/非循环停住；`testAnimation` 6 用例（采样/STEP/slerp、未覆盖节点、loop、crossFade、非循环停住） |
+| P2/P8–P9 | ⏳ 未开始 | —— |
 
 P4 的"剔除结果与暴力测试一致"验收已通过：BVH 512 盒 40 次 AABB 查询与暴力集合逐元素相等；射线 20 条与暴力最小 t 对照；
 视锥 300 点/300 盒分别与"投影后 NDC 判定"和"8 角点全在外侧"暴力判据对照；动态树 350 步随机 Insert/Update/Remove
@@ -349,6 +350,11 @@ P6 v1 的验收（CPU）：5×5 软布四角固定后重力下垂、侧风把中
 P7 v1 的验收（CPU）：参数非法拒绝；`rate=100, dt=0.1` 发射 10 个；停发后按寿命全部回收；发射速率远大于容量时
 存活数钳在 `maxParticles`；初速 0 的粒子在重力下 `v.y = g*dt` 且位置向下；同参数两次模拟池内容逐位一致；
 `reset()` 清空存活粒子并保留容量/参数。**边界**：无纹理/混合模式/GPU 实例缓冲（`Upload`/`Draw` 留 P8）。
+
+P3 v1 的验收（CPU）：LINEAR 平移中点/STEP 取前一帧、旋转最短弧 slerp（identity→90° 在 t=0.5 为 45°）、
+未覆盖节点返回 false 且不改 out、loop 按 duration 回绕、crossFade 权重线性过渡并在结束后切到下一段、
+非循环到末尾停住且采样停在最后一帧。**边界**：CUBICSPLINE 未实现；glTF clip 导入依赖 P2；无骨骼/蒙皮
+（GPU 蒙皮留 P8/P9）。
 - **仍不稳**：7 层及以上堆叠坍塌（30/40 次迭代都复现）。定位：每步强制唤醒的 6 层对照仍坍塌 ⇒ 排除休眠路径，
   是速度迭代预算/收敛不足；6 层在 20 次迭代下会下沉、30 次迭代后稳定（本项已把上限由 5 层提到 6 层）。
 
@@ -390,6 +396,8 @@ P7 v1 的验收（CPU）：参数非法拒绝；`rate=100, dt=0.1` 发射 10 个
    GPU 上传/绘制未做（P8/P9）。
 9. 新增 `GN_3Dparticle.h`（`sPARTICLE` / `sPARTICLE_EMITTER_DESC` / `cPARTICLE_SYSTEM`）并接入 `GN.h`；
    纯 CPU 池模拟，实例上传/绘制未做（P8）。
+10. 新增 `GN_3Danim.h`（`sANIM_CHANNEL` / `sANIM_TRANSFORM` / `sANIM_CLIP` / `cANIM_PLAYER`）并接入 `GN.h`；
+    采样/混合/状态机纯 CPU，glTF 导入留 P2，GPU 蒙皮留 P8/P9。
 
 **已知边界**：warm start 只重放**标量**冲量，切线方向按本步相对速度重算 ⇒ 高速滑动/旋转接触不保留历史切向
 （v1 近似）；接触点匹配半径 5cm，超出视为新接触（冷启动）；休眠体的接触不入缓存。
