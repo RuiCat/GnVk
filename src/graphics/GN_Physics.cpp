@@ -171,8 +171,8 @@ const uint32_t cPHYSICS_WORLD::INVALID_HANDLE;
 // ═══════════════════════════════════════════════════════════
 
 cPHYSICS_WORLD::cPHYSICS_WORLD()
-    : aGravity{0.0f, -9.81f, 0.0f}, aFixedStep(1.0f / 60.0f), aAccumulator(0.0f),
-      aMaxSubSteps(4), aBodyCount(0), aLastContactCount(0) {}
+    : aContinuousCollision(false), aGravity{0.0f, -9.81f, 0.0f}, aFixedStep(1.0f / 60.0f),
+      aAccumulator(0.0f), aMaxSubSteps(4), aBodyCount(0), aLastContactCount(0) {}
 
 cPHYSICS_WORLD::~cPHYSICS_WORLD() {
     Clear();
@@ -273,6 +273,7 @@ void cPHYSICS_WORLD::Clear() {
     aConstraintBodyLo.clear();
     aConstraintBodyHi.clear();
     aWarmContacts.clear();
+    aPreviousPositions.clear();
     aAccumulator = 0.0f;
     aBodyCount = 0;
     aLastContactCount = 0;
@@ -374,7 +375,14 @@ void cPHYSICS_WORLD::StepOnce(float dt) {
         SolvePositions(&aConstraints[0], (uint32_t)aConstraints.size(), kPositionIterations);
     }
     cacheContacts(); // 本子步的累计冲量留给下一子步 warm start
+    if(aContinuousCollision) {
+        aPreviousPositions.resize(aBodies.size());
+        for(size_t i = 0; i < aBodies.size(); ++i) {
+            if(aUsed[i]) aPreviousPositions[i] = aBodies[i].aPos;
+        }
+    }
     IntegratePositions(dt);
+    if(aContinuousCollision) resolveContinuousCollisions();
     UpdateSleep(dt);
     aLastContactCount = (uint32_t)aConstraints.size();
 }

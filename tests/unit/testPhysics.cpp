@@ -102,6 +102,81 @@ TEST_CASE(physicsTallStackStable) {
     }
 }
 
+// CCD v1：薄地面（顶面 y=0、厚 0.1），半径 0.1 的球以 120 m/s 下落（一步位移约 2m）。
+// 开 CCD 时在 TOI 处停住且进入方向法向速度清零；不开则中心穿到地面顶面以下。
+TEST_CASE(physicsCcdPreventsTunneling) {
+    cPHYSICS_WORLD fast;
+    fast.AddBody(MakeBoxBody(eBODY_STATIC, GNg::sVEC3{0.0f, -0.05f, 0.0f},
+                             GNg::sVEC3{10.0f, 0.05f, 10.0f}, 0.0f));
+    sRIGID_BODY fastBall = MakeSphereBody(eBODY_DYNAMIC, GNg::sVEC3{0.0f, 2.0f, 0.0f}, 0.1f, 1.0f);
+    fastBall.aLinVel.y = -120.0f;
+    const uint32_t fastHandle = fast.AddBody(fastBall);
+    CHECK(fastHandle != cPHYSICS_WORLD::INVALID_HANDLE);
+    fast.setContinuousCollision(true);
+    fast.Step(1.0f / 60.0f);
+
+    const sRIGID_BODY *stopped = fast.GetBody(fastHandle);
+    CHECK(stopped != 0);
+    if(!stopped) return;
+    CHECK(stopped->aPos.y > 0.09f); // 停在地面顶面 + 半径附近（不是穿过去）
+    CHECK(stopped->aPos.y < 0.11f);
+    CHECK(stopped->aLinVel.y > -0.01f); // 进入方向的法向速度已清零
+
+    // 对照组：同一初态不开 CCD，一步后球心已在地面顶面以下（穿透未被拦）。
+    cPHYSICS_WORLD tunnel;
+    tunnel.AddBody(MakeBoxBody(eBODY_STATIC, GNg::sVEC3{0.0f, -0.05f, 0.0f},
+                               GNg::sVEC3{10.0f, 0.05f, 10.0f}, 0.0f));
+    sRIGID_BODY tunnelBall = MakeSphereBody(eBODY_DYNAMIC, GNg::sVEC3{0.0f, 2.0f, 0.0f}, 0.1f, 1.0f);
+    tunnelBall.aLinVel.y = -120.0f;
+    const uint32_t tunnelHandle = tunnel.AddBody(tunnelBall);
+    CHECK(tunnelHandle != cPHYSICS_WORLD::INVALID_HANDLE);
+    tunnel.Step(1.0f / 60.0f);
+
+    const sRIGID_BODY *passed = tunnel.GetBody(tunnelHandle);
+    CHECK(passed != 0);
+    if(!passed) return;
+    CHECK(passed->aPos.y < 0.05f);
+}
+
+// CCD 对胶囊同样有效（包围半径 = 圆柱半长 + 半径），两步内被薄地面拦住。
+TEST_CASE(physicsCcdCapsuleStops) {
+    cPHYSICS_WORLD world;
+    world.setContinuousCollision(true);
+    world.AddBody(MakeBoxBody(eBODY_STATIC, GNg::sVEC3{0.0f, -0.05f, 0.0f},
+                              GNg::sVEC3{10.0f, 0.05f, 10.0f}, 0.0f));
+    sRIGID_BODY capsule = MakeCapsuleBody(eBODY_DYNAMIC, GNg::sVEC3{0.0f, 3.0f, 0.0f}, 0.2f, 0.5f, 1.0f);
+    capsule.aLinVel.y = -90.0f;
+    const uint32_t handle = world.AddBody(capsule);
+    CHECK(handle != cPHYSICS_WORLD::INVALID_HANDLE);
+
+    for(int i = 0; i < 4; ++i) world.Step(1.0f / 60.0f);
+
+    const sRIGID_BODY *body = world.GetBody(handle);
+    CHECK(body != 0);
+    if(!body) return;
+    CHECK(AllFinite(body->aPos));
+    CHECK(body->aPos.y > 0.65f); // 竖直胶囊落在半径 0.7 附近
+    CHECK(body->aPos.y < 0.75f);
+}
+
+// CCD 开启不影响常速接触：普通下落仍静止在地面并入睡。
+TEST_CASE(physicsCcdKeepsNormalContacts) {
+    cPHYSICS_WORLD world;
+    world.setContinuousCollision(true);
+    AddGround(world);
+    const uint32_t handle = world.AddBody(
+        MakeSphereBody(eBODY_DYNAMIC, GNg::sVEC3{0.0f, 2.0f, 0.0f}, 0.5f, 1.0f));
+    CHECK(handle != cPHYSICS_WORLD::INVALID_HANDLE);
+
+    for(int i = 0; i < 240; ++i) world.Step(1.0f / 60.0f);
+
+    const sRIGID_BODY *body = world.GetBody(handle);
+    CHECK(body != 0);
+    if(!body) return;
+    CHECK_NEAR(body->aPos.y, 0.5f, 0.05f);
+    CHECK(body->aSleeping);
+}
+
 TEST_CASE(physicsHeadOnSpheresSeparate) {
     cPHYSICS_WORLD world;
     world.SetGravity(GNg::sVEC3{0.0f, 0.0f, 0.0f});

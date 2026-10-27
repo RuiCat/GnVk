@@ -161,6 +161,13 @@ class cPHYSICS_WORLD {
     // 唤醒指定刚体（无效句柄无操作）。调用方直接改速度后应调用它。
     void WakeBody(uint32_t handle);
 
+    // 连续碰撞（CCD v1）：默认关闭。开启后每个子步用「上一位置 → 目标位置」的线段扫掠
+    // 静态/运动学刚体的世界 AABB（按本刚体包围半径扩展），在最早 TOI 处钳住并清零进入方向的
+    // 法向速度。近似边界见 GN_PhysicsCcd.cpp 文件头（保守扩展、不扫掠运动学目标的步内运动、
+    // 不施加恢复系数、只处理动态且醒着的刚体）。
+    void setContinuousCollision(bool enabled);
+    bool getContinuousCollision() const { return aContinuousCollision; }
+
   private:
     // 上一步的接触冲量缓存（warm start）：按刚体对 + 接触点位置匹配到本步的新流形。
     struct sWARM_CONTACT {
@@ -179,6 +186,7 @@ class cPHYSICS_WORLD {
     void UpdateSleep(float fixedDt);
     void seedWarmStart(uint32_t bodyLo, uint32_t bodyHi, sCONTACT_CONSTRAINT &constraint);
     void cacheContacts();
+    void resolveContinuousCollisions();
 
     std::vector<sRIGID_BODY> aBodies;
     std::vector<uint8_t> aUsed;
@@ -190,6 +198,8 @@ class cPHYSICS_WORLD {
     std::vector<uint32_t> aConstraintBodyLo; // 与 aConstraints 同索引的刚体对（小/大句柄）
     std::vector<uint32_t> aConstraintBodyHi;
     std::vector<sWARM_CONTACT> aWarmContacts; // 上一步接触冲量（本步 warm start 的输入）
+    std::vector<GNg::sVEC3> aPreviousPositions; // 本子步积分前的质心位置（CCD 扫掠起点）
+    bool aContinuousCollision; // CCD v1 开关（默认 false）
     GNg::sVEC3 aGravity;
     float aFixedStep;
     float aAccumulator;
