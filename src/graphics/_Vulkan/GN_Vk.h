@@ -7,6 +7,7 @@
 #include <GLFW/glfw3.h>
 #include <cstring>
 #include <cstdlib>
+#include "GN_Pipeline.h" // P1b：管线缓存以值成员持有，需完整类型
 
 namespace GNg {
 // ═══════════════════════════════════════════════════════════
@@ -148,6 +149,8 @@ struct GN_VkContext {
     VkFramebuffer *framebuffers;
     VkRenderPass renderPass;
     VkPipelineLayout pipelineLayout;
+    // P1b：2D 4 条 + 3D 前向/PBR 管线由缓存创建并持有（Release 必须在 vkDestroyDevice 之前）
+    GN3d::cPIPELINE_CACHE aPipelineCache;
     VkPipeline pipeline;
     VkPipeline pipelineBright; // additive blend for eBLEND_BRIGHT
     VkPipeline pipelineMultiply; // multiply blend for eBLEND_MODULATE
@@ -378,6 +381,7 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
 
 // 结束 3D 渲染 pass (切换回 2D 管线)
 void GN_VkEnd3DPass();
+
 
 // 提交 3D 模型绘制 (PBR 模式: 使用 roughness/metallic/ao, 支持纹理/法线贴图)
 void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,

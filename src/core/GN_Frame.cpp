@@ -2184,7 +2184,7 @@ void GNg::cFRAME_LAUNCHER_FONT::ControlActFromMouseAuto(bool yes, short onDown) 
     zActMouseKey = onDown > 4 ? 4 : (int8)onDown; //防止超出鼠标键范围
 }
 /********************************************************* cLENS_FLARE ********************************************************************************/
-static const char *GT_DefLensFlareFilePath = "eft/camerabright_"; //默认光环式样文件路径
+static const char *GT_DefLensFlareFilePath = "effects/camerabright_"; //默认光环式样文件路径（assets/effects/，与仓库资源目录一致）
 
 bool GNg::cLENS_FLARE::InitToData(char *imgfile_name, float size, unsigned int flash_interval, unsigned char flash_value, short ScreenW, short ScreenH) {
     zImg.Release();

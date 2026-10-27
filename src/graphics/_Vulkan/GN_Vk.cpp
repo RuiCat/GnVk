@@ -136,6 +136,8 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     dci.ppEnabledExtensionNames = dexts;
     VkCheck(vkCreateDevice(GN_Vk.physicalDevice, &dci, 0, &GN_Vk.device), "vkCreateDevice");
     vkGetDeviceQueue(GN_Vk.device, GN_Vk.graphicsFamily, 0, &GN_Vk.graphicsQueue);
+    // P1b：设备就绪后初始化管线缓存（所有缓存的管线在 GN_VkShutdown 里统一 Release）
+    GN_Vk.aPipelineCache.Init(GN_Vk.device);
 
     // Swapchain
     VkSurfaceCapabilitiesKHR caps;
@@ -196,9 +198,6 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
 // Shaders — 必须从 .spv 文件加载 (make shaders 编译 GLSL→SPIR-V)
 #include "gn2d_vert_spv.h"
 #include "gn2d_frag_spv.h"
-    VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-    VkShaderModule vm, fm;
-
     auto vertSpv = LoadSPIRVFile("assets/shaders/gn2d.vert.spv");
     auto fragSpv = LoadSPIRVFile("assets/shaders/gn2d.frag.spv");
 
@@ -210,64 +209,8 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
         fprintf(stderr, "[GN_Vk] FATAL: 无法加载着色器 assets/shaders/gn2d.frag.spv\n");
         return;
     }
-    sm.codeSize = vertSpv.size() * sizeof(uint32_t);
-    sm.pCode = vertSpv.data();
-    vkCreateShaderModule(GN_Vk.device, &sm, 0, &vm);
 
-    sm.codeSize = fragSpv.size() * sizeof(uint32_t);
-    sm.pCode = fragSpv.data();
-    vkCreateShaderModule(GN_Vk.device, &sm, 0, &fm);
-
-    // Pipeline
-    VkPipelineShaderStageCreateInfo ss[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}, {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-    ss[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    ss[0].module = vm;
-    ss[0].pName = "main";
-    ss[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    ss[1].module = fm;
-    ss[1].pName = "main";
-
-    VkVertexInputBindingDescription vib = {0, sizeof(VkVertex), VK_VERTEX_INPUT_RATE_VERTEX};
-    VkVertexInputAttributeDescription via[4] = {{0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, x)}, {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, u)}, {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VkVertex, r)}};
-    VkPipelineVertexInputStateCreateInfo vis = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-    vis.vertexBindingDescriptionCount = 1;
-    vis.pVertexBindingDescriptions = &vib;
-    vis.vertexAttributeDescriptionCount = 3;
-    vis.pVertexAttributeDescriptions = via;
-    VkPipelineInputAssemblyStateCreateInfo ias = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    ias.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkViewport vp = {0, 0, (float)GN_Vk.swapchainExtent.width, (float)GN_Vk.swapchainExtent.height, 0, 1};
-    VkRect2D sc = {{0, 0}, GN_Vk.swapchainExtent};
-    VkPipelineViewportStateCreateInfo vps = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-    vps.viewportCount = 1;
-    vps.pViewports = &vp;
-    vps.scissorCount = 1;
-    vps.pScissors = &sc;
-    VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-    rs.polygonMode = VK_POLYGON_MODE_FILL;
-    rs.cullMode = VK_CULL_MODE_BACK_BIT;
-    rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
-    rs.lineWidth = 1.0f;
-    VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState cba = {};
-    cba.blendEnable = VK_TRUE;
-    cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    cba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    cba.colorBlendOp = VK_BLEND_OP_ADD;
-    cba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    cba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-    cba.colorWriteMask = 0xf;
-    VkPipelineColorBlendStateCreateInfo cbs = {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    cbs.attachmentCount = 1;
-    cbs.pAttachments = &cba;
-
-    // Dynamic state: scissor (for UI clipping)
-    VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dsci = {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-    dsci.dynamicStateCount = 1;
-    dsci.pDynamicStates = dynamicStates;
-
+    // 描述符布局与管线布局必须先于管线创建（缓存只接收已有的 VkPipelineLayout）
     VkDescriptorSetLayoutBinding dslb[2] = {};
     dslb[0].binding = 0;
     dslb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -286,52 +229,61 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     plci.pSetLayouts = &GN_Vk.descriptorLayout;
     VkCheck(vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &GN_Vk.pipelineLayout), "vkCreatePipelineLayout");
 
-    VkGraphicsPipelineCreateInfo pci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-    pci.stageCount = 2;
-    pci.pStages = ss;
-    pci.pVertexInputState = &vis;
-    pci.pInputAssemblyState = &ias;
-    pci.pViewportState = &vps;
-    pci.pRasterizationState = &rs;
-    pci.pMultisampleState = &ms;
-    pci.pColorBlendState = &cbs;
-    pci.pDynamicState = &dsci;
-    pci.layout = GN_Vk.pipelineLayout;
-    pci.renderPass = GN_Vk.renderPass;
-    pci.subpass = 0;
-    VkCheck(vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.pipeline), "vkCreateGraphicsPipelines");
-    // Additive blend pipeline (also needs dynamic state)
-    pci.pDynamicState = &dsci;
-    // Additive blend pipeline (eBLEND_BRIGHT)
-    {
-        VkPipelineColorBlendAttachmentState cbaAdd = cba;
-        cbaAdd.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        VkPipelineColorBlendStateCreateInfo cbsAdd = cbs;
-        cbsAdd.pAttachments = &cbaAdd;
-        pci.pColorBlendState = &cbsAdd;
-        vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.pipelineBright);
+    // Pipeline（P1b：改由 cPIPELINE_CACHE 创建；描述字段逐项对齐旧 VkPipelineCreateInfo）
+    // 顶点布局：0=pos(vec2) 1=uv(vec2) 2=color(vec4)，单一 binding、stride=sizeof(VkVertex)
+    GN3d::sVERTEX_LAYOUT layout2D;
+    layout2D.Add(0, (uint32_t)offsetof(VkVertex, x), VK_FORMAT_R32G32_SFLOAT);
+    layout2D.Add(1, (uint32_t)offsetof(VkVertex, u), VK_FORMAT_R32G32_SFLOAT);
+    layout2D.Add(2, (uint32_t)offsetof(VkVertex, r), VK_FORMAT_R32G32B32A32_SFLOAT);
+    layout2D.aStride = (uint32_t)sizeof(VkVertex);
+
+    GN3d::sPIPELINE_DESC desc2D;
+    desc2D.aKind = GN3d::ePIPE_GRAPHICS;
+    desc2D.aVertSpv = vertSpv.data();
+    desc2D.aVertSize = vertSpv.size() * sizeof(uint32_t);
+    desc2D.aFragSpv = fragSpv.data();
+    desc2D.aFragSize = fragSpv.size() * sizeof(uint32_t);
+    desc2D.aVertexLayout = layout2D;
+    desc2D.aRenderPass = GN_Vk.renderPass; // 只有颜色附件，无深度
+    desc2D.aSubpass = 0;
+    desc2D.aLayout = GN_Vk.pipelineLayout;
+    desc2D.aDepthTest = false;
+    desc2D.aDepthWrite = false;
+    desc2D.aDepthStencil = false; // 旧 2D 管线 pDepthStencilState = 空
+    desc2D.aCullBack = true;
+    desc2D.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+    desc2D.aBlend = GN3d::eBLEND_NONE;
+    desc2D.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    desc2D.aSamples = VK_SAMPLE_COUNT_1_BIT;
+    desc2D.aColorAttachmentCount = 1;
+    desc2D.aDynamicViewport = false; // 旧 2D 管线视口固定
+    desc2D.aViewport = VkViewport{0.0f, 0.0f, (float)GN_Vk.swapchainExtent.width,
+                                  (float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
+    desc2D.aDynamicScissor = true; // 旧 2D 管线仅 SCISSOR 动态（UI 裁剪）
+    desc2D.aScissor = VkRect2D{{0, 0}, GN_Vk.swapchainExtent};
+    // 旧 2D 混合：color=(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)，alpha=(ONE, ZERO)
+    desc2D.aCustomBlend = true;
+    desc2D.aBlendSrcColor = VK_BLEND_FACTOR_SRC_ALPHA;
+    desc2D.aBlendDstColor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    desc2D.aBlendSrcAlpha = VK_BLEND_FACTOR_ONE;
+    desc2D.aBlendDstAlpha = VK_BLEND_FACTOR_ZERO;
+    GN_Vk.pipeline = GN_Vk.aPipelineCache.GetOrCreate(desc2D);
+
+    desc2D.aBlendDstColor = VK_BLEND_FACTOR_ONE; // eBLEND_BRIGHT（加法）
+    GN_Vk.pipelineBright = GN_Vk.aPipelineCache.GetOrCreate(desc2D);
+
+    desc2D.aBlendSrcColor = VK_BLEND_FACTOR_DST_COLOR; // eBLEND_MODULATE（乘法）
+    desc2D.aBlendDstColor = VK_BLEND_FACTOR_ZERO;
+    GN_Vk.pipelineMultiply = GN_Vk.aPipelineCache.GetOrCreate(desc2D);
+
+    desc2D.aCustomBlend = false; // eBLEND_NULL（不混合）
+    desc2D.aBlend = GN3d::eBLEND_NONE;
+    GN_Vk.pipelineNull = GN_Vk.aPipelineCache.GetOrCreate(desc2D);
+
+    if(!GN_Vk.pipeline || !GN_Vk.pipelineBright || !GN_Vk.pipelineMultiply || !GN_Vk.pipelineNull) {
+        fprintf(stderr, "[GN_Vk] FATAL: 2D 管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        return;
     }
-    // Multiply blend pipeline (eBLEND_MODULATE = 11)
-    {
-        VkPipelineColorBlendAttachmentState cbaMul = cba;
-        cbaMul.srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
-        cbaMul.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
-        VkPipelineColorBlendStateCreateInfo cbsMul = cbs;
-        cbsMul.pAttachments = &cbaMul;
-        pci.pColorBlendState = &cbsMul;
-        vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.pipelineMultiply);
-    }
-    // No-blend pipeline (eBLEND_NULL = 0)
-    {
-        VkPipelineColorBlendAttachmentState cbaNull = cba;
-        cbaNull.blendEnable = VK_FALSE;
-        VkPipelineColorBlendStateCreateInfo cbsNull = cbs;
-        cbsNull.pAttachments = &cbaNull;
-        pci.pColorBlendState = &cbsNull;
-        vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.pipelineNull);
-    }
-    vkDestroyShaderModule(GN_Vk.device, vm, 0);
-    vkDestroyShaderModule(GN_Vk.device, fm, 0);
 
     // Framebuffers
     GN_Vk.framebuffers = new VkFramebuffer[GN_Vk.swapchainImageCount];
@@ -499,6 +451,8 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
 void GN_VkShutdown() {
     if(!GN_Vk.initialized) return;
     vkDeviceWaitIdle(GN_Vk.device);
+    // P1b：缓存持有的管线必须先于 renderPass / VkDevice 销毁
+    GN_Vk.aPipelineCache.Release();
 #ifdef GN_USING_3D
     GN_VkShutdown3D();
 #endif
@@ -532,10 +486,6 @@ void GN_VkShutdown() {
     delete[] GN_Vk.swapchainViews;
     delete[] GN_Vk.swapchainImages;
     vkDestroySwapchainKHR(GN_Vk.device, GN_Vk.swapchain, 0);
-    vkDestroyPipeline(GN_Vk.device, GN_Vk.pipeline, 0);
-    vkDestroyPipeline(GN_Vk.device, GN_Vk.pipelineBright, 0);
-    vkDestroyPipeline(GN_Vk.device, GN_Vk.pipelineMultiply, 0);
-    vkDestroyPipeline(GN_Vk.device, GN_Vk.pipelineNull, 0);
     vkDestroyPipelineLayout(GN_Vk.device, GN_Vk.pipelineLayout, 0);
     vkDestroyDescriptorSetLayout(GN_Vk.device, GN_Vk.descriptorLayout, 0);
     if(s_rtFramebuffer) {

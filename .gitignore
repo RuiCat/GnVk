@@ -3,3 +3,4 @@ libGN_mini*.*
 *.o
 *.d
 RunLog.txt
+.local/

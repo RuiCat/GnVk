@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-27 — 恢复引擎默认资源（修复资源加载全失败）
+
+- 根因：`701828d 清理原始例子` 把 `assets/` 下除 `shaders/` 外的资源整批删除，而引擎与测试仍按 `GN_SysDir()`（根目录 = `assets/`）加载：
+  `samples/02/03` 用 `ui/bubbleB`，`GN_RunRec` 用 `ui/br`，`GN_UiBase` 用 `ui/bubble*`、`axis/2Dctrl_*`，`GN_UiFBrowser` 用 `fileicon/*`，`GN_Frame` 用光环贴图。
+- 修复：从 `701828d^` 恢复 `assets/ui`（21）、`assets/axis`（4）、`assets/fileicon`（36）、`assets/effects`（1），共 62 个文件 / 约 0.9 MB。
+- 修复 `GN_Frame.cpp` 默认光环路径 `eft/` → `effects/`（仓库里从未有过 `assets/eft/`，该默认值一直是坏的）。
+- 说明：`samples/05/06/07/09/11..16` 仍是 TODO 占位页（不是资源加载失败）；资源类测试为 `./run.sh 02`、`03`。
+
 ## 2026-10-26 — 工程化阶段 0（止血）
 
 - 修复 `samples/08_cube3d.cpp` 的 `Height()` 重复声明 `float h`（该文件此前无法编译）。

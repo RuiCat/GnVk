@@ -144,6 +144,10 @@ extern GN_API unsigned int GT_SystemInited; //标记引擎系统各部分是否�
 #include "GN_3Dmodel.h" //3D模型加载与绘制等功能
 #include "GN_3Dlight.h" //3D光源系统
 #include "GN_3Dmaterial.h" //3D材质系统
+#include "GN_Shader.h" //SPIR-V 加载与着色器模块缓存
+#include "GN_Pipeline.h" //通用图形/计算管线描述与缓存
+#include "GN_Spatial.h" //3D空间划分 AABB/BVH/动态AABB树/视锥/射线
+#include "GN_Physics.h" //3D刚体物理 球/盒 顺序冲量求解
 #endif
 #include "GN_Linear.h" //线性插值与曲线插值等功能
 #include "GN_2DArea.h" //2D空间区域构造与2D碰撞检测等功能

@@ -107,21 +107,7 @@ void init3DHdr() {
     // ── 编译合成着色器 ──
     auto compVertSpv = LoadSPIRVFile("assets/shaders/gn3d_composite.vert.spv");
     auto compFragSpv = LoadSPIRVFile("assets/shaders/gn3d_composite.frag.spv");
-    VkShaderModule csvm = 0, csfm = 0;
     if(!compVertSpv.empty() && !compFragSpv.empty()) {
-        {
-            VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-            sm.codeSize = compVertSpv.size() * sizeof(uint32_t);
-            sm.pCode = compVertSpv.data();
-            vkCreateShaderModule(GN_Vk.device, &sm, 0, &csvm);
-        }
-        {
-            VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-            sm.codeSize = compFragSpv.size() * sizeof(uint32_t);
-            sm.pCode = compFragSpv.data();
-            vkCreateShaderModule(GN_Vk.device, &sm, 0, &csfm);
-        }
-
         // 描述符布局: Binding 1 = HDR sampler (Fragment)
         {
             VkDescriptorSetLayoutBinding dslb[1] = {};
@@ -142,37 +128,7 @@ void init3DHdr() {
             vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &GN_Vk.compositePipelineLayout);
         }
 
-        // 管线: 全屏三角形, 无顶点输入
-        VkPipelineShaderStageCreateInfo ss[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}, {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-        ss[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-        ss[0].module = csvm;
-        ss[0].pName = "main";
-        ss[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        ss[1].module = csfm;
-        ss[1].pName = "main";
-        VkPipelineVertexInputStateCreateInfo vis = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-        vis.vertexBindingDescriptionCount = 0;
-        vis.vertexAttributeDescriptionCount = 0;
-        VkPipelineInputAssemblyStateCreateInfo ias = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-        ias.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        VkViewport vp = {0, 0, (float)sw, (float)sh, 0, 1};
-        VkRect2D sc = {{0, 0}, {sw, sh}};
-        VkPipelineViewportStateCreateInfo vps = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-        vps.viewportCount = 1;
-        vps.pViewports = &vp;
-        vps.scissorCount = 1;
-        vps.pScissors = &sc;
-        VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-        rs.polygonMode = VK_POLYGON_MODE_FILL;
-        rs.cullMode = VK_CULL_MODE_NONE;
-        rs.lineWidth = 1.0f;
-        VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-        ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-        VkPipelineColorBlendAttachmentState cba = {};
-        cba.colorWriteMask = 0xf;
-        VkPipelineColorBlendStateCreateInfo cbs = {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-        cbs.attachmentCount = 1;
-        cbs.pAttachments = &cba;
+        // 管线（P1b）：全屏三角形、无顶点输入；描述在 renderPass 建好后交给管线缓存
 
         // Composite RenderPass: swapchain 格式, 单采样
         {
@@ -207,21 +163,34 @@ void init3DHdr() {
             vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.compositeFramebuffers[i]);
         }
 
-        VkGraphicsPipelineCreateInfo pci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        pci.stageCount = 2;
-        pci.pStages = ss;
-        pci.pVertexInputState = &vis;
-        pci.pInputAssemblyState = &ias;
-        pci.pViewportState = &vps;
-        pci.pRasterizationState = &rs;
-        pci.pMultisampleState = &ms;
-        pci.pColorBlendState = &cbs;
-        pci.layout = GN_Vk.compositePipelineLayout;
-        pci.renderPass = GN_Vk.compositeRenderPass;
-        pci.subpass = 0;
-        vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.compositePipeline);
-        vkDestroyShaderModule(GN_Vk.device, csvm, 0);
-        vkDestroyShaderModule(GN_Vk.device, csfm, 0);
+        // 合成管线（P1b）：无顶点输入、无深度附件、不剔除、单采样、无混合、固定视口
+        GN3d::sPIPELINE_DESC descComp;
+        descComp.aKind = GN3d::ePIPE_GRAPHICS;
+        descComp.aVertSpv = compVertSpv.data();
+        descComp.aVertSize = compVertSpv.size() * sizeof(uint32_t);
+        descComp.aFragSpv = compFragSpv.data();
+        descComp.aFragSize = compFragSpv.size() * sizeof(uint32_t);
+        descComp.aRenderPass = GN_Vk.compositeRenderPass;
+        descComp.aSubpass = 0;
+        descComp.aLayout = GN_Vk.compositePipelineLayout;
+        descComp.aDepthTest = false;
+        descComp.aDepthWrite = false;
+        descComp.aDepthStencil = false;
+        descComp.aCullBack = false;
+        descComp.aFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // 旧 pci 未设置 frontFace（默认 CCW）
+        descComp.aBlend = GN3d::eBLEND_NONE;
+        descComp.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        descComp.aSamples = VK_SAMPLE_COUNT_1_BIT;
+        descComp.aColorAttachmentCount = 1;
+        descComp.aDynamicViewport = false;
+        descComp.aDynamicScissor = false;
+        descComp.aViewport = VkViewport{0.0f, 0.0f, (float)sw, (float)sh, 0.0f, 1.0f};
+        descComp.aScissor = VkRect2D{{0, 0}, {sw, sh}};
+        descComp.aCustomBlend = false;
+        GN_Vk.compositePipeline = GN_Vk.aPipelineCache.GetOrCreate(descComp);
+        if(!GN_Vk.compositePipeline) {
+            fprintf(stderr, "[GN_Vk] 合成管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        }
 
         // 分配描述符集并绑定 HDR 纹理
         {
@@ -432,22 +401,7 @@ void init3DSkybox() {
     {
         auto svSpv = LoadSPIRVFile("assets/shaders/gn3d_skybox.vert.spv");
         auto sfSpv = LoadSPIRVFile("assets/shaders/gn3d_skybox.frag.spv");
-        VkShaderModule svm = 0, sfm = 0;
         if(!svSpv.empty() && !sfSpv.empty()) {
-            {
-                VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-                sm.codeSize = svSpv.size() * sizeof(uint32_t);
-                sm.pCode = svSpv.data();
-                vkCreateShaderModule(GN_Vk.device, &sm, 0, &svm);
-            }
-            {
-                VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-                sm.codeSize = sfSpv.size() * sizeof(uint32_t);
-                sm.pCode = sfSpv.data();
-                vkCreateShaderModule(GN_Vk.device, &sm, 0, &sfm);
-            }
-        }
-        if(svm && sfm) {
             // 描述符布局: Binding 0 = UBO (invProj+invView), Binding 1 = Cubemap
             VkDescriptorSetLayoutBinding dslb[2] = {};
             dslb[0].binding = 0;
@@ -496,56 +450,35 @@ void init3DSkybox() {
                 vkUpdateDescriptorSets(GN_Vk.device, 2, w, 0, 0);
             }
 
-            // Pipeline (全屏三角形, 深度测试=LEQUAL, 深度写入=OFF)
-            VkPipelineShaderStageCreateInfo ss[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}, {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-            ss[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-            ss[0].module = svm;
-            ss[0].pName = "main";
-            ss[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-            ss[1].module = sfm;
-            ss[1].pName = "main";
-            VkPipelineVertexInputStateCreateInfo vis = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-            VkPipelineInputAssemblyStateCreateInfo ias = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-            ias.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-            VkViewport vp = {0, 0, (float)sw, (float)sh, 0, 1};
-            VkRect2D sc = {{0, 0}, {sw, sh}};
-            VkPipelineViewportStateCreateInfo vps = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-            vps.viewportCount = 1;
-            vps.pViewports = &vp;
-            vps.scissorCount = 1;
-            vps.pScissors = &sc;
-            VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-            rs.polygonMode = VK_POLYGON_MODE_FILL;
-            rs.cullMode = VK_CULL_MODE_NONE;
-            rs.lineWidth = 1.0f;
-            rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
-            VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-            ms.rasterizationSamples = GN_Vk.msaaSamples;
-            VkPipelineDepthStencilStateCreateInfo dss = {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-            dss.depthTestEnable = VK_TRUE;
-            dss.depthWriteEnable = VK_FALSE;
-            dss.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-            VkPipelineColorBlendAttachmentState cba = {};
-            cba.colorWriteMask = 0xf;
-            VkPipelineColorBlendStateCreateInfo cbs = {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-            cbs.attachmentCount = 1;
-            cbs.pAttachments = &cba;
-            VkGraphicsPipelineCreateInfo pci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-            pci.stageCount = 2;
-            pci.pStages = ss;
-            pci.pVertexInputState = &vis;
-            pci.pInputAssemblyState = &ias;
-            pci.pViewportState = &vps;
-            pci.pRasterizationState = &rs;
-            pci.pMultisampleState = &ms;
-            pci.pDepthStencilState = &dss;
-            pci.pColorBlendState = &cbs;
-            pci.layout = GN_Vk.skyboxPipelineLayout;
-            pci.renderPass = GN_Vk.renderPass3D;
-            pci.subpass = 0;
-            vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.skyboxPipeline);
-            vkDestroyShaderModule(GN_Vk.device, svm, 0);
-            vkDestroyShaderModule(GN_Vk.device, sfm, 0);
+            // 天空盒管线（P1b）：无顶点输入、不剔除、正面 CLOCKWISE、MSAA、深度 LEQUAL 不写、固定视口
+            GN3d::sPIPELINE_DESC descSky;
+            descSky.aKind = GN3d::ePIPE_GRAPHICS;
+            descSky.aVertSpv = svSpv.data();
+            descSky.aVertSize = svSpv.size() * sizeof(uint32_t);
+            descSky.aFragSpv = sfSpv.data();
+            descSky.aFragSize = sfSpv.size() * sizeof(uint32_t);
+            descSky.aRenderPass = GN_Vk.renderPass3D;
+            descSky.aSubpass = 0;
+            descSky.aLayout = GN_Vk.skyboxPipelineLayout;
+            descSky.aDepthTest = true;
+            descSky.aDepthWrite = false;
+            descSky.aDepthCompare = VK_COMPARE_OP_LESS_OR_EQUAL;
+            descSky.aDepthStencil = true;
+            descSky.aCullBack = false;
+            descSky.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+            descSky.aBlend = GN3d::eBLEND_NONE;
+            descSky.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            descSky.aSamples = GN_Vk.msaaSamples;
+            descSky.aColorAttachmentCount = 1;
+            descSky.aDynamicViewport = false;
+            descSky.aDynamicScissor = false;
+            descSky.aViewport = VkViewport{0.0f, 0.0f, (float)sw, (float)sh, 0.0f, 1.0f};
+            descSky.aScissor = VkRect2D{{0, 0}, {sw, sh}};
+            descSky.aCustomBlend = false;
+            GN_Vk.skyboxPipeline = GN_Vk.aPipelineCache.GetOrCreate(descSky);
+            if(!GN_Vk.skyboxPipeline) {
+                fprintf(stderr, "[GN_Vk] 天空盒管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+            }
         }
     }
 }
@@ -688,22 +621,7 @@ void init3DGbuffer() {
     {
         auto gvSpv = LoadSPIRVFile("assets/shaders/gn3d_gbuffer.vert.spv");
         auto gfSpv = LoadSPIRVFile("assets/shaders/gn3d_gbuffer.frag.spv");
-        VkShaderModule gvm = 0, gfm = 0;
         if(!gvSpv.empty() && !gfSpv.empty()) {
-            {
-                VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-                sm.codeSize = gvSpv.size() * 4;
-                sm.pCode = gvSpv.data();
-                vkCreateShaderModule(GN_Vk.device, &sm, 0, &gvm);
-            }
-            {
-                VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-                sm.codeSize = gfSpv.size() * 4;
-                sm.pCode = gfSpv.data();
-                vkCreateShaderModule(GN_Vk.device, &sm, 0, &gfm);
-            }
-        }
-        if(gvm && gfm) {
             // 描述符布局: Binding 0=SceneUBO, 1=texSampler, 3=normalSampler (复用PBR部分)
             VkDescriptorSetLayoutBinding dslb[3] = {};
             dslb[0].binding = 0;
@@ -761,62 +679,43 @@ void init3DGbuffer() {
                 w[2].pImageInfo = &dii;
                 vkUpdateDescriptorSets(GN_Vk.device, 3, w, 0, 0);
             }
-            // Pipeline
-            VkPipelineShaderStageCreateInfo ss[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}, {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-            ss[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-            ss[0].module = gvm;
-            ss[0].pName = "main";
-            ss[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-            ss[1].module = gfm;
-            ss[1].pName = "main";
-            VkVertexInputBindingDescription vib = {0, sizeof(VkVertex3D), VK_VERTEX_INPUT_RATE_VERTEX};
-            VkVertexInputAttributeDescription via[4] = {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VkVertex3D, px)}, {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VkVertex3D, nx)}, {2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VkVertex3D, tx)}, {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex3D, u)}};
-            VkPipelineVertexInputStateCreateInfo vis = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-            vis.vertexBindingDescriptionCount = 1;
-            vis.pVertexBindingDescriptions = &vib;
-            vis.vertexAttributeDescriptionCount = 4;
-            vis.pVertexAttributeDescriptions = via;
-            VkPipelineInputAssemblyStateCreateInfo ias = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-            ias.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-            VkViewport vp = {0, 0, (float)sw, (float)sh, 0, 1};
-            VkRect2D sc = {{0, 0}, {sw, sh}};
-            VkPipelineViewportStateCreateInfo vps = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-            vps.viewportCount = 1;
-            vps.pViewports = &vp;
-            vps.scissorCount = 1;
-            vps.pScissors = &sc;
-            VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-            rs.polygonMode = VK_POLYGON_MODE_FILL;
-            rs.cullMode = VK_CULL_MODE_BACK_BIT;
-            rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
-            rs.lineWidth = 1.0f;
-            VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-            ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-            VkPipelineDepthStencilStateCreateInfo dss = {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-            dss.depthTestEnable = VK_TRUE;
-            dss.depthWriteEnable = VK_TRUE;
-            dss.depthCompareOp = VK_COMPARE_OP_LESS;
-            VkPipelineColorBlendAttachmentState cba[3] = {};
-            for(int i = 0; i < 3; i++) cba[i].colorWriteMask = 0xf;
-            VkPipelineColorBlendStateCreateInfo cbs = {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-            cbs.attachmentCount = 3;
-            cbs.pAttachments = cba;
-            VkGraphicsPipelineCreateInfo pci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-            pci.stageCount = 2;
-            pci.pStages = ss;
-            pci.pVertexInputState = &vis;
-            pci.pInputAssemblyState = &ias;
-            pci.pViewportState = &vps;
-            pci.pRasterizationState = &rs;
-            pci.pMultisampleState = &ms;
-            pci.pDepthStencilState = &dss;
-            pci.pColorBlendState = &cbs;
-            pci.layout = GN_Vk.gBufferPipelineLayout;
-            pci.renderPass = GN_Vk.gBufferRenderPass;
-            pci.subpass = 0;
-            vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.gBufferPipeline);
-            vkDestroyShaderModule(GN_Vk.device, gvm, 0);
-            vkDestroyShaderModule(GN_Vk.device, gfm, 0);
+            // G-Buffer 管线（P1b）：4 顶点属性、3 颜色附件、背面剔除 CLOCKWISE、MSAA1、深度 LESS
+            GN3d::sVERTEX_LAYOUT layoutGB;
+            layoutGB.Add(0, (uint32_t)offsetof(VkVertex3D, px), VK_FORMAT_R32G32B32_SFLOAT);
+            layoutGB.Add(1, (uint32_t)offsetof(VkVertex3D, nx), VK_FORMAT_R32G32B32_SFLOAT);
+            layoutGB.Add(2, (uint32_t)offsetof(VkVertex3D, tx), VK_FORMAT_R32G32B32_SFLOAT);
+            layoutGB.Add(3, (uint32_t)offsetof(VkVertex3D, u), VK_FORMAT_R32G32_SFLOAT);
+            layoutGB.aStride = (uint32_t)sizeof(VkVertex3D);
+
+            GN3d::sPIPELINE_DESC descGB;
+            descGB.aKind = GN3d::ePIPE_GRAPHICS;
+            descGB.aVertSpv = gvSpv.data();
+            descGB.aVertSize = gvSpv.size() * sizeof(uint32_t);
+            descGB.aFragSpv = gfSpv.data();
+            descGB.aFragSize = gfSpv.size() * sizeof(uint32_t);
+            descGB.aVertexLayout = layoutGB;
+            descGB.aRenderPass = GN_Vk.gBufferRenderPass;
+            descGB.aSubpass = 0;
+            descGB.aLayout = GN_Vk.gBufferPipelineLayout;
+            descGB.aDepthTest = true;
+            descGB.aDepthWrite = true;
+            descGB.aDepthCompare = VK_COMPARE_OP_LESS;
+            descGB.aDepthStencil = true;
+            descGB.aCullBack = true;
+            descGB.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+            descGB.aBlend = GN3d::eBLEND_NONE;
+            descGB.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            descGB.aSamples = VK_SAMPLE_COUNT_1_BIT;
+            descGB.aColorAttachmentCount = 3;
+            descGB.aDynamicViewport = false;
+            descGB.aDynamicScissor = false;
+            descGB.aViewport = VkViewport{0.0f, 0.0f, (float)sw, (float)sh, 0.0f, 1.0f};
+            descGB.aScissor = VkRect2D{{0, 0}, {sw, sh}};
+            descGB.aCustomBlend = false;
+            GN_Vk.gBufferPipeline = GN_Vk.aPipelineCache.GetOrCreate(descGB);
+            if(!GN_Vk.gBufferPipeline) {
+                fprintf(stderr, "[GN_Vk] G-Buffer 管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+            }
         }
     }
 }
@@ -830,22 +729,7 @@ void init3DDeferredLight() {
     {
         auto dlv = LoadSPIRVFile("assets/shaders/gn3d_deferred_light.vert.spv");
         auto dlf = LoadSPIRVFile("assets/shaders/gn3d_deferred_light.frag.spv");
-        VkShaderModule dvm = 0, dfm = 0;
         if(!dlv.empty() && !dlf.empty()) {
-            {
-                VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-                sm.codeSize = dlv.size() * 4;
-                sm.pCode = dlv.data();
-                vkCreateShaderModule(GN_Vk.device, &sm, 0, &dvm);
-            }
-            {
-                VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-                sm.codeSize = dlf.size() * 4;
-                sm.pCode = dlf.data();
-                vkCreateShaderModule(GN_Vk.device, &sm, 0, &dfm);
-            }
-        }
-        if(dvm && dfm) {
             // 描述符: 0=SceneUBO,1=gAlbedo,2=gNormal,3=gPBR,4=gDepth,5=shadow,6=skybox,7=LightUBO
             VkDescriptorSetLayoutBinding dlb[8] = {};
             dlb[0].binding = 0;
@@ -971,50 +855,34 @@ void init3DDeferredLight() {
                 fci.layers = 1;
                 vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.deferredLightFramebuffers[i]);
             }
-            // Pipeline (全屏三角形)
-            VkPipelineShaderStageCreateInfo ss[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}, {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-            ss[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-            ss[0].module = dvm;
-            ss[0].pName = "main";
-            ss[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-            ss[1].module = dfm;
-            ss[1].pName = "main";
-            VkPipelineVertexInputStateCreateInfo vis = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-            VkPipelineInputAssemblyStateCreateInfo ias = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-            ias.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-            VkViewport vp = {0, 0, (float)sw, (float)sh, 0, 1};
-            VkRect2D sc = {{0, 0}, {sw, sh}};
-            VkPipelineViewportStateCreateInfo vps = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-            vps.viewportCount = 1;
-            vps.pViewports = &vp;
-            vps.scissorCount = 1;
-            vps.pScissors = &sc;
-            VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-            rs.polygonMode = VK_POLYGON_MODE_FILL;
-            rs.cullMode = VK_CULL_MODE_NONE;
-            rs.lineWidth = 1.0f;
-            VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-            ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-            VkPipelineColorBlendAttachmentState cba = {};
-            cba.colorWriteMask = 0xf;
-            VkPipelineColorBlendStateCreateInfo cbs = {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-            cbs.attachmentCount = 1;
-            cbs.pAttachments = &cba;
-            VkGraphicsPipelineCreateInfo pci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-            pci.stageCount = 2;
-            pci.pStages = ss;
-            pci.pVertexInputState = &vis;
-            pci.pInputAssemblyState = &ias;
-            pci.pViewportState = &vps;
-            pci.pRasterizationState = &rs;
-            pci.pMultisampleState = &ms;
-            pci.pColorBlendState = &cbs;
-            pci.layout = GN_Vk.deferredLightPipelineLayout;
-            pci.renderPass = GN_Vk.deferredLightRenderPass;
-            pci.subpass = 0;
-            vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.deferredLightPipeline);
-            vkDestroyShaderModule(GN_Vk.device, dvm, 0);
-            vkDestroyShaderModule(GN_Vk.device, dfm, 0);
+            // 延迟光照管线（P1b）：全屏三角形、无顶点输入、不剔除、无深度状态、单采样、1 颜色附件
+            GN3d::sPIPELINE_DESC descDL;
+            descDL.aKind = GN3d::ePIPE_GRAPHICS;
+            descDL.aVertSpv = dlv.data();
+            descDL.aVertSize = dlv.size() * sizeof(uint32_t);
+            descDL.aFragSpv = dlf.data();
+            descDL.aFragSize = dlf.size() * sizeof(uint32_t);
+            descDL.aRenderPass = GN_Vk.deferredLightRenderPass;
+            descDL.aSubpass = 0;
+            descDL.aLayout = GN_Vk.deferredLightPipelineLayout;
+            descDL.aDepthTest = false;
+            descDL.aDepthWrite = false;
+            descDL.aDepthStencil = false;
+            descDL.aCullBack = false;
+            descDL.aFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // 旧 pci 未设置 frontFace（默认 CCW）
+            descDL.aBlend = GN3d::eBLEND_NONE;
+            descDL.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            descDL.aSamples = VK_SAMPLE_COUNT_1_BIT;
+            descDL.aColorAttachmentCount = 1;
+            descDL.aDynamicViewport = false;
+            descDL.aDynamicScissor = false;
+            descDL.aViewport = VkViewport{0.0f, 0.0f, (float)sw, (float)sh, 0.0f, 1.0f};
+            descDL.aScissor = VkRect2D{{0, 0}, {sw, sh}};
+            descDL.aCustomBlend = false;
+            GN_Vk.deferredLightPipeline = GN_Vk.aPipelineCache.GetOrCreate(descDL);
+            if(!GN_Vk.deferredLightPipeline) {
+                fprintf(stderr, "[GN_Vk] 延迟光照管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+            }
         }
     }
 }

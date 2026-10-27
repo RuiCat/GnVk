@@ -157,19 +157,7 @@ void init3DTargets() {
 // 前向 3D 管线：着色器模块、描述符布局、管线布局、图形管线、场景/光照 UBO、默认描述符集。
 void init3DForward(const std::vector<uint32_t> &vertSpv,
                    const std::vector<uint32_t> &fragSpv) {
-    VkShaderModule vm3d, fm3d;
-    {
-        VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        sm.codeSize = vertSpv.size() * sizeof(uint32_t);
-        sm.pCode = vertSpv.data();
-        vkCreateShaderModule(GN_Vk.device, &sm, 0, &vm3d);
-    }
-    {
-        VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        sm.codeSize = fragSpv.size() * sizeof(uint32_t);
-        sm.pCode = fragSpv.data();
-        vkCreateShaderModule(GN_Vk.device, &sm, 0, &fm3d);
-    }
+    // 着色器模块由管线缓存（P1b）统一创建与持有，这里不再建 VkShaderModule
 
     // ── 3D 描述符布局 ────────────────────────────────
     // Binding 0: Scene UBO (uniform buffer) — 顶点+片段着色器
@@ -211,78 +199,47 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
 
     // ── 3D 图形管线 ──────────────────────────────────
     {
-        VkPipelineShaderStageCreateInfo ss[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}, {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-        ss[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-        ss[0].module = vm3d;
-        ss[0].pName = "main";
-        ss[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        ss[1].module = fm3d;
-        ss[1].pName = "main";
+        // P1b：改由 cPIPELINE_CACHE 创建；字段逐项对齐旧 VkGraphicsPipelineCreateInfo
+        //   顶点：0=pos 1=normal 2=tangent 3=uv，stride=sizeof(VkVertex3D)
+        //   旧管线：固定视口与剪裁、无动态状态、MSAA=GN_Vk.msaaSamples、背面剔除、CCW 正面
+        GN3d::sVERTEX_LAYOUT layout3D;
+        layout3D.Add(0, (uint32_t)offsetof(VkVertex3D, px), VK_FORMAT_R32G32B32_SFLOAT);
+        layout3D.Add(1, (uint32_t)offsetof(VkVertex3D, nx), VK_FORMAT_R32G32B32_SFLOAT);
+        layout3D.Add(2, (uint32_t)offsetof(VkVertex3D, tx), VK_FORMAT_R32G32B32_SFLOAT);
+        layout3D.Add(3, (uint32_t)offsetof(VkVertex3D, u), VK_FORMAT_R32G32_SFLOAT);
+        layout3D.aStride = (uint32_t)sizeof(VkVertex3D);
 
-        VkVertexInputBindingDescription vib = {0, sizeof(VkVertex3D), VK_VERTEX_INPUT_RATE_VERTEX};
-        VkVertexInputAttributeDescription via[4] = {
-            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VkVertex3D, px)}, // pos
-            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VkVertex3D, nx)}, // normal
-            {2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VkVertex3D, tx)}, // tangent
-            {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex3D, u)} // uv
-        };
-        VkPipelineVertexInputStateCreateInfo vis = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-        vis.vertexBindingDescriptionCount = 1;
-        vis.pVertexBindingDescriptions = &vib;
-        vis.vertexAttributeDescriptionCount = 4;
-        vis.pVertexAttributeDescriptions = via;
+        GN3d::sPIPELINE_DESC desc;
+        desc.aKind = GN3d::ePIPE_GRAPHICS;
+        desc.aVertSpv = vertSpv.data();
+        desc.aVertSize = vertSpv.size() * sizeof(uint32_t);
+        desc.aFragSpv = fragSpv.data();
+        desc.aFragSize = fragSpv.size() * sizeof(uint32_t);
+        desc.aVertexLayout = layout3D;
+        desc.aRenderPass = GN_Vk.renderPass3D;
+        desc.aSubpass = 0;
+        desc.aLayout = GN_Vk.pipelineLayout3D;
+        desc.aDepthTest = true;
+        desc.aDepthWrite = true;
+        desc.aDepthCompare = VK_COMPARE_OP_LESS;
+        desc.aDepthStencil = true;
+        desc.aCullBack = true;
+        desc.aFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        desc.aBlend = GN3d::eBLEND_NONE;
+        desc.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        desc.aSamples = GN_Vk.msaaSamples;
+        desc.aColorAttachmentCount = 1;
+        desc.aDynamicViewport = false;
+        desc.aDynamicScissor = false;
+        desc.aViewport = VkViewport{0.0f, 0.0f, (float)GN_Vk.swapchainExtent.width,
+                                    (float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
+        desc.aScissor = VkRect2D{{0, 0}, GN_Vk.swapchainExtent};
+        desc.aCustomBlend = false;
+        GN_Vk.pipeline3D = GN_Vk.aPipelineCache.GetOrCreate(desc);
+        if(!GN_Vk.pipeline3D) {
+            fprintf(stderr, "[GN_Vk] 3D 前向管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        }
 
-        VkPipelineInputAssemblyStateCreateInfo ias = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-        ias.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-        VkViewport vp = {0, 0, (float)GN_Vk.swapchainExtent.width, (float)GN_Vk.swapchainExtent.height, 0, 1};
-        VkRect2D sc = {{0, 0}, GN_Vk.swapchainExtent};
-        VkPipelineViewportStateCreateInfo vps = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-        vps.viewportCount = 1;
-        vps.pViewports = &vp;
-        vps.scissorCount = 1;
-        vps.pScissors = &sc;
-
-        VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-        rs.polygonMode = VK_POLYGON_MODE_FILL;
-        rs.cullMode = VK_CULL_MODE_BACK_BIT;
-        rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-        rs.lineWidth = 1.0f;
-        // viewport Y翻转 + m[5]=-f 双翻抵消 → NDC CCW → COUNTER_CLOCKWISE=正面 ✓
-
-        VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-        ms.rasterizationSamples = GN_Vk.msaaSamples;
-
-        VkPipelineDepthStencilStateCreateInfo dss = {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-        dss.depthTestEnable = VK_TRUE;
-        dss.depthWriteEnable = VK_TRUE;
-        dss.depthCompareOp = VK_COMPARE_OP_LESS;
-
-        VkPipelineColorBlendAttachmentState cba = {};
-        cba.colorWriteMask = 0xf;
-        cba.blendEnable = VK_FALSE; // 3D 不使用混合
-
-        VkPipelineColorBlendStateCreateInfo cbs = {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-        cbs.attachmentCount = 1;
-        cbs.pAttachments = &cba;
-
-        VkGraphicsPipelineCreateInfo pci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        pci.stageCount = 2;
-        pci.pStages = ss;
-        pci.pVertexInputState = &vis;
-        pci.pInputAssemblyState = &ias;
-        pci.pViewportState = &vps;
-        pci.pRasterizationState = &rs;
-        pci.pMultisampleState = &ms;
-        pci.pDepthStencilState = &dss;
-        pci.pColorBlendState = &cbs;
-        pci.layout = GN_Vk.pipelineLayout3D;
-        pci.renderPass = GN_Vk.renderPass3D;
-        pci.subpass = 0;
-        vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.pipeline3D);
-
-        vkDestroyShaderModule(GN_Vk.device, vm3d, 0);
-        vkDestroyShaderModule(GN_Vk.device, fm3d, 0);
     }
 
     // ── 3D 场景 UBO ──────────────────────────────────
@@ -381,85 +338,48 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
         vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &GN_Vk.pipelineLayoutPBR);
     }
 
-    // ── 加载 PBR 着色器并创建管线 ───────────────────
-    VkShaderModule pvm = 0, pfm = 0;
+    // ── 加载 PBR 着色器并创建管线（P1b：走管线缓存）────
     if(!pbrVert.empty() && !pbrFrag.empty()) {
-        {
-            VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-            sm.codeSize = pbrVert.size() * sizeof(uint32_t);
-            sm.pCode = pbrVert.data();
-            vkCreateShaderModule(GN_Vk.device, &sm, 0, &pvm);
+        // 旧 PBR 管线：固定视口 y=H/h=-H（Y 翻转）、正面 CLOCKWISE、MSAA、深度 LESS、无混合
+        GN3d::sVERTEX_LAYOUT layoutPBR;
+        layoutPBR.Add(0, (uint32_t)offsetof(VkVertex3D, px), VK_FORMAT_R32G32B32_SFLOAT);
+        layoutPBR.Add(1, (uint32_t)offsetof(VkVertex3D, nx), VK_FORMAT_R32G32B32_SFLOAT);
+        layoutPBR.Add(2, (uint32_t)offsetof(VkVertex3D, tx), VK_FORMAT_R32G32B32_SFLOAT);
+        layoutPBR.Add(3, (uint32_t)offsetof(VkVertex3D, u), VK_FORMAT_R32G32_SFLOAT);
+        layoutPBR.aStride = (uint32_t)sizeof(VkVertex3D);
+
+        GN3d::sPIPELINE_DESC descPBR;
+        descPBR.aKind = GN3d::ePIPE_GRAPHICS;
+        descPBR.aVertSpv = pbrVert.data();
+        descPBR.aVertSize = pbrVert.size() * sizeof(uint32_t);
+        descPBR.aFragSpv = pbrFrag.data();
+        descPBR.aFragSize = pbrFrag.size() * sizeof(uint32_t);
+        descPBR.aVertexLayout = layoutPBR;
+        descPBR.aRenderPass = GN_Vk.renderPass3D;
+        descPBR.aSubpass = 0;
+        descPBR.aLayout = GN_Vk.pipelineLayoutPBR;
+        descPBR.aDepthTest = true;
+        descPBR.aDepthWrite = true;
+        descPBR.aDepthCompare = VK_COMPARE_OP_LESS;
+        descPBR.aDepthStencil = true;
+        descPBR.aCullBack = true;
+        descPBR.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+        descPBR.aBlend = GN3d::eBLEND_NONE;
+        descPBR.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        descPBR.aSamples = GN_Vk.msaaSamples;
+        descPBR.aColorAttachmentCount = 1;
+        descPBR.aDynamicViewport = false;
+        descPBR.aDynamicScissor = false;
+        descPBR.aViewport = VkViewport{0.0f, (float)GN_Vk.swapchainExtent.height,
+                                       (float)GN_Vk.swapchainExtent.width,
+                                       -(float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
+        descPBR.aScissor = VkRect2D{{0, 0}, GN_Vk.swapchainExtent};
+        descPBR.aCustomBlend = false;
+        GN_Vk.pipelinePBR = GN_Vk.aPipelineCache.GetOrCreate(descPBR);
+        if(!GN_Vk.pipelinePBR) {
+            fprintf(stderr, "[GN_Vk] PBR 管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
         }
-        {
-            VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-            sm.codeSize = pbrFrag.size() * sizeof(uint32_t);
-            sm.pCode = pbrFrag.data();
-            vkCreateShaderModule(GN_Vk.device, &sm, 0, &pfm);
-        }
 
-        VkPipelineShaderStageCreateInfo ss[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}, {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
-        ss[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-        ss[0].module = pvm;
-        ss[0].pName = "main";
-        ss[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        ss[1].module = pfm;
-        ss[1].pName = "main";
-
-        VkVertexInputBindingDescription vib = {0, sizeof(VkVertex3D), VK_VERTEX_INPUT_RATE_VERTEX};
-        VkVertexInputAttributeDescription via[4] = {
-            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VkVertex3D, px)},
-            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VkVertex3D, nx)},
-            {2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VkVertex3D, tx)},
-            {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex3D, u)}};
-        VkPipelineVertexInputStateCreateInfo vis = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-        vis.vertexBindingDescriptionCount = 1;
-        vis.pVertexBindingDescriptions = &vib;
-        vis.vertexAttributeDescriptionCount = 4;
-        vis.pVertexAttributeDescriptions = via;
-
-        VkPipelineInputAssemblyStateCreateInfo ias = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-        ias.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        // viewport Y 翻转: y=H, height=-H 抵消投影 Y-flip, 使 NDC CCW 保持 CCW
-        VkViewport vp = {0, (float)GN_Vk.swapchainExtent.height, (float)GN_Vk.swapchainExtent.width, -(float)GN_Vk.swapchainExtent.height, 0, 1};
-        VkRect2D sc = {{0, 0}, GN_Vk.swapchainExtent};
-        VkPipelineViewportStateCreateInfo vps = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-        vps.viewportCount = 1;
-        vps.pViewports = &vp;
-        vps.scissorCount = 1;
-        vps.pScissors = &sc;
-        VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-        rs.polygonMode = VK_POLYGON_MODE_FILL;
-        rs.cullMode = VK_CULL_MODE_BACK_BIT;
-        rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
-        rs.lineWidth = 1.0f;
-        VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-        ms.rasterizationSamples = GN_Vk.msaaSamples;
-        VkPipelineDepthStencilStateCreateInfo dss = {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-        dss.depthTestEnable = VK_TRUE;
-        dss.depthWriteEnable = VK_TRUE;
-        dss.depthCompareOp = VK_COMPARE_OP_LESS;
-        VkPipelineColorBlendAttachmentState cba = {};
-        cba.colorWriteMask = 0xf;
-        VkPipelineColorBlendStateCreateInfo cbs = {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-        cbs.attachmentCount = 1;
-        cbs.pAttachments = &cba;
-        VkGraphicsPipelineCreateInfo pci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        pci.stageCount = 2;
-        pci.pStages = ss;
-        pci.pVertexInputState = &vis;
-        pci.pInputAssemblyState = &ias;
-        pci.pViewportState = &vps;
-        pci.pRasterizationState = &rs;
-        pci.pMultisampleState = &ms;
-        pci.pDepthStencilState = &dss;
-        pci.pColorBlendState = &cbs;
-        pci.layout = GN_Vk.pipelineLayoutPBR;
-        pci.renderPass = GN_Vk.renderPass3D;
-        pci.subpass = 0;
-        vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.pipelinePBR);
-
-        vkDestroyShaderModule(GN_Vk.device, pvm, 0);
-        vkDestroyShaderModule(GN_Vk.device, pfm, 0);
     }
 }
 
@@ -594,63 +514,44 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         vkUpdateDescriptorSets(GN_Vk.device, 1, &w, 0, 0);
     }
 
-    // Shadow pipeline
-    VkShaderModule svm = 0;
+    // Shadow pipeline（P1b：深度专用走缓存：无片元阶段、0 颜色附件、深度偏移 1.25/1.75）
     if(!shadowVertSpv.empty()) {
-        {
-            VkShaderModuleCreateInfo sm = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-            sm.codeSize = shadowVertSpv.size() * sizeof(uint32_t);
-            sm.pCode = shadowVertSpv.data();
-            vkCreateShaderModule(GN_Vk.device, &sm, 0, &svm);
+        GN3d::sVERTEX_LAYOUT layoutShadow;
+        layoutShadow.Add(0, (uint32_t)offsetof(VkVertex3D, px), VK_FORMAT_R32G32B32_SFLOAT);
+        layoutShadow.aStride = (uint32_t)sizeof(VkVertex3D);
+
+        GN3d::sPIPELINE_DESC descShadow;
+        descShadow.aKind = GN3d::ePIPE_GRAPHICS;
+        descShadow.aVertSpv = shadowVertSpv.data();
+        descShadow.aVertSize = shadowVertSpv.size() * sizeof(uint32_t);
+        descShadow.aFragSpv = 0; // 深度专用：只提交顶点阶段
+        descShadow.aFragSize = 0;
+        descShadow.aVertexLayout = layoutShadow;
+        descShadow.aRenderPass = GN_Vk.shadowRenderPass;
+        descShadow.aSubpass = 0;
+        descShadow.aLayout = GN_Vk.shadowPipelineLayout;
+        descShadow.aDepthTest = true;
+        descShadow.aDepthWrite = true;
+        descShadow.aDepthCompare = VK_COMPARE_OP_LESS;
+        descShadow.aDepthStencil = true;
+        descShadow.aDepthBiasEnable = true;
+        descShadow.aDepthBiasConstant = 1.25f;
+        descShadow.aDepthBiasSlope = 1.75f;
+        descShadow.aCullBack = true;
+        descShadow.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+        descShadow.aBlend = GN3d::eBLEND_NONE;
+        descShadow.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        descShadow.aSamples = VK_SAMPLE_COUNT_1_BIT;
+        descShadow.aColorAttachmentCount = 0;
+        descShadow.aDynamicViewport = false;
+        descShadow.aDynamicScissor = false;
+        descShadow.aViewport = VkViewport{0.0f, 0.0f, (float)smSize, (float)smSize, 0.0f, 1.0f};
+        descShadow.aScissor = VkRect2D{{0, 0}, {smSize, smSize}};
+        descShadow.aCustomBlend = false;
+        GN_Vk.shadowPipeline = GN_Vk.aPipelineCache.GetOrCreate(descShadow);
+        if(!GN_Vk.shadowPipeline) {
+            fprintf(stderr, "[GN_Vk] 阴影管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
         }
-        VkPipelineShaderStageCreateInfo ss = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
-        ss.stage = VK_SHADER_STAGE_VERTEX_BIT;
-        ss.module = svm;
-        ss.pName = "main";
-        VkVertexInputBindingDescription vib = {0, sizeof(VkVertex3D), VK_VERTEX_INPUT_RATE_VERTEX};
-        VkVertexInputAttributeDescription via = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VkVertex3D, px)};
-        VkPipelineVertexInputStateCreateInfo vis = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-        vis.vertexBindingDescriptionCount = 1;
-        vis.pVertexBindingDescriptions = &vib;
-        vis.vertexAttributeDescriptionCount = 1;
-        vis.pVertexAttributeDescriptions = &via;
-        VkPipelineInputAssemblyStateCreateInfo ias = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-        ias.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        VkViewport vp = {0, 0, (float)smSize, (float)smSize, 0, 1};
-        VkRect2D sc = {{0, 0}, {smSize, smSize}};
-        VkPipelineViewportStateCreateInfo vps = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-        vps.viewportCount = 1;
-        vps.pViewports = &vp;
-        vps.scissorCount = 1;
-        vps.pScissors = &sc;
-        VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-        rs.polygonMode = VK_POLYGON_MODE_FILL;
-        rs.cullMode = VK_CULL_MODE_BACK_BIT;
-        rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
-        rs.lineWidth = 1.0f;
-        rs.depthBiasEnable = VK_TRUE;
-        rs.depthBiasConstantFactor = 1.25f;
-        rs.depthBiasSlopeFactor = 1.75f;
-        VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-        ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-        VkPipelineDepthStencilStateCreateInfo dss = {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-        dss.depthTestEnable = VK_TRUE;
-        dss.depthWriteEnable = VK_TRUE;
-        dss.depthCompareOp = VK_COMPARE_OP_LESS;
-        VkGraphicsPipelineCreateInfo pci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        pci.stageCount = 1;
-        pci.pStages = &ss;
-        pci.pVertexInputState = &vis;
-        pci.pInputAssemblyState = &ias;
-        pci.pViewportState = &vps;
-        pci.pRasterizationState = &rs;
-        pci.pMultisampleState = &ms;
-        pci.pDepthStencilState = &dss;
-        pci.layout = GN_Vk.shadowPipelineLayout;
-        pci.renderPass = GN_Vk.shadowRenderPass;
-        pci.subpass = 0;
-        vkCreateGraphicsPipelines(GN_Vk.device, 0, 1, &pci, 0, &GN_Vk.shadowPipeline);
-        vkDestroyShaderModule(GN_Vk.device, svm, 0);
     }
 }
 

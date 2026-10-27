@@ -72,9 +72,8 @@ void GN_VkShutdown3D() {
         vkFreeMemory(GN_Vk.device, GN_Vk.lightMemory3D, 0);
         GN_Vk.lightMemory3D = VK_NULL_HANDLE;
     }
-    // PBR
+    // PBR 管线由 cPIPELINE_CACHE 持有，统一在 GN_VkShutdown 的 Release 中销毁
     if(GN_Vk.pipelinePBR) {
-        vkDestroyPipeline(GN_Vk.device, GN_Vk.pipelinePBR, 0);
         GN_Vk.pipelinePBR = VK_NULL_HANDLE;
     }
     if(GN_Vk.pipelineLayoutPBR) {
@@ -85,9 +84,8 @@ void GN_VkShutdown3D() {
         vkDestroyDescriptorSetLayout(GN_Vk.device, GN_Vk.descriptorLayoutPBR, 0);
         GN_Vk.descriptorLayoutPBR = VK_NULL_HANDLE;
     }
-    // Shadow
+    // Shadow（管线由 cPIPELINE_CACHE 持有）
     if(GN_Vk.shadowPipeline) {
-        vkDestroyPipeline(GN_Vk.device, GN_Vk.shadowPipeline, 0);
         GN_Vk.shadowPipeline = VK_NULL_HANDLE;
     }
     if(GN_Vk.shadowPipelineLayout) {
@@ -130,8 +128,8 @@ void GN_VkShutdown3D() {
         vkFreeMemory(GN_Vk.device, GN_Vk.shadowMemory, 0);
         GN_Vk.shadowMemory = VK_NULL_HANDLE;
     }
+    // 3D 前向管线由 cPIPELINE_CACHE 持有，统一在 GN_VkShutdown 的 Release 中销毁
     if(GN_Vk.pipeline3D) {
-        vkDestroyPipeline(GN_Vk.device, GN_Vk.pipeline3D, 0);
         GN_Vk.pipeline3D = VK_NULL_HANDLE;
     }
     if(GN_Vk.pipelineLayout3D) {
@@ -180,7 +178,6 @@ void GN_VkShutdown3D() {
     // HDR + Composite
     if(GN_Vk.compositeDescriptorSet) { GN_Vk.compositeDescriptorSet = VK_NULL_HANDLE; }
     if(GN_Vk.compositePipeline) {
-        vkDestroyPipeline(GN_Vk.device, GN_Vk.compositePipeline, 0);
         GN_Vk.compositePipeline = VK_NULL_HANDLE;
     }
     if(GN_Vk.compositePipelineLayout) {
@@ -229,7 +226,6 @@ void GN_VkShutdown3D() {
     }
     // Skybox
     if(GN_Vk.skyboxPipeline) {
-        vkDestroyPipeline(GN_Vk.device, GN_Vk.skyboxPipeline, 0);
         GN_Vk.skyboxPipeline = VK_NULL_HANDLE;
     }
     if(GN_Vk.skyboxPipelineLayout) {
@@ -265,7 +261,7 @@ void GN_VkShutdown3D() {
         GN_Vk.skyboxMemory = VK_NULL_HANDLE;
     }
     // Deferred
-    if(GN_Vk.deferredLightPipeline) { vkDestroyPipeline(GN_Vk.device, GN_Vk.deferredLightPipeline, 0); }
+    if(GN_Vk.deferredLightPipeline) { GN_Vk.deferredLightPipeline = VK_NULL_HANDLE; }
     if(GN_Vk.deferredLightPipelineLayout) { vkDestroyPipelineLayout(GN_Vk.device, GN_Vk.deferredLightPipelineLayout, 0); }
     if(GN_Vk.deferredLightDescriptorLayout) { vkDestroyDescriptorSetLayout(GN_Vk.device, GN_Vk.deferredLightDescriptorLayout, 0); }
     if(GN_Vk.deferredLightFramebuffers) {
@@ -274,7 +270,7 @@ void GN_VkShutdown3D() {
         delete[] GN_Vk.deferredLightFramebuffers;
     }
     if(GN_Vk.deferredLightRenderPass) { vkDestroyRenderPass(GN_Vk.device, GN_Vk.deferredLightRenderPass, 0); }
-    if(GN_Vk.gBufferPipeline) { vkDestroyPipeline(GN_Vk.device, GN_Vk.gBufferPipeline, 0); }
+    if(GN_Vk.gBufferPipeline) { GN_Vk.gBufferPipeline = VK_NULL_HANDLE; }
     if(GN_Vk.gBufferPipelineLayout) { vkDestroyPipelineLayout(GN_Vk.device, GN_Vk.gBufferPipelineLayout, 0); }
     if(GN_Vk.gBufferDescriptorLayout) { vkDestroyDescriptorSetLayout(GN_Vk.device, GN_Vk.gBufferDescriptorLayout, 0); }
     if(GN_Vk.gBufferSampler) { vkDestroySampler(GN_Vk.device, GN_Vk.gBufferSampler, 0); }
