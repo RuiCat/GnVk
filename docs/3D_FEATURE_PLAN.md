@@ -1,18 +1,18 @@
 # 3D 能力扩展规划：空间划分 / 物理 / 粒子 / 动画 / 骨骼 / 布料 / 通用管线
 
 > 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存**）+ P4（空间划分）+
-> P5 v1（球/盒刚体物理）+ P5b 前四项（胶囊形状、warm starting、CCD v1、DebugDraw）已落地（2026-10-27）；
-> P1c、P5 剩余能力（关节/静态三角网）与 P2+ 未开始。
+> P5 v1（球/盒刚体物理）+ P5b 前五项（胶囊形状、warm starting、CCD v1、DebugDraw、关节/约束）已落地（2026-10-27）；
+> P1c、P5 剩余能力（静态三角网）与 P2+ 未开始。
 > 基线：C++11、Vulkan 1.4、Makefile 单一构建入口；现有 3D 为静态网格 + Blinn-Phong/PBR + 阴影/延迟/天空盒。
 > 约束：不破坏现有 `GN_VkDraw3D`/`GN_VkDrawPBR`/`cMODEL` API；新文件 camelCase，单功能 <500 有效行、多功能 <1000 有效行。
 > 2D 侧现有的 `GN_2DArea` 碰撞与 `cFRAME_LAUNCHER` 动画图筐发射器**保持不变**，新系统只服务 3D。
 >
-> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **160 cases, 0 failed, 0 assertions failed**
-> （基线 67 + P1a/P1b 22 + P4 11 + P5 60）；`lintCodeModularity src/graphics tests/unit --naming --comments`
+> **本轮验收证据**（2026-10-27，`make -j8 check`）：单元测试 **166 cases, 0 failed, 0 assertions failed**
+> （基线 67 + P1a/P1b 22 + P4 11 + P5 66）；`lintCodeModularity src/graphics tests/unit --naming --comments`
 > 仅剩既有 `GN_2Dmath.cpp` 超限与既有 `gn3d_pbr_frag_spv.h` 告警，新增/改动文件 0 违规 0 告警。
-> 物理新增文件有效行：`GN_Physics.cpp` 484、`GN_PhysicsSolver.cpp` 265、`GN_PhysicsCcd.cpp` 112、
-> `GN_PhysicsDebug.cpp` 108、`GN_PhysicsBody.cpp` 196、`GN_PhysicsCollision.cpp` 376、
-> `GN_PhysicsCollisionCapsule.cpp` 319（均 <500）。
+> 物理新增文件有效行：`GN_Physics.cpp` 493、`GN_PhysicsSolver.cpp` 265、`GN_PhysicsCcd.cpp` 112、
+> `GN_PhysicsDebug.cpp` 108、`GN_PhysicsJoint.cpp` 380、`GN_PhysicsBody.cpp` 196、
+> `GN_PhysicsCollision.cpp` 376、`GN_PhysicsCollisionCapsule.cpp` 319（均 <500）。
 > **重要边界**：本机无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）⇒ Vulkan 创建路径
 > （`cSHADER_CACHE` / `cPIPELINE_CACHE` 的 `vkCreate*` 调用）**只做了编译验证，未做运行时验证**；
 > P1b 已接入的 11 条管线必须在有 GPU 的桌面用**重新设计的测试体系**对照后才能算验收通过（原 `samples/` + `run.sh` 已移除，见 CHANGELOG 2026-10-27）。
@@ -299,8 +299,8 @@ struct sANIM_STATE {
 | P1b 契约补充 | ✅ | `aDepthBiasEnable/Constant/Slope`（阴影 1.25/1.75）；`aColorAttachmentCount==0` = 深度专用（无 FS、subpass 0、颜色混合 0 附件） |
 | P1c | ⏳ 未开始 | GPU 材质实例（管线 + 描述符集 + UBO/纹理） |
 | P4 | ✅ 完成 | `GN_Spatial.cpp`（AABB/射线/视锥）、`GN_SpatialBVH.cpp`、`GN_SpatialTree.cpp`、`testSpatial`（11 用例）；有效行 219/167/241/499 |
-| P5 | ✅ v1 + 胶囊 + warm start + CCD + DebugDraw | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线/warm start 缓存，迭代 30 次，484）、`GN_PhysicsCollision.cpp`（dispatch，376）、`GN_PhysicsCollisionCapsule.cpp`（球/胶囊/盒-胶囊，319）、`GN_PhysicsBody.cpp`（构造/惯量/AABB，196）、`GN_PhysicsCcd.cpp`（扫掠 TOI，112）、`GN_PhysicsDebug.cpp`（线框/接触标记，108）、`GN_PhysicsSolver.cpp`（265）；`testPhysics` 19 + `testPhysicsCollision` 10 + `testPhysicsSolver` 14 + `testPhysicsCapsule` 12 + `testPhysicsDebug` 5 = 60 用例 |
-| P5 剩余 | ⏳ | 关节/约束、`AddStaticMesh` 三角网；P5b。**已知限制**：7 层及以上堆叠坍塌（30/40 次速度迭代都复现）；6 层以内稳定入睡 |
+| P5 | ✅ v1 + 胶囊 + warm start + CCD + DebugDraw + 关节 | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线/warm start 缓存，迭代 30 次，493）、`GN_PhysicsCollision.cpp`（dispatch，376）、`GN_PhysicsCollisionCapsule.cpp`（球/胶囊/盒-胶囊，319）、`GN_PhysicsBody.cpp`（构造/惯量/AABB，196）、`GN_PhysicsJoint.cpp`（距离/铰链/固定，380）、`GN_PhysicsCcd.cpp`（扫掠 TOI，112）、`GN_PhysicsDebug.cpp`（线框/接触标记，108）、`GN_PhysicsSolver.cpp`（265）；`testPhysics` 19 + `testPhysicsCollision` 10 + `testPhysicsSolver` 14 + `testPhysicsCapsule` 12 + `testPhysicsDebug` 5 + `testPhysicsJoint` 6 = 66 用例 |
+| P5 剩余 | ⏳ | `AddStaticMesh` 三角网；P5b。**已知限制**：7 层及以上堆叠坍塌（30/40 次速度迭代都复现）；6 层以内稳定入睡 |
 | P2/P3/P6–P9 | ⏳ 未开始 | —— |
 
 P4 的"剔除结果与暴力测试一致"验收已通过：BVH 512 盒 40 次 AABB 查询与暴力集合逐元素相等；射线 20 条与暴力最小 t 对照；
@@ -328,6 +328,11 @@ P5b 已验收部分（2026-10-27）：
   线数口径：球 3×24、盒 12、胶囊 2×24+4、每接触点 4（十字 + 0.2 长法线）；`GN_PhysicsDebug.cpp`（108）。
   `testPhysicsDebug` 5 用例：空世界清空、盒包围盒=半尺寸、球端点距心=半径、胶囊端圆位置/半径、接触标记与法线长度。
   v1 边界：胶囊线框只画圆柱端圆与侧线（半球顶不在线框里）；渲染器消费在 P8。
+- **关节/约束（距离/铰链/固定）**：`AddJoint(sJOINT_DESC)` / `RemoveJoint` / `GetJointCount`；世界每子步构建
+  运行时关节，速度层消去被约束方向的相对速度 + Baumgarte 误差项，位置层修正锚点/轴向误差
+  （`GN_PhysicsJoint.cpp`，380）。静态/运动学/睡着的动态刚体在关节内按无限质量；`RemoveBody` 连带删除
+  引用它的关节；v1 无关节 warm start。`testPhysicsJoint` 6 用例：非法输入/连带删除、距离保持、
+  固定关节局部系相对位姿、铰链绕轴自由、铰链消去垂直角速度、确定性。
 - **仍不稳**：7 层及以上堆叠坍塌（30/40 次迭代都复现）。定位：每步强制唤醒的 6 层对照仍坍塌 ⇒ 排除休眠路径，
   是速度迭代预算/收敛不足；6 层在 20 次迭代下会下沉、30 次迭代后稳定（本项已把上限由 5 层提到 6 层）。
 
@@ -360,6 +365,8 @@ P5b 已验收部分（2026-10-27）：
    CCD 状态不进入 `sRIGID_BODY` 布局，旧代码（含手工构造刚体的单测）无需改字段初始化。
 5. 新增 `sDEBUG_LINE` / `sDEBUG_DRAW`（纯 CPU 线段收集器）与 `cPHYSICS_WORLD::DebugDraw(sDEBUG_DRAW&)`；
    本层不含颜色/线宽/句柄，渲染器消费在 P8（`_Vulkan/vkDebugDraw.cpp`）。
+6. 新增 `eJOINT_TYPE` / `sJOINT_DESC` / `sJOINT_CONSTRAINT`、`AddJoint` / `RemoveJoint` / `GetJointCount`
+   与 `solveJointVelocities` / `solveJointPositions`；关节持久数据存世界私有区，`RemoveBody` 连带删除。
 
 **已知边界**：warm start 只重放**标量**冲量，切线方向按本步相对速度重算 ⇒ 高速滑动/旋转接触不保留历史切向
 （v1 近似）；接触点匹配半径 5cm，超出视为新接触（冷启动）；休眠体的接触不入缓存。
@@ -367,6 +374,9 @@ P5b 已验收部分（2026-10-27）：
 **CCD 的近似**：目标用世界 AABB 按本刚体包围半径扩展 ⇒ 盒/胶囊的棱角会**提前**停下（保守，不漏判）；
 运动学目标只按步末位置参与扫掠（其步内自身运动不扫掠）；命中后本步剩余位移丢弃、不施加恢复系数；
 只处理动态且醒着的刚体；起点已在扩展盒内时不在此处理（交给接触求解）。
+
+**关节的边界**：v1 不做关节 warm starting；固定/铰链要求添加时两锚点重合（否则第一步会被立即拉齐）；
+铰链轴为零向量时退回 (0,1,0)；睡着的动态刚体在关节内按无限质量，不会被关节唤醒（与接触的唤醒规则不同）。
 
 ## 4. 关键决策（需拍板）
 

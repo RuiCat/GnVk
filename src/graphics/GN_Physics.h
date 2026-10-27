@@ -131,6 +131,45 @@ void SolveVelocities(sCONTACT_CONSTRAINT *constraints, uint32_t count, float dt,
 void SolvePositions(sCONTACT_CONSTRAINT *constraints, uint32_t count, uint32_t iterations);
 
 // ═══════════════════════════════════════════════════════════
+//  关节约束（v2：距离 / 铰链 / 固定）
+// ═══════════════════════════════════════════════════════════
+enum eJOINT_TYPE {
+    eJOINT_DISTANCE = 0, // 两锚点保持固定距离（1 个平移自由度）
+    eJOINT_HINGE = 1, // 锚点重合 + 两局部轴对齐，只允许绕轴旋转（1 个旋转自由度）
+    eJOINT_FIXED = 2 // 锚点重合 + 朝向锁定（0 个自由度）
+};
+
+struct sJOINT_DESC {
+    eJOINT_TYPE aType;
+    uint32_t aBodyA;
+    uint32_t aBodyB;
+    GNg::sVEC3 aLocalAnchorA; // 刚体局部坐标锚点（默认 (0,0,0) = 质心）
+    GNg::sVEC3 aLocalAnchorB;
+    GNg::sVEC3 aLocalAxisA; // 仅 hinge：局部轴（默认 (0,1,0)，内部归一化）
+    GNg::sVEC3 aLocalAxisB;
+    float aDistance; // 仅 distance：静止长度；<0 表示按添加时的当前锚点距离
+};
+
+// 每步构建的运行时关节（指针只在本次 Step 内有效；世界量每步按当前位姿重算）
+struct sJOINT_CONSTRAINT {
+    eJOINT_TYPE aType;
+    sRIGID_BODY *aBodyA;
+    sRIGID_BODY *aBodyB;
+    GNg::sVEC3 aLocalAnchorA;
+    GNg::sVEC3 aLocalAnchorB;
+    GNg::sVEC3 aLocalAxisA; // hinge：局部单位轴
+    GNg::sVEC3 aLocalAxisB;
+    float aRestLength;
+    bool aMovableA; // 动态且醒着才可动；静态/运动学/睡着的刚体视为无限质量
+    bool aMovableB;
+};
+
+// 关节速度求解（消去被约束方向的相对速度 + Baumgarte 误差项）
+void solveJointVelocities(sJOINT_CONSTRAINT *joints, uint32_t count, float dt, uint32_t iterations);
+// 关节位置修正（锚点/轴向误差的伪冲量修正）
+void solveJointPositions(sJOINT_CONSTRAINT *joints, uint32_t count, uint32_t iterations);
+
+// ═══════════════════════════════════════════════════════════
 //  调试绘制（CPU 线段收集，渲染器消费；P8 接入 vkDebugDraw）
 // ═══════════════════════════════════════════════════════════
 struct sDEBUG_LINE {
@@ -181,6 +220,11 @@ class cPHYSICS_WORLD {
     // 唤醒指定刚体（无效句柄无操作）。调用方直接改速度后应调用它。
     void WakeBody(uint32_t handle);
 
+    // 关节：添加返回句柄（失败 INVALID_HANDLE）；RemoveBody 会连带删除引用该刚体的关节。
+    uint32_t AddJoint(const sJOINT_DESC &desc);
+    bool RemoveJoint(uint32_t handle);
+    uint32_t GetJointCount() const { return aJointCount; }
+
     // 连续碰撞（CCD v1）：默认关闭。开启后每个子步用「上一位置 → 目标位置」的线段扫掠
     // 静态/运动学刚体的世界 AABB（按本刚体包围半径扩展），在最早 TOI 处钳住并清零进入方向的
     // 法向速度。近似边界见 GN_PhysicsCcd.cpp 文件头（保守扩展、不扫掠运动学目标的步内运动、
@@ -203,6 +247,18 @@ class cPHYSICS_WORLD {
         float aAccTangent[4];
     };
 
+    // 持久关节数据（句柄稳定；RemoveBody 会清理引用该刚体的条目）
+    struct sJOINT {
+        eJOINT_TYPE aType;
+        uint32_t aBodyA;
+        uint32_t aBodyB;
+        GNg::sVEC3 aLocalAnchorA;
+        GNg::sVEC3 aLocalAnchorB;
+        GNg::sVEC3 aLocalAxisA;
+        GNg::sVEC3 aLocalAxisB;
+        float aRestLength;
+    };
+
     void StepOnce(float fixedDt);
     void IntegrateVelocities(float fixedDt);
     void IntegratePositions(float fixedDt);
@@ -211,6 +267,9 @@ class cPHYSICS_WORLD {
     void seedWarmStart(uint32_t bodyLo, uint32_t bodyHi, sCONTACT_CONSTRAINT &constraint);
     void cacheContacts();
     void resolveContinuousCollisions();
+    void buildJoints();
+    void resetJoints();
+    void removeJointsOfBody(uint32_t handle);
 
     std::vector<sRIGID_BODY> aBodies;
     std::vector<uint8_t> aUsed;
@@ -224,6 +283,11 @@ class cPHYSICS_WORLD {
     std::vector<sWARM_CONTACT> aWarmContacts; // 上一步接触冲量（本步 warm start 的输入）
     std::vector<GNg::sVEC3> aPreviousPositions; // 本子步积分前的质心位置（CCD 扫掠起点）
     bool aContinuousCollision; // CCD v1 开关（默认 false）
+    std::vector<sJOINT> aJoints; // 持久关节
+    std::vector<uint8_t> aJointUsed;
+    std::vector<uint32_t> aFreeJointHandles;
+    std::vector<sJOINT_CONSTRAINT> aJointConstraints; // 本子步运行时关节
+    uint32_t aJointCount;
     GNg::sVEC3 aGravity;
     float aFixedStep;
     float aAccumulator;

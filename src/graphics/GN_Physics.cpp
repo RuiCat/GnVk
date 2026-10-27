@@ -172,7 +172,7 @@ const uint32_t cPHYSICS_WORLD::INVALID_HANDLE;
 
 cPHYSICS_WORLD::cPHYSICS_WORLD()
     : aContinuousCollision(false), aGravity{0.0f, -9.81f, 0.0f}, aFixedStep(1.0f / 60.0f),
-      aAccumulator(0.0f), aMaxSubSteps(4), aBodyCount(0), aLastContactCount(0) {}
+      aAccumulator(0.0f), aMaxSubSteps(4), aBodyCount(0), aJointCount(0), aLastContactCount(0) {}
 
 cPHYSICS_WORLD::~cPHYSICS_WORLD() {
     Clear();
@@ -248,6 +248,7 @@ bool cPHYSICS_WORLD::RemoveBody(uint32_t handle) {
     aBodies[handle].aSleeping = true;
     aFreeHandles.push_back(handle);
     aWarmContacts.clear(); // 句柄可能被复用，旧接触冲量不再对应当前刚体
+    removeJointsOfBody(handle);
     if(aBodyCount > 0) --aBodyCount;
     return true;
 }
@@ -274,6 +275,7 @@ void cPHYSICS_WORLD::Clear() {
     aConstraintBodyHi.clear();
     aWarmContacts.clear();
     aPreviousPositions.clear();
+    resetJoints();
     aAccumulator = 0.0f;
     aBodyCount = 0;
     aLastContactCount = 0;
@@ -373,6 +375,13 @@ void cPHYSICS_WORLD::StepOnce(float dt) {
     if(!aConstraints.empty()) {
         SolveVelocities(&aConstraints[0], (uint32_t)aConstraints.size(), dt, kVelocityIterations, true);
         SolvePositions(&aConstraints[0], (uint32_t)aConstraints.size(), kPositionIterations);
+    }
+    buildJoints();
+    if(!aJointConstraints.empty()) {
+        solveJointVelocities(&aJointConstraints[0], (uint32_t)aJointConstraints.size(), dt,
+                             kVelocityIterations);
+        solveJointPositions(&aJointConstraints[0], (uint32_t)aJointConstraints.size(),
+                            kPositionIterations);
     }
     cacheContacts(); // 本子步的累计冲量留给下一子步 warm start
     if(aContinuousCollision) {
