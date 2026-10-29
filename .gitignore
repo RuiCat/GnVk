@@ -4,3 +4,6 @@ libGN_mini*.*
 *.d
 RunLog.txt
 .local/
+.agent-memory/
+docs/papers/pdf
+tests/うさうさ

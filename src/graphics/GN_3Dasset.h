@@ -12,8 +12,9 @@
 //   * 皮肤：关节=节点索引数组，逆绑定矩阵与关节等长（缺失时为单位矩阵）。
 //   * 动画：仅 translation/rotation/scale 通道，STEP/LINEAR 映射到 `sANIM_CLIP`；
 //     CUBICSPLINE 通道与 morph 权重通道跳过（P2 v1 边界）。
-//   * 材质/纹理只导入 CPU 描述（因子、贴图索引、来源 uri/mime/bufferView、sampler 的
-//     wrap/filter）；不读取图片字节、不解码、不接渲染侧的 sMATERIAL。
+//   * 材质/纹理只导入 CPU 描述与压缩图片字节（因子、贴图索引、uri/mime/bufferView、
+//     sampler 的 wrap/filter；bufferView/外部文件的图片字节存进 aImageBytes）；
+//     不解码、不接渲染侧的 sMATERIAL（解码见 GN_3Dtexture.h）。
 //   * 相机/灯光不导入。
 #include "GN_3Dmath.h"
 #include "GN_3Danim.h"
@@ -63,13 +64,16 @@ struct sASSET_ANIMATION {
     sANIM_CLIP aClip;
 };
 
-// 纹理来源描述（不读取图片字节）：image 的 uri/mime/bufferView + 其 sampler 的采样参数。
+// 纹理来源描述：image 的 uri/mime/bufferView + 其 sampler 的采样参数。
+// 导入时已把可取的压缩字节存进 aImageBytes（bufferView / 相对 .gltf 的外部文件）；
+// data URI 不进 aImageBytes，由 GN_3Dtexture 的解码器按 aUri 解出。
 // wrap/filter 用 glTF 原始枚举值，0 表示未指定（filter 无规范默认），wrap 缺省 10497(REPEAT)。
 struct sASSET_TEXTURE {
     std::string aName;
     std::string aUri; // image.uri，空 = 无外部 uri
     std::string aMime; // image.mimeType，缺失为空
     int32_t aBufferView; // image.bufferView 索引，-1 = 无
+    std::vector<uint8_t> aImageBytes; // 压缩图片字节（PNG/JPEG）；空 = 需从 aUri 解
     int32_t aWrapS;
     int32_t aWrapT;
     int32_t aMagFilter; // 9728/9729/9984..9987，0 = 未指定

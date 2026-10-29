@@ -111,7 +111,7 @@ VkPipeline CreateGraphicsPipeline(VkDevice device, const sPIPELINE_DESC &desc,
     inputAssembly.topology = desc.aTopology;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-    // 固定态用描述里的 viewport/scissor（PBR 的 Y 翻转是 y=H、height=-H 的负高度视口）；
+    // 固定态用描述里的 viewport/scissor（各 3D 管线统一为正高度全屏视口，竖直方向交给投影矩阵）；
     // 动态态下这两个指针被 VK_DYNAMIC_STATE_* 忽略，但仍提供合法内存。
     VkPipelineViewportStateCreateInfo viewportState = {};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;

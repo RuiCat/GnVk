@@ -48,6 +48,19 @@ layout(binding = 7) uniform LightUBO {
     float _p3, _p4, _p5;        // padding
 } ld;
 
+// P11-S3：雾（独立 Weather UBO，绑定 8；density == 0 时无效果）
+layout(binding = 8) uniform FogUBO {
+    vec4 fogColor;
+    vec4 fogParams;  // x=density(1/m), y=heightFalloff(1/m), z=baseHeight(m), w=maxOpacity
+} fog;
+
+float fogAmountAt(vec3 worldPosition) {
+    float distanceToCamera = length(worldPosition - scene.cp.xyz);
+    float heightScale = exp(-fog.fogParams.y * max(worldPosition.y - fog.fogParams.z, 0.0));
+    float amount = 1.0 - exp(-fog.fogParams.x * heightScale * distanceToCamera);
+    return clamp(amount, 0.0, fog.fogParams.w);
+}
+
 layout(location = 0) out vec4 outColor;
 
 // ═══════════════════════════════════════════════════════════
@@ -265,5 +278,5 @@ void main() {
     // ── Reinhard 色调映射 (HDR→LDR) ─────────────────
     color = color / (color + vec3(1.0));
 
-    outColor = vec4(color, 1.0);
+    outColor = vec4(mix(fog.fogColor.rgb, color, 1.0 - fogAmountAt(wp)), 1.0);
 }

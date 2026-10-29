@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "GN_3DclothGPU.h" // P9：布料 SSBO 描述（绘制模块按网格参数生成索引）
+
 #if defined(__GNUC__)
 #define GN_VK_INTERNAL __attribute__((visibility("hidden")))
 #else
@@ -79,6 +81,43 @@ void VkCheck(VkResult err, const char *msg);
 // 蒙皮关节调色板 UBO（P2-C，8KB：128 × mat4）；未初始化/失败返回 false。
 GN_VK_INTERNAL bool createSkinPaletteBuffer();
 GN_VK_INTERNAL void destroySkinPaletteBuffer();
+
+// P1c / P2 / P8 新增子系统：初始化失败只告警，不影响既有 3D 路径；
+// 实现分别位于 vkMaterial.cpp / vkSkinDraw.cpp / vkDebugDraw.cpp。
+GN_VK_INTERNAL bool init3DMaterial();
+GN_VK_INTERNAL void destroyMaterial();
+GN_VK_INTERNAL bool init3DSkinned();
+GN_VK_INTERNAL void destroySkinned();
+GN_VK_INTERNAL bool init3DDebugLines();
+GN_VK_INTERNAL void destroyDebugLines();
+
+// P9 GPU 粒子：模拟（vkParticleCompute.cpp）与绘制（vkParticleDraw.cpp）两半。
+// 绘制半在 SSBO 创建后由模拟半调用绑定；解绑先于缓冲销毁。
+GN_VK_INTERNAL bool init3DParticle();
+GN_VK_INTERNAL void destroyParticle();
+GN_VK_INTERNAL bool init3DParticleDraw();
+GN_VK_INTERNAL void destroyParticleDraw();
+GN_VK_INTERNAL bool particleDrawBindBuffer(VkBuffer buffer, uint32_t capacity);
+GN_VK_INTERNAL void particleDrawUnbindBuffer();
+
+// P9 剩余片：GPU 布料（vkClothCompute/vkClothDraw）与 SSBO 蒙皮（vkSkinSsbo）。
+// 均为惰性初始化，Lead 在 GN_VkInit3D 接线后同时走 init 路径。
+GN_VK_INTERNAL bool init3DCloth();
+GN_VK_INTERNAL void destroyCloth();
+GN_VK_INTERNAL bool init3DSkinnedSsbo();
+GN_VK_INTERNAL void destroySkinnedSsbo();
+
+// 布料绘制模块（vkClothDraw.cpp）从模拟模块取当前 A 缓冲与网格参数。
+GN_VK_INTERNAL VkBuffer clothGpuVertexBuffer();
+GN_VK_INTERNAL uint32_t clothGpuVertexCount();
+GN_VK_INTERNAL const GN3d::sCLOTH_GPU_DESC *clothGpuDesc();
+GN_VK_INTERNAL void destroyClothDraw();
+
+// P11-S3：雾 UBO（绑定 前向 3 / PBR 6 / 延迟 8）；由 GN_VkInit3D 最先创建。
+GN_VK_INTERNAL bool init3DAtmosphere();
+GN_VK_INTERNAL void destroyAtmosphere();
+GN_VK_INTERNAL VkBuffer atmosphereFogBuffer();
+GN_VK_INTERNAL VkDeviceSize atmosphereFogRange();
 
 } // namespace GNg
 

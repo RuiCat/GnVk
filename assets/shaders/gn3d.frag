@@ -33,6 +33,19 @@ layout(binding = 2, set = 0) uniform LightUBO {
     float lightCount;           // 激活光源数
 } lightData;
 
+// P11-S3：雾（独立 Weather UBO，绑定 3；density == 0 时无效果）
+layout(binding = 3, set = 0) uniform FogUBO {
+    vec4 fogColor;   // rgb = 雾颜色
+    vec4 fogParams;  // x=density(1/m), y=heightFalloff(1/m), z=baseHeight(m), w=maxOpacity
+} fog;
+
+float fogAmountAt(vec3 worldPosition) {
+    float distanceToCamera = length(worldPosition - scene.cameraPos.xyz);
+    float heightScale = exp(-fog.fogParams.y * max(worldPosition.y - fog.fogParams.z, 0.0));
+    float amount = 1.0 - exp(-fog.fogParams.x * heightScale * distanceToCamera);
+    return clamp(amount, 0.0, fog.fogParams.w);
+}
+
 // ── Push Constant (Blinn-Phong 材质) ────────────────
 layout(push_constant) uniform ModelPC {
     mat4 model;           // 模型矩阵
@@ -52,42 +65,6 @@ void main() {
     vec3 Kd = texColor * pc.diffuse.rgb;
     vec3 Ks = pc.specular.rgb;
     float shininess = pc.specular.a;
-
-    // ── 生物群系: 高程+坡度 → 颜色 ─────────────────
-    float h = fragWorldY;
-    float slope = 1.0 - abs(fragNormal.y);  // 0=平, 1=垂直
-
-    // 各生物群系基色
-    vec3 water    = vec3(0.08, 0.20, 0.50);
-    vec3 beach    = vec3(0.72, 0.66, 0.45);
-    vec3 grassland= vec3(0.25, 0.52, 0.15);
-    vec3 forest   = vec3(0.08, 0.32, 0.06);
-    vec3 shrubland= vec3(0.42, 0.38, 0.18);
-    vec3 rock     = vec3(0.38, 0.35, 0.33);
-    vec3 snow     = vec3(0.94, 0.94, 0.97);
-
-    // 高程阈值 (0~8 均匀分布, 低gain抑制了尖峰)
-    float t0 = smoothstep(-0.2, 0.2, h);
-    float t1 = smoothstep(0.5, 1.5, h);
-    float t2 = smoothstep(1.5, 3.0, h);
-    float t3 = smoothstep(3.0, 5.0, h);
-    float t4 = smoothstep(5.0, 6.5, h);
-    float t5 = smoothstep(6.5, 7.5, h);
-
-    vec3 color = water;
-    color = mix(color, beach,     t0);
-    color = mix(color, grassland, t1);
-    color = mix(color, forest,    t2);
-    color = mix(color, shrubland, t3);
-    color = mix(color, rock,      t4);
-    color = mix(color, snow,      t5);
-
-    // 坡度覆盖: 陡坡→岩石
-    float rocky = smoothstep(0.3, 0.6, slope);
-    vec3 slopeRock = vec3(0.35, 0.33, 0.30);
-    color = mix(color, slopeRock, rocky * 0.7);
-
-    Kd = color;
 
     // ── 环境光 ─────────────────────────────────────
     // 场景环境光 × 光源环境光 × 漫反射颜色
@@ -149,5 +126,5 @@ void main() {
         totalColor += (diffuse + specular) * lightColor * att;
     }
 
-    outColor = vec4(ambient + totalColor, 1.0);
+    outColor = vec4(mix(fog.fogColor.rgb, ambient + totalColor, 1.0 - fogAmountAt(fragWorldPos)), 1.0);
 }

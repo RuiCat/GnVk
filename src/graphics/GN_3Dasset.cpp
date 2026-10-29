@@ -14,11 +14,49 @@
 #include "cgltf.h"
 #pragma GCC diagnostic pop
 
+#include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace GN3d {
 
 namespace {
+
+// 读取整个文件（上限 64MB，图片足够）；失败返回空。
+std::vector<uint8_t> readFileBytes(const char *path) {
+    std::vector<uint8_t> bytes;
+    if(path == 0) return bytes;
+    FILE *fp = fopen(path, "rb");
+    if(fp == 0) return bytes;
+    fseek(fp, 0, SEEK_END);
+    const long size = ftell(fp);
+    if(size <= 0 || size > 64L * 1024L * 1024L) {
+        fclose(fp);
+        return bytes;
+    }
+    fseek(fp, 0, SEEK_SET);
+    bytes.resize((size_t)size);
+    const size_t got = fread(bytes.data(), 1, bytes.size(), fp);
+    fclose(fp);
+    if(got != bytes.size()) bytes.clear();
+    return bytes;
+}
+
+// 取文件路径的目录部分（含末尾分隔符）；无分隔符返回空串。
+std::string dirNameOf(const char *path) {
+    std::string text = path ? path : "";
+    const size_t slash = text.find_last_of("/\\");
+    if(slash == std::string::npos) return std::string();
+    return text.substr(0, slash + 1);
+}
+
+std::string joinPath(const std::string &dir, const std::string &name) {
+    if(dir.empty()) return name;
+    if(name.empty()) return dir;
+    const char last = dir[dir.size() - 1];
+    if(last == '/' || last == '\\') return dir + name;
+    return dir + "/" + name;
+}
 
 GNg::sVEC3 makeVec3(float x, float y, float z) {
     GNg::sVEC3 v = {x, y, z};
@@ -160,7 +198,7 @@ void importSkins(const cgltf_data *data, sASSET &out) {
     }
 }
 
-void importTextures(const cgltf_data *data, sASSET &out) {
+void importTextures(const cgltf_data *data, sASSET &out, const char *baseDir) {
     out.aTextures.resize(data->textures_count);
     for(cgltf_size t = 0; t < data->textures_count; ++t) {
         const cgltf_texture &texture = data->textures[t];
@@ -169,6 +207,7 @@ void importTextures(const cgltf_data *data, sASSET &out) {
         target.aUri.clear();
         target.aMime.clear();
         target.aBufferView = -1;
+        target.aImageBytes.clear();
         // glTF 默认值：wrap=REPEAT；filter 无规范默认（记为 0=未指定）。
         target.aWrapS = (int32_t)cgltf_wrap_mode_repeat;
         target.aWrapT = (int32_t)cgltf_wrap_mode_repeat;
@@ -177,8 +216,18 @@ void importTextures(const cgltf_data *data, sASSET &out) {
         if(texture.image != 0) {
             target.aUri = texture.image->uri ? texture.image->uri : "";
             target.aMime = texture.image->mime_type ? texture.image->mime_type : "";
-            if(texture.image->buffer_view != 0 && data->buffer_views != 0) {
-                target.aBufferView = (int32_t)(texture.image->buffer_view - data->buffer_views);
+            const cgltf_buffer_view *view = texture.image->buffer_view;
+            if(view != 0 && data->buffer_views != 0) {
+                target.aBufferView = (int32_t)(view - data->buffer_views);
+                // .glb / 内嵌 buffer：cgltf_load_buffers 已把字节读进 buffer->data。
+                if(view->buffer != 0 && view->buffer->data != 0 && view->buffer->size >= view->offset &&
+                   view->buffer->size - view->offset >= view->size) {
+                    const uint8_t *start = view->buffer->data + view->offset;
+                    target.aImageBytes.assign(start, start + view->size);
+                }
+            } else if(!target.aUri.empty() && target.aUri.compare(0, 5, "data:") != 0 && baseDir != 0) {
+                // 外部图片：按 .gltf 所在目录解析（loadFromMemory 无目录，留空由解码器报不支持）。
+                target.aImageBytes = readFileBytes(joinPath(baseDir, target.aUri).c_str());
             }
         }
         if(texture.sampler != 0) {
@@ -267,13 +316,13 @@ void importAnimations(const cgltf_data *data, sASSET &out) {
     }
 }
 
-bool importGltf(const cgltf_data *data, sASSET &out) {
+bool importGltf(const cgltf_data *data, sASSET &out, const char *baseDir) {
     out.clear();
     importNodes(data, out);
     importMeshes(data, out);
     importSkins(data, out);
     importAnimations(data, out);
-    importTextures(data, out);
+    importTextures(data, out, baseDir);
     importMaterials(data, out);
     return true;
 }
@@ -299,7 +348,8 @@ bool sASSET::loadFromFile(const char *path) {
         return false;
     }
     const cgltf_result buffers = cgltf_load_buffers(&options, data, path);
-    const bool ok = (buffers == cgltf_result_success) && importGltf(data, *this);
+    const std::string baseDir = dirNameOf(path);
+    const bool ok = (buffers == cgltf_result_success) && importGltf(data, *this, baseDir.c_str());
     cgltf_free(data);
     if(!ok) clear();
     return ok;
@@ -315,7 +365,7 @@ bool sASSET::loadFromMemory(const void *data, size_t size) {
         return false;
     }
     const cgltf_result buffers = cgltf_load_buffers(&options, gltf, 0);
-    const bool ok = (buffers == cgltf_result_success) && importGltf(gltf, *this);
+    const bool ok = (buffers == cgltf_result_success) && importGltf(gltf, *this, 0);
     cgltf_free(gltf);
     if(!ok) clear();
     return ok;

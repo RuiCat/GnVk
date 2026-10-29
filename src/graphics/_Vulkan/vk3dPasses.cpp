@@ -9,6 +9,11 @@ namespace GNg {
 
 bool s_inShadowPass = false;
 
+namespace {
+// 天空参数：GN_VkSetSky 写入，GN_VkDrawSkybox 每帧连同 viewProj 一起上传。
+VkSkyParams s_skyParams;
+} // namespace
+
 // ═══════════════════════════════════════════════════════════
 //  阴影映射 Pass
 // ═══════════════════════════════════════════════════════════
@@ -166,13 +171,18 @@ void GN_VkCompositeToSwapchain() {
 //  天空盒渲染
 //  必须在一个活跃的 RenderPass 中调用 (在 Clear 之后, 3D 绘制之前)
 // ═══════════════════════════════════════════════════════════
+void GN_VkSetSky(const VkSkyParams &params) { s_skyParams = params; }
+
 void GN_VkDrawSkybox(const sMAT44 *viewProj) {
     if(!GN_Vk.initialized || !GN_Vk.skyboxPipeline || !s_in3DPass) return;
 
-    // 上传 viewProj
+    // UBO: viewProj(64) + VkSkyParams(64) = 128 B
+    float ubo[32];
+    memcpy(ubo, viewProj->m, 64);
+    memcpy(ubo + 16, &s_skyParams, sizeof(VkSkyParams));
     void *d;
-    vkMapMemory(GN_Vk.device, GN_Vk.skyboxUBOMemory, 0, 64, 0, &d);
-    memcpy(d, viewProj->m, 64);
+    vkMapMemory(GN_Vk.device, GN_Vk.skyboxUBOMemory, 0, sizeof(ubo), 0, &d);
+    memcpy(d, ubo, sizeof(ubo));
     vkUnmapMemory(GN_Vk.device, GN_Vk.skyboxUBOMemory);
 
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame],

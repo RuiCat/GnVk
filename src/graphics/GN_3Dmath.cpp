@@ -341,8 +341,8 @@ void Mat44RotateYawPitchRoll(sMAT44 *out, float yaw, float pitch, float roll) {
 
 void Mat44PerspectiveVK(sMAT44 *out, float fovY_rad, float aspect,
                         float nearZ, float farZ) {
-    // Vulkan 约定: 深度 [0,1], Y 向上, 右手坐标系
-    // 经过投影后: NDC z ∈ [0,1]
+    // 输入：视图空间右手系、+Y 上、-Z 前；输出：Vulkan NDC（y 向下、z ∈ [0,1]）。
+    // m[5] = -f 把 +Y 翻到 NDC 的 -y，再由正高度视口映射到屏幕上方。
     float f = 1.0f / tanf(fovY_rad * 0.5f);
     float nf = 1.0f / (nearZ - farZ);
 

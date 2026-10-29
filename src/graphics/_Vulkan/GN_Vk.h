@@ -8,6 +8,12 @@
 #include <cstring>
 #include <cstdlib>
 #include "GN_Pipeline.h" // P1b：管线缓存以值成员持有，需完整类型
+#include "GN_Material.h" // P1c：材质实例（CPU 描述 + GPU 句柄槽）
+#include "GN_3Dtexture.h" // P1c：纹理解码结果与 glTF sampler 参数
+#include "GN_3DparticleGPU.h" // P9：GPU 粒子 SSBO 布局与绘制参数
+#include "GN_3DclothGPU.h" // P9：GPU 布料 SSBO 布局与 CPU 回退
+#include "GN_3Dparticle.h" // P11-S5：降水绘制直接消费 CPU 粒子池（GN3d::sPARTICLE）
+#include "GN_3Ddecal.h" // P11-S6b：贴花渲染条目（GN3d::sDECAL_RENDER_ITEM）
 
 namespace GNg {
 // ═══════════════════════════════════════════════════════════
@@ -122,6 +128,21 @@ struct alignas(16) VkModelPushConstPBR {
 
 // 向后兼容别名 (Blinn-Phong 是默认)
 typedef VkModelPushConstBP VkModelPushConst;
+
+// 天空参数（CPU → 天空 UBO；与 assets/shaders/gn3d_skybox.frag 的 SkyboxUBO 逐字段一致）
+struct VkSkyParams {
+    float sunDirection[3] = {0.45f, 0.78f, 0.44f};
+    float sunIntensity = 1.0f;
+    float horizonColor[3] = {0.68f, 0.78f, 0.92f};
+    float cloudCoverage = 0.15f;
+    float zenithColor[3] = {0.16f, 0.32f, 0.62f};
+    float cloudSharpness = 0.6f;
+    float timeSeconds = 0.0f;
+    float windX = 0.0f;
+    float windZ = 0.0f;
+    float exposure = 1.0f;
+};
+static_assert(sizeof(VkSkyParams) == 64, "VkSkyParams 必须为 64 字节");
 #endif // GN_USING_3D
 
 // ═══════════════════════════════════════════════════════════
@@ -382,6 +403,10 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
 // 结束 3D 渲染 pass (切换回 2D 管线)
 void GN_VkEnd3DPass();
 
+// 在 3D pass 之后重新打开一个 2D 叠层通道（loadOp=LOAD，保留 3D 画面）：
+// 之后的 2D / UI / 文本绘制会在帧末 GN_VkEndFrame 里画进该通道，实现 HUD 叠在 3D 画面上。
+void GN_VkBegin2DPass();
+
 
 // 提交 3D 模型绘制 (PBR 模式: 使用 roughness/metallic/ao, 支持纹理/法线贴图)
 void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
@@ -428,6 +453,8 @@ void GN_VkShadowDraw(const void *vertices, uint32_t vertexCount,
 void GN_VkCompositeToSwapchain();
 
 // — 天空盒 —
+// 设置天空参数（下一次 GN_VkDrawSkybox 生效）；未设置时使用 VkSkyParams 默认值。
+void GN_VkSetSky(const VkSkyParams &params);
 void GN_VkDrawSkybox(const sMAT44 *viewProj);
 
 // — 延迟渲染 —
@@ -441,6 +468,176 @@ void GN_VkDraw3D_GBuffer(const void *vertices, uint32_t vertexCount,
                          const sIMAGE *albedoTex = nullptr, const sIMAGE *normalTex = nullptr);
 void GN_VkDeferredLighting(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                            const void *lightUBO, uint32_t lightUBOSize);
+
+// ── P1c：GPU 材质实例（描述符集 + UBO/纹理绑定）────────────
+// sMATERIAL_BINDING::aResource 按 aKind 指向下面两种资源描述之一。
+struct sMATERIAL_UBO_RESOURCE {
+    VkBuffer aBuffer;
+    VkDeviceSize aOffset;
+    VkDeviceSize aRange;
+};
+struct sMATERIAL_TEX_RESOURCE {
+    VkImageView aImageView;
+    VkSampler aSampler;
+    VkImageLayout aLayout;
+};
+
+// 材质固定布局（set 0）：binding 0 = UNIFORM_BUFFER，binding 1 = COMBINED_IMAGE_SAMPLER。
+// 成功时把 VkDescriptorSet 写入 material->aDescriptorSet 并返回 true；
+// 描述非法/绑定不是 0,1/未初始化/池耗尽返回 false。
+bool GN_VkMaterialCreate(GN3d::sMATERIAL_RES *material);
+// 归还材质描述符集（不销毁 UBO/纹理本身）；nullptr/未创建时安全。
+void GN_VkMaterialDestroy(GN3d::sMATERIAL_RES *material);
+// 用材质实例的 set 0 绘制；vertices 为 VkVertex3D（11 float）数组，model 走 push constant。
+void GN_VkDraw3DMaterial(const void *vertices, uint32_t vertexCount,
+                         const uint32_t *indices, uint32_t indexCount,
+                         const sMAT44 *modelMatrix, const GN3d::sMATERIAL_RES *material);
+
+// ── P2：GPU 蒙皮绘制（顶点 = GN3d::sSKINNED_VERTEX，68 字节）────
+// palette 为关节调色板（world × inverseBind）：蒙皮在模型空间完成后再乘 modelMatrix。
+// 成功提交返回 true；未初始化/参数为空/调色板打包失败返回 false。
+bool GN_VkDraw3DSkinned(const void *vertices, uint32_t vertexCount,
+                        const uint32_t *indices, uint32_t indexCount,
+                        const sMAT44 *palette, uint32_t paletteCount,
+                        const sMAT44 *modelMatrix,
+                        float r, float g, float b);
+
+// ── P9-b：SSBO 调色板蒙皮（关节数不再受 128 UBO 上限；v1 上限 4096）────
+// 顶点格式与 GN_VkDraw3DSkinned 相同（GN3d::sSKINNED_VERTEX，68B）；palette 存 SSBO。
+// paletteCount 为 0 或 > 4096、参数为空、3D pass 外调用均返回 false。
+bool GN_VkDraw3DSkinnedSsbo(const void *vertices, uint32_t vertexCount,
+                            const uint32_t *indices, uint32_t indexCount,
+                            const sMAT44 *palette, uint32_t paletteCount,
+                            const sMAT44 *modelMatrix,
+                            float r, float g, float b);
+
+// ── P10：动态 LOD 诊断钩子 ────
+// 最近一次 GN_VkDraw3DPBR 提交的 indexCount（无索引绘制 / 尚未绘制时为 0）。
+// 仅供验收与诊断：选级正确性由 GN_3Dlod 的纯 CPU 单测保证。
+uint32_t GN_VkLast3DIndexCount();
+
+// ── P8：3D pass 内的调试线框（世界坐标，颜色 0xAARRGGBB）────
+void GN_VkDrawDebugLines(const void *lines, uint32_t lineCount, unsigned int color);
+
+// ── P1c：纹理上传（RGBA8 → VkImage，glTF sampler → VkSampler）────
+struct sTEXTURE_GPU {
+    VkImage aImage;
+    VkDeviceMemory aMemory;
+    VkImageView aView;
+    VkSampler aSampler;
+    uint32_t aWidth;
+    uint32_t aHeight;
+
+    sTEXTURE_GPU();
+};
+
+// pixels 为逐行 top-down 的 RGBA8（width*height*4 字节），上传为 R8G8B8A8_SRGB。
+// sampler 取 GN3d::samplerFromAssetTexture() 的结果；成功时填满 out 并返回 true。
+// out 已被占用（aImage != 空）时拒绝，要求先 GN_VkDestroyTexture。
+bool GN_VkCreateTextureRGBA8(const unsigned char *pixels, uint32_t width, uint32_t height,
+                             const GN3d::sTEXTURE_SAMPLER &sampler, sTEXTURE_GPU &out);
+// 释放纹理的 sampler/view/image/memory；可重复调用。
+void GN_VkDestroyTexture(sTEXTURE_GPU &texture);
+
+// ── P11-S3：雾（独立 Weather/Fog UBO，三条件 3D 片元管线共用）────
+// 布局：color.rgb = 雾颜色，params = (density 1/m, heightFalloff 1/m, baseHeight m, maxOpacity)。
+// 绑定点：前向 binding 3、PBR binding 6、延迟光照 binding 8（冻结槽位表）。
+struct sFOG_UBO {
+    float aColor[4];
+    float aParams[4];
+};
+
+// 写入雾参数（密度/高度衰减被钳到 >= 0，最大不透明度钳到 [0,1]）；未初始化时安全忽略。
+// density == 0 表示关闭雾（默认值），既有画面不变。
+void GN_VkSetFog(const sFOG_UBO &fog);
+
+// ── P11-S2b：中景 billboard 云层 ────
+// 一块云层 = aTilesPerAxis² 个面向相机的四边形（顶点着色器内 billboard 展开），
+// 片元用 FBM 程序化 alpha（aCoverage 截断 + aSharpness 控制边缘），随风漂移、近处淡出。
+// tile 网格原点按相机 xz 取模对齐并以 aWind × aTimeSeconds 平移 ⇒ 云层"无限"且无接缝；
+// 管线：alpha 混合、深度测试开、深度写关、不剔除（L2 云层在 3D pass 内提交）。
+// 参数非法 / 未初始化 / 3D pass 外 / aTilesPerAxis 越界 返回 false。
+struct sCLOUD_DRAW_PARAMS {
+    sMAT44 aViewProj; // 主 pass 的 view-projection（列主序，与其它 3D 绘制一致）
+    GNg::sVEC3 aCameraPos; // 相机世界位置（视差与近处淡出）
+    float aLayerHeight = 0.0f; // 云层世界高度（m）
+    GNg::sVEC3 aWind; // 漂移速度（m/s，只用 x/z）
+    float aTileSize = 256.0f; // 单个 tile 的世界尺寸（m，必须 > 0）
+    uint32_t aTilesPerAxis = 1; // 每轴 tile 数（1..64；总四边形 = 平方）
+    float aCoverage = 0.5f; // 云量 0..1（越大越满）
+    float aSharpness = 0.5f; // 边缘锐度 0..1
+    float aOpacity = 1.0f; // 整体不透明度 0..1
+    float aTimeSeconds = 0.0f; // 漂移时间（秒）
+    float aNearFade = 0.0f; // 近处淡出距离（m，0 = 关）
+};
+bool GN_VkDrawCloud(const sCLOUD_DRAW_PARAMS &params);
+// 释放云层的顶点缓冲/管线布局（管线归 aPipelineCache）；可重复调用。
+void GN_VkCloudDestroy();
+
+// ── P11-S5：降水（CPU 展开 billboard，alpha 混合，深度测试开 / 深度写关）────
+// 每个活粒子展开成 2 个三角形（6 顶点，世界空间 billboard 面向相机）；
+// 雨滴沿世界 -Y 按 aStreakScale 拉长（雪 = 1 ⇒ 圆形/方形飘落）；alpha = 粒子 aColor.w × aAlphaScale。
+// v1 每帧 CPU 展开 + 上传动态顶点缓冲（≈36 B/顶点，8000 粒子 ≈ 1.7 MB/帧）。
+// 参数非法（aCount > 0 但 aParticles 为空）/ 未初始化 / 3D pass 外返回 false。
+struct sPRECIP_DRAW_PARAMS {
+    sMAT44 aViewProj; // 主 pass 的 view-projection（列主序）
+    GNg::sVEC3 aCameraRight; // 相机右向量（世界空间，单位）
+    GNg::sVEC3 aCameraUp; // 相机上向量（世界空间，单位）
+    const GN3d::sPARTICLE *aParticles = nullptr; // CPU 粒子池（只读）
+    uint32_t aCount = 0;
+    float aStreakScale = 1.0f; // 雨滴纵向拉伸（雪 = 1）
+    float aAlphaScale = 1.0f; // 额外透明度缩放 0..1
+};
+bool GN_VkDrawPrecipitation(const sPRECIP_DRAW_PARAMS &params);
+// 释放降水顶点缓冲/管线布局；可重复调用。
+void GN_VkPrecipitationDestroy();
+
+// ── P11-S6b：地面贴花（软圆斑 / 溅射环，alpha 混合、深度测试开 / 写关、不剔除）────
+// 每个条目铺成一块**水平**四边形（世界 XZ 平面，y 由调用方给，通常贴地 +0.02），uv 供片元做软边：
+//   * aKind == SPLASH_RING：环状 alpha（溅射圈）；
+//   * 其它：中心亮的软圆斑（水渍）。
+// 顶点缓冲按帧奇偶与帧内调用序号分配（4 槽），同帧可多次调用。
+// 条目为空 / 未初始化 / 3D pass 外返回 false。
+struct sDECAL_DRAW_PARAMS {
+    sMAT44 aViewProj; // 主 pass 的 view-projection（列主序）
+    const GN3d::sDECAL_RENDER_ITEM *aItems = nullptr;
+    uint32_t aCount = 0;
+    float aAlphaScale = 1.0f; // 额外透明度缩放 0..1
+};
+bool GN_VkDrawDecals(const sDECAL_DRAW_PARAMS &params);
+// 释放贴花的顶点缓冲与管线布局；可重复调用。
+void GN_VkDecalDestroy();
+
+// ── P9：GPU 粒子（compute 模拟 + SSBO + 实例化 billboard）────
+// 创建固定容量粒子系统：SSBO 为 host-visible（模拟在 compute 内完成，CPU 只做上传/回读）。
+// capacity ∈ (0, PARTICLE_GPU_MAX_CAPACITY]；sim 非法或容量越界返回 false 且不改变既有系统。
+// 重复调用会先释放旧系统再重建。
+bool GN_VkParticleCreate(uint32_t capacity, const GN3d::sPARTICLE_SIM_DESC &sim);
+// 把 count 个粒子写入 SSBO 的 [offset, offset+count) 区间；越界/空指针返回 false。
+bool GN_VkParticleUpload(const GN3d::sGPU_PARTICLE *particles, uint32_t count, uint32_t offset);
+// 提交一次 compute 模拟并等待完成（dt <= 0 或系统未创建返回 false）。
+// 调用方须保证上一帧提交已完成（引擎在帧边界等待），v1 不跨帧流水化。
+bool GN_VkParticleSimulate(float dt);
+// 在 3D pass 内绘制 params.aCount 个 billboard（超过容量截断）；pass 外/参数非法返回 false。
+bool GN_VkParticleDraw(const GN3d::sPARTICLE_DRAW_PARAMS &params);
+// 只读回读接口（测试/调试）：返回映射后的粒子数组，未创建返回 0；outCount 可为空。
+const GN3d::sGPU_PARTICLE *GN_VkParticleData(uint32_t *outCount);
+// 释放 SSBO/UBO/描述符集；可重复调用。
+void GN_VkParticleDestroy();
+
+// ── P9-a：GPU 布料（compute 模拟 + SSBO + 网格绘制）────
+// 惰性初始化：首次 Create 时建管线/缓冲；失败返回 false。
+bool GN_VkClothCreate(const GN3d::sCLOTH_GPU_DESC &desc);
+// 上传顶点（count 必须等于 width*height）；越界/空指针返回 false。
+bool GN_VkClothUpload(const GN3d::sCLOTH_GPU_VERTEX *vertices, uint32_t count);
+// 推进一步（compute 提交并等待完成）；未创建或 dt <= 0 返回 false。
+bool GN_VkClothSimulate(float dt);
+// 只读回读：返回映射后的顶点数组；未创建返回 0。
+const GN3d::sCLOTH_GPU_VERTEX *GN_VkClothData(uint32_t *outCount);
+// 在 3D pass 内绘制布料网格（顶点 pulling + 网格索引；albedo = (r,g,b)）。
+bool GN_VkClothDraw(const sMAT44 &viewProj, float r, float g, float b);
+// 释放布料 SSBO/管线布局/索引缓冲；可重复调用。
+void GN_VkClothDestroy();
 
 } // namespace GNg
 #endif // GN_USING_3D

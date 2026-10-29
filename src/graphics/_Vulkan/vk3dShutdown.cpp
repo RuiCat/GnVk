@@ -54,6 +54,23 @@ void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize) {
 }
 
 void GN_VkShutdown3D() {
+    // P1c / P2 / P8：先释放新增子系统的缓冲/布局（此时 device 仍有效）
+    destroyMaterial();
+    destroySkinned();
+    destroyDebugLines();
+    // P9：先释放粒子 SSBO/描述符集，再销毁两半的管线布局。
+    destroyParticle();
+    destroyParticleDraw();
+    // P9 剩余片：SSBO 蒙皮与 GPU 布料（管线归缓存，这里释放缓冲/描述符集/布局）。
+    destroySkinnedSsbo();
+    destroyCloth();
+    // P11-S3：雾 UBO（描述符集随池释放，这里只销毁缓冲/内存）。
+    destroyAtmosphere();
+    // P11-S2b / S5 / S6b：云层、降水、贴花的动态顶点缓冲/管线布局（管线归 aPipelineCache）。
+    GN_VkCloudDestroy();
+    GN_VkPrecipitationDestroy();
+    GN_VkDecalDestroy();
+
     if(GN_Vk.descriptorSet3D) { GN_Vk.descriptorSet3D = VK_NULL_HANDLE; } // pool freed elsewhere
     if(GN_Vk.descriptorSetPBR) { GN_Vk.descriptorSetPBR = VK_NULL_HANDLE; }
     if(GN_Vk.uniformBuffer3D) {

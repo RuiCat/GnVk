@@ -122,3 +122,46 @@ TEST_CASE(cullVisibleList) {
     CHECK_EQ(cullModels(frustum, models, 4, out, 0), 0u); // maxOut=0
     CHECK_EQ(cullModels(frustum, 0, 4, out, 4), 0u); // 空数组
 }
+
+// 剔除绘制：复用可见列表，返回绘制数并写 outVisible；无 GPU 时绘制是 no-op，只验计数。
+TEST_CASE(cullDrawModelsPBRCount) {
+    const sFRUSTUM frustum = sFRUSTUM::FromViewProj(identityMatrix());
+    cMODEL visibleA;
+    buildCube(visibleA, 0.5f);
+    CHECK(visibleA.computeWorldAABB());
+    cMODEL hidden;
+    buildCube(hidden, 0.5f);
+    hidden.SetPosition(10.0f, 0.0f, 0.0f);
+    CHECK(hidden.computeWorldAABB());
+    cMODEL visibleC;
+    buildCube(visibleC, 0.2f);
+    visibleC.SetPosition(0.0f, 0.0f, 0.4f);
+    CHECK(visibleC.computeWorldAABB());
+
+    cMODEL *models[4] = {&visibleA, &hidden, &visibleC, 0};
+    uint32_t visible = 0xFFFFFFFFu;
+    CHECK_EQ(cullDrawModelsPBR(frustum, models, 4, &visible), 2u);
+    CHECK_EQ(visible, 2u);
+
+    CHECK_EQ(cullDrawModelsPBR(frustum, models, 4, 0), 2u); // outVisible 可空
+}
+
+// 剔除绘制边界：空指针/空列表返回 0 且 outVisible 归零；全部可见时 outVisible 取上限 count。
+TEST_CASE(cullDrawModelsPBREdgeCases) {
+    const sFRUSTUM frustum = sFRUSTUM::FromViewProj(identityMatrix());
+    uint32_t visible = 0xFFFFFFFFu;
+
+    CHECK_EQ(cullDrawModelsPBR(frustum, 0, 4, &visible), 0u); // models 为空
+    CHECK_EQ(visible, 0u);
+    CHECK_EQ(cullDrawModelsPBR(frustum, 0, 0, 0), 0u); // 全空指针
+
+    cMODEL allVisible;
+    buildCube(allVisible, 0.5f);
+    CHECK(allVisible.computeWorldAABB());
+    cMODEL *models[1] = {&allVisible};
+    CHECK_EQ(cullDrawModelsPBR(frustum, models, 1, &visible), 1u);
+    CHECK_EQ(visible, 1u); // 上限 = count
+
+    CHECK_EQ(cullDrawModelsPBR(frustum, models, 0, &visible), 0u); // count=0
+    CHECK_EQ(visible, 0u);
+}

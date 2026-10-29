@@ -80,7 +80,9 @@ struct sMAT44 {
 
     inline sMAT44() {}
     inline void Init(bool is_unit); // 实现放在所有函数声明之后
-    inline sMAT44(bool is_unit) { Init(is_unit); }
+    // explicit：防止 pointer/整数被静默转成 bool 再构造出一个单位矩阵
+    // （mmdViewer 的 drawPrecipitation(&viewProjection) 就是这么把真矩阵换成单位矩阵的）。
+    inline explicit sMAT44(bool is_unit) { Init(is_unit); }
 
     // 逐元素构造 (列主序: 先列0, 再列1, 再列2, 再列3)
     inline sMAT44(

@@ -141,6 +141,14 @@ ifeq ($(PLATFORM),linux)
     CXXFLAGS_EXTRA += $(FT_CFLAGS)
     LIBS      += $(FT_LIBS)
   endif
+  # libjpeg（P1c glTF 纹理：JPEG 解码；缺失时只支持 PNG）
+  ifeq ($(shell pkg-config --exists libjpeg && echo yes),yes)
+    JPEG_CFLAGS := $(shell pkg-config --cflags libjpeg)
+    JPEG_LIBS   := $(shell pkg-config --libs libjpeg)
+    DEFINES   += -DGN_HAS_JPEG
+    CXXFLAGS_EXTRA += $(JPEG_CFLAGS)
+    LIBS      += $(JPEG_LIBS)
+  endif
 endif
 
 # ═══════════════════════════════════════════════════════════
@@ -172,9 +180,11 @@ FILE_SRC   := $(wildcard src/file/*.cpp)
 PLAT_SRC   := $(wildcard src/platform/_Main/*.cpp) \
               $(wildcard src/platform/_Sys/*.cpp)
 MEDIA_SRC  := $(wildcard src/media/Media/*.cpp)
+MMD_SRC    := $(wildcard src/mmd/*.cpp)
 
 ENGINE_SRC := $(CORE_SRC) $(GFX_SRC) $(AUDIO_SRC) $(INPUT_SRC) \
-              $(UI_SRC) $(NET_SRC) $(FILE_SRC) $(PLAT_SRC) $(MEDIA_SRC)
+              $(UI_SRC) $(NET_SRC) $(FILE_SRC) $(PLAT_SRC) $(MEDIA_SRC) \
+              $(MMD_SRC)
 ENGINE_OBJ := $(patsubst src/%.cpp, $(BUILD_DIR)/%.o, $(ENGINE_SRC))
 
 # ── 颜色 ────────────────────────────────────────────────
@@ -231,6 +241,31 @@ unit: $(TARGET)
 check: all unit
 	@echo "$(GREEN)✅ check 通过: 构建 + 单元测试$(RESET)"
 
+# ── P1b GPU 验收（需要 Vulkan 设备与可见窗口；无 GPU 时退出码 2 = SKIP）──
+GPU_CHECK_SRC   := $(wildcard tests/gpu/*.cpp)
+GPU_CHECK_BIN   := build/gpuCheck
+GPU_CHECK_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+
+.PHONY: gpuCheck
+gpuCheck: $(TARGET)
+	@echo "$(YELLOW)🖥  编译 GPU 管线验收程序...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(GPU_CHECK_FLAGS) $(GPU_CHECK_SRC) $(TEST_LIBS) -o $(GPU_CHECK_BIN)
+	@echo "$(YELLOW)▶ 运行 GPU 验收（无 /dev/dri 时会 SKIP）...$(RESET)"
+	@LD_LIBRARY_PATH=. ./$(GPU_CHECK_BIN)
+
+# ── MMD 查看器（编译不依赖 GPU；运行需要 Vulkan 设备与窗口）────────
+MMD_VIEWER_SRC := $(wildcard tests/mmdViewer/*.cpp)
+MMD_VIEWER_BIN := build/mmdViewer
+MMD_VIEWER_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+
+.PHONY: mmdViewer
+mmdViewer: $(TARGET)
+	@echo "$(YELLOW)🖼  编译 MMD 查看器...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(MMD_VIEWER_FLAGS) $(MMD_VIEWER_SRC) -L. -l$(LIB_STEM) $(LIBS) -o $(MMD_VIEWER_BIN)
+	@echo "$(GREEN)✅ 运行: LD_LIBRARY_PATH=. ./$(MMD_VIEWER_BIN)$(RESET)"
+
 # ── ASan/UBSan 单元测试（独立构建目录与库名，不污染 release 产物）──
 .PHONY: asan
 asan:
@@ -259,7 +294,7 @@ debug: clean all
 .PHONY: clean
 clean:
 	@echo "$(YELLOW)🧹 清理编译产物...$(RESET)"
-	rm -rf $(BUILD_DIR) build/obj-asan libGN_mini*.* build/test_* build/unit_tests*
+	rm -rf $(BUILD_DIR) build/obj-asan libGN_mini*.* build/test_* build/unit_tests* build/gpuCheck
 	@echo "$(GREEN)✅ 清理完成$(RESET)"
 
 # ═══════════════════════════════════════════════════════════
@@ -302,6 +337,7 @@ help:
 	@echo "║    make unit                编译并运行单元测试   ║"
 	@echo "║    make asan                ASan/UBSan 单测      ║"
 	@echo "║    make check               构建+单元测试        ║"
+	@echo "║    make gpuCheck            P1b GPU 管线验收     ║"
 	@echo "║    make shaders             编译 GLSL → SPIR-V   ║"
 	@echo "║    make clean               清理                 ║"
 	@echo "║    make help                此帮助               ║"

@@ -1,6 +1,8 @@
-// GN_3Dparticle.cpp — 3D 粒子：固定池、按速率发射、圆锥随机方向、重力/阻尼、寿命回收、颜色插值。
+// GN_3Dparticle.cpp — 3D 粒子：固定池、按速率发射、CONE/BOX 生成、重力/阻尼/风、寿命回收、
+// 逐轴回收盒折返、尺寸范围、颜色插值。
 //
-// 确定性：随机数用固定种子 xorshift32；同参数 + 同 dt 序列结果可逐位重复（发射槽按空闲栈顺序分配）。
+// 确定性：主随机流（方向/速度/寿命）与尺寸随机流分开，均用固定种子 xorshift32；
+// 同参数 + 同 dt 序列结果可逐位重复（发射槽按空闲栈顺序分配）。尺寸流独立 ⇒ 旧 desc 逐位不变。
 // 渲染（实例缓冲/纹理/加法混合）留 P8；本文件只做 CPU 模拟。
 #include <GN.h>
 #include "GN_3Dparticle.h"
@@ -14,6 +16,7 @@ namespace {
 const float kParticleMaxDt = 0.1f;
 const float kParticleTwoPi = 6.2831853072f;
 const uint32_t kParticleSeed = 0x2545F491u;
+const uint32_t kParticleSizeSeed = 0x9E3779B9u;
 
 GNg::sVEC3 makeVec3(float x, float y, float z) {
     GNg::sVEC3 v = {x, y, z};
@@ -55,6 +58,15 @@ float lerpFloat(float from, float to, float t) {
     return from + (to - from) * t;
 }
 
+// 逐轴折返：把坐标 wrap 到 [center-half, center+half)；half <= 0 的轴不动。
+void wrapCoordinate(float &coordinate, float center, float halfExtent) {
+    if(!(halfExtent > 0.0f)) return;
+    const float span = 2.0f * halfExtent;
+    float offset = fmodf(coordinate - (center - halfExtent), span);
+    if(offset < 0.0f) offset += span;
+    coordinate = center - halfExtent + offset;
+}
+
 GNg::sVEC4 lerpColor(const GNg::sVEC4 &from, const GNg::sVEC4 &to, float t) {
     return GNg::sVEC4(lerpFloat(from.x, to.x, t), lerpFloat(from.y, to.y, t),
                       lerpFloat(from.z, to.z, t), lerpFloat(from.w, to.w, t));
@@ -63,7 +75,8 @@ GNg::sVEC4 lerpColor(const GNg::sVEC4 &from, const GNg::sVEC4 &to, float t) {
 } // namespace
 
 cPARTICLE_SYSTEM::cPARTICLE_SYSTEM()
-    : aActiveCount(0), aRngState(kParticleSeed), aEmitAccumulator(0.0f) {
+    : aActiveCount(0), aRngState(kParticleSeed), aSizeRngState(kParticleSizeSeed),
+      aEmitAccumulator(0.0f) {
     aDesc.aOrigin = makeVec3(0.0f, 0.0f, 0.0f);
     aDesc.aDirection = makeVec3(0.0f, 1.0f, 0.0f);
     aDesc.aSpread = 0.0f;
@@ -77,6 +90,8 @@ cPARTICLE_SYSTEM::cPARTICLE_SYSTEM()
     aDesc.aDrag = 0.0f;
     aDesc.aColorStart = GNg::sVEC4(1.0f, 1.0f, 1.0f, 1.0f);
     aDesc.aColorEnd = GNg::sVEC4(1.0f, 1.0f, 1.0f, 0.0f);
+    aRecycleCenter = makeVec3(0.0f, 0.0f, 0.0f);
+    aRecycleHalfExtent = makeVec3(0.0f, 0.0f, 0.0f);
 }
 
 cPARTICLE_SYSTEM::~cPARTICLE_SYSTEM() {}
@@ -92,6 +107,22 @@ bool cPARTICLE_SYSTEM::create(const sPARTICLE_EMITTER_DESC &desc) {
     if(!finiteVec(desc.aOrigin) || !finiteVec(desc.aGravity) || !finiteVec(desc.aDirection)) {
         return false;
     }
+    if(!(desc.aSizeMin > 0.0f) || !std::isfinite(desc.aSizeMin)) return false;
+    if(!(desc.aSizeMax >= desc.aSizeMin) || !std::isfinite(desc.aSizeMax)) return false;
+    if(!finiteVec(desc.aWind)) return false;
+    if(!(desc.aWindResponse >= 0.0f) || !std::isfinite(desc.aWindResponse)) return false;
+    if(desc.aShape == ParticleShape::BOX) {
+        // BOX：三轴 >= 0、至少一轴 > 0；CONE 忽略 aBoxHalfExtent（可为 0）。
+        if(!finiteVec(desc.aBoxHalfExtent)) return false;
+        if(desc.aBoxHalfExtent.x < 0.0f || desc.aBoxHalfExtent.y < 0.0f ||
+           desc.aBoxHalfExtent.z < 0.0f) {
+            return false;
+        }
+        if(!(desc.aBoxHalfExtent.x > 0.0f || desc.aBoxHalfExtent.y > 0.0f ||
+             desc.aBoxHalfExtent.z > 0.0f)) {
+            return false;
+        }
+    }
 
     aDesc = desc;
     if(!normalizeVec(aDesc.aDirection, aDesc.aDirection)) {
@@ -105,6 +136,9 @@ bool cPARTICLE_SYSTEM::create(const sPARTICLE_EMITTER_DESC &desc) {
     aActiveCount = 0;
     aEmitAccumulator = 0.0f;
     aRngState = kParticleSeed;
+    aSizeRngState = kParticleSizeSeed;
+    aRecycleCenter = makeVec3(0.0f, 0.0f, 0.0f);
+    aRecycleHalfExtent = makeVec3(0.0f, 0.0f, 0.0f);
     return true;
 }
 
@@ -116,6 +150,7 @@ void cPARTICLE_SYSTEM::reset() {
     aActiveCount = 0;
     aEmitAccumulator = 0.0f;
     aRngState = kParticleSeed;
+    aSizeRngState = kParticleSizeSeed;
 }
 
 void cPARTICLE_SYSTEM::update(float dt) {
@@ -123,12 +158,21 @@ void cPARTICLE_SYSTEM::update(float dt) {
     if(dt > kParticleMaxDt) dt = kParticleMaxDt;
     updateParticles(dt);
     aEmitAccumulator += aDesc.aRate * dt;
-    emitDueParticles();
+    emitDueParticles(dt);
 }
 
 void cPARTICLE_SYSTEM::updateParticles(float dt) {
     const float gravityScale = dt;
     const float dragScale = 1.0f / (1.0f + aDesc.aDrag * dt);
+    // response <= 0 时完全跳过风（不产生任何浮点运算，旧 desc 逐位不变）。
+    const bool windActive = aDesc.aWindResponse > 0.0f;
+    float windBlend = 0.0f;
+    if(windActive) {
+        windBlend = aDesc.aWindResponse * dt;
+        if(windBlend > 1.0f) windBlend = 1.0f;
+    }
+    const bool recycleActive = aRecycleHalfExtent.x > 0.0f || aRecycleHalfExtent.y > 0.0f ||
+                               aRecycleHalfExtent.z > 0.0f;
     for(size_t i = 0; i < aParticles.size(); ++i) {
         if(!aAlive[i]) continue;
         sPARTICLE &particle = aParticles[i];
@@ -141,20 +185,46 @@ void cPARTICLE_SYSTEM::updateParticles(float dt) {
         }
         particle.aVelocity = addVec(particle.aVelocity, scaleVec(aDesc.aGravity, gravityScale));
         particle.aVelocity = scaleVec(particle.aVelocity, dragScale);
+        if(windActive) {
+            particle.aVelocity.x += (aDesc.aWind.x - particle.aVelocity.x) * windBlend;
+            particle.aVelocity.y += (aDesc.aWind.y - particle.aVelocity.y) * windBlend;
+            particle.aVelocity.z += (aDesc.aWind.z - particle.aVelocity.z) * windBlend;
+        }
         particle.aPosition = addVec(particle.aPosition, scaleVec(particle.aVelocity, dt));
+        if(recycleActive) {
+            wrapCoordinate(particle.aPosition.x, aRecycleCenter.x, aRecycleHalfExtent.x);
+            wrapCoordinate(particle.aPosition.y, aRecycleCenter.y, aRecycleHalfExtent.y);
+            wrapCoordinate(particle.aPosition.z, aRecycleCenter.z, aRecycleHalfExtent.z);
+        }
         const float lifeRatio = particle.aAge / particle.aLife;
         particle.aColor = lerpColor(aDesc.aColorStart, aDesc.aColorEnd, lifeRatio);
     }
 }
 
-void cPARTICLE_SYSTEM::emitDueParticles() {
-    while(aEmitAccumulator >= 1.0f) {
+void cPARTICLE_SYSTEM::emitDueParticles(float dt) {
+    if(aEmitAccumulator < 1.0f) return;
+    uint32_t want = (uint32_t)aEmitAccumulator;
+    if(want > (uint32_t)aFreeSlots.size()) {
+        want = (uint32_t)aFreeSlots.size();
+        // 池满：只保留至多「一个最大帧（0.1 s）」的待发射量，避免长停顿后爆发；
+        // 旧实现把积压钳到 1，池满后每帧只补 1 颗，存活数会被寿命抽干到近空再瞬间灌满，
+        // 表现为「粒子分层 / 空白间隔」的锯齿。保留 0.1 s 的额度后，槽位一释放就能当帧补齐。
+        const float maxBacklog = aDesc.aRate * kParticleMaxDt;
+        if(aEmitAccumulator > maxBacklog) aEmitAccumulator = maxBacklog;
+    }
+    for(uint32_t i = 0; i < want; ++i) {
         uint32_t slot = 0;
-        if(!findFreeSlot(slot)) {
-            if(aEmitAccumulator > 1.0f) aEmitAccumulator = 1.0f; // 池满：限制积压，避免后续爆发
-            return;
-        }
+        if(!findFreeSlot(slot)) return;
         spawnParticle(slot);
+        // 帧内相位打散：把本帧这一批沿各自速度预推进 (i+0.5)/want 帧位移。
+        // 否则同帧粒子都在同一高度，持续发射会形成一条条横向"片子"（近处可见空白间隔）。
+        if(aDesc.aSpreadSpawnPhase && want > 1u) {
+            sPARTICLE &particle = aParticles[slot];
+            const float phase = ((float)i + 0.5f) / (float)want;
+            const float advance = dt * phase;
+            particle.aPosition = addVec(particle.aPosition, scaleVec(particle.aVelocity, advance));
+            particle.aAge += advance;
+        }
         aEmitAccumulator -= 1.0f;
     }
 }
@@ -168,16 +238,36 @@ bool cPARTICLE_SYSTEM::findFreeSlot(uint32_t &outSlot) {
 
 void cPARTICLE_SYSTEM::spawnParticle(uint32_t slot) {
     sPARTICLE &particle = aParticles[slot];
-    particle.aPosition = aDesc.aOrigin;
+    // BOX：在 aOrigin ± halfExtent 内均匀取点（每轴一次主随机流抽取）；CONE 不消耗主随机流。
+    GNg::sVEC3 position = aDesc.aOrigin;
+    if(aDesc.aShape == ParticleShape::BOX) {
+        position.x += (nextRandom() * 2.0f - 1.0f) * aDesc.aBoxHalfExtent.x;
+        position.y += (nextRandom() * 2.0f - 1.0f) * aDesc.aBoxHalfExtent.y;
+        position.z += (nextRandom() * 2.0f - 1.0f) * aDesc.aBoxHalfExtent.z;
+    }
+    particle.aPosition = position;
     const GNg::sVEC3 direction = randomConeDirection();
     const float speed = lerpFloat(aDesc.aSpeedMin, aDesc.aSpeedMax, nextRandom());
     particle.aVelocity = scaleVec(direction, speed);
     particle.aAge = 0.0f;
     particle.aLife = lerpFloat(aDesc.aLifeMin, aDesc.aLifeMax, nextRandom());
-    particle.aSize = 1.0f;
+    particle.aSize = lerpFloat(aDesc.aSizeMin, aDesc.aSizeMax, nextSizeRandom()); // 独立流
     particle.aColor = aDesc.aColorStart;
     aAlive[slot] = 1;
     ++aActiveCount;
+}
+
+void cPARTICLE_SYSTEM::setRecycleBox(const GNg::sVEC3 &center, const GNg::sVEC3 &halfExtent) {
+    if(!finiteVec(center) || !finiteVec(halfExtent)) return;
+    aRecycleCenter = center;
+    aRecycleHalfExtent = halfExtent; // <= 0 的轴在 update 中不回收
+}
+
+void cPARTICLE_SYSTEM::setWind(const GNg::sVEC3 &wind, float response) {
+    if(!finiteVec(wind)) return;
+    if(!(response >= 0.0f) || !std::isfinite(response)) return;
+    aDesc.aWind = wind;
+    aDesc.aWindResponse = response;
 }
 
 float cPARTICLE_SYSTEM::nextRandom() {
@@ -185,6 +275,13 @@ float cPARTICLE_SYSTEM::nextRandom() {
     aRngState ^= aRngState >> 17;
     aRngState ^= aRngState << 5;
     return (float)(aRngState & 0xFFFFFFu) / 16777216.0f; // [0,1)
+}
+
+float cPARTICLE_SYSTEM::nextSizeRandom() {
+    aSizeRngState ^= aSizeRngState << 13;
+    aSizeRngState ^= aSizeRngState >> 17;
+    aSizeRngState ^= aSizeRngState << 5;
+    return (float)(aSizeRngState & 0xFFFFFFu) / 16777216.0f; // [0,1)
 }
 
 GNg::sVEC3 cPARTICLE_SYSTEM::randomConeDirection() {

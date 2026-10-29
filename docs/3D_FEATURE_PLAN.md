@@ -1,11 +1,24 @@
-# 3D 能力扩展规划：空间划分 / 物理 / 粒子 / 动画 / 骨骼 / 布料 / 通用管线
+# 3D 能力扩展规划：空间划分 / 物理 / 粒子 / 动画 / 骨骼 / 布料 / 通用管线 / 天空天气 / 全局光照
 
-> 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存**）+ P4（空间划分）+
+> **2026-10-30 最新**：待办与已知缺口统一登记在 **§0 未解决项**；当前证据 `make unit` 292/0、
+> `make gpuCheck` 99/99（**llvmpipe CPU Vulkan**，真机 RADV 待复跑）。
+
+> 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存，GPU 31/31**）+ P4（空间划分）+
 > P5 v1（球/盒刚体物理）+ P5b 全部六项（胶囊、warm starting、CCD v1、DebugDraw、关节/约束、静态三角网）已落地；
 > P6 布料 XPBD、P7 3D 粒子、P3 动画、P2 骨骼（世界矩阵/调色板）、P4→P8 的 CPU 侧（cMODEL 世界 AABB + 视锥剔除）
 > 与 P1c 材质实例 CPU 侧（描述/校验/去重键）已落地；**P2 的 CPU 部分全部落地**（glTF 导入、材质/纹理描述、
 > 骨骼、动画、场景装配、CPU 线性混合蒙皮、8KB 调色板 UBO 骨架）；
-> P2 剩余（GPU 蒙皮描述符集/绘制）、P1c GPU 侧、P8 渲染接入与 P9 未开始。
+> **2026-10-29：P2 GPU 蒙皮、P1c GPU 材质实例与纹理上传、P8 渲染接入（剔除绘制 + 调试线框）已落地并在真实 GPU
+> 验收通过；P9 全部落地（GPU 粒子 compute+SSBO+实例化 billboard、GPU 布料 compute+网格绘制、
+> SSBO 调色板蒙皮 >128 关节、绘制项批处理），CPU 回退全部保留**
+> （`make gpuCheck` = 94/94 PASS，`make unit` = 275 cases 0 failed）；
+> **P10 动态 LOD 已落地（2026-10-29）**：`GN_3Dlod`（屏幕像素误差 + 滞后选级）、`sMESH` 追加
+> `aLods/aLodCount`、`sMESH::DrawPBRLevel` / `cMODEL::DrawPBRWithLod`（§3.4）。
+> **2026-10-29 追加：天空 / 云 / 天气与全局光照（GI）纳入本规划**（P11 / P12，路线图见 §3.6 / §3.7）；
+> 其中 S1 天气状态机、S2a 解析式天空 + FBM 云、**S3 雾（独立 Fog UBO，前向 3 / PBR 6 / 延迟 8）**
+> 已落地；**S2b 三层云盘、S4 粒子池扩展、S5 降水管线、S6 查看器全天气集成也已落地**
+> （`gpuCheck` 新增 cloud.* 4 条 + precipitation.* 6 条）；GI 仅完成规划，G0–G5 未开始。
+> 详细证据、代码锚点与复算命令见子计划 `docs/SKY_WEATHER_PLAN.md`、`docs/GI_PLAN.md`。
 > 基线：C++11、Vulkan 1.4、Makefile 单一构建入口；现有 3D 为静态网格 + Blinn-Phong/PBR + 阴影/延迟/天空盒。
 > 约束：不破坏现有 `GN_VkDraw3D`/`GN_VkDrawPBR`/`cMODEL` API；新文件 camelCase，单功能 <500 有效行、多功能 <1000 有效行。
 > 2D 侧现有的 `GN_2DArea` 碰撞与 `cFRAME_LAUNCHER` 动画图筐发射器**保持不变**，新系统只服务 3D。
@@ -23,9 +36,27 @@
 > 布料 `GN_3Dcloth.cpp` 234、粒子 `GN_3Dparticle.cpp` 170、动画 `GN_3Danim.cpp` 190、骨骼 `GN_3Dskeleton.cpp` 43、
 > 剔除 `GN_3Dcull.cpp` 61、材质 `GN_Material.cpp` 82、资产 `GN_3Dasset.cpp` 286、场景 `GN_3Dscene.cpp` 105、
 > 蒙皮 `GN_3DSkin.cpp` 82、`_Vulkan/vkSkin.cpp` 41（均 <500）。
-> **重要边界**：本机无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）⇒ Vulkan 创建路径
-> （`cSHADER_CACHE` / `cPIPELINE_CACHE` 的 `vkCreate*` 调用）**只做了编译验证，未做运行时验证**；
-> P1b 已接入的 11 条管线必须在有 GPU 的桌面用**重新设计的测试体系**对照后才能算验收通过（原 `samples/` + `run.sh` 已移除，见 CHANGELOG 2026-10-27）。
+> **重要边界**：DSH 沙箱内无 GPU（`/dev/dri` 不存在，`vulkaninfo` 报 no valid GPUs）；P1b 的 11 条管线已在
+> 桌面 GPU（AMD Radeon 780M / RADV PHOENIX，RGBA16F swapchain）用 `make gpuCheck` 验收通过：
+> **31/31 PASS**（2026-10-29）。验收程序与证据位置见 `tests/gpu/`（`make gpuCheck`）。
+
+## 0. 未解决项（2026-10-30 接管时登记）
+
+> 当前证据：`make unit` = **292 cases / 0 failed**；`make gpuCheck` = **99/99 PASS**，但只在 **llvmpipe（CPU Vulkan）**
+> 上跑过，**真实 GPU（RADV）尚未复跑**。下列条目按「影响 → 现状 → 下一步/验收」登记，完成一条划掉一条。
+
+| # | 问题 | 现状与根因 | 下一步 / 验收 |
+|---|---|---|---|
+| 1 | **S2b 中景 billboard 云层不可用** | `drawClouds` 之前因拿到单位矩阵从未真正显示（等于未验证）；矩阵修对后暴露为大片 256 m 方形贴片、接缝明显、「糊一片」。查看器已**默认关闭**，C 键开关；天空盒 S2a 云仍正常 | 重做贴片尺度/接缝/透明度（或环形分布 + 距离淡出）后再默认开；验收：真机目视 + `cloud.*` 4 条仍 PASS |
+| 2 | **降水柱硬边（"一条雪带"）** | 降水固定 24 m 柱（`PRECIP_COLUMN_HEIGHT`），上下是硬边界；相机远看会像一条悬空雪带 | 提高柱高并同步放大回收盒 y 半范围（代价：粒子数与上传量）；验收：真机目视上下过渡连续 |
+| 3 | **粒子分层 / 空白间隔（待真机确认）** | 已修两处：满池时积压不再钳到 1（否则锯齿抽干）；新增 `aSpreadSpawnPhase` 把同帧批次沿速度打散。单测 `particleFullPoolStaysSteady`（min=max=容量）锁定 | 真机目视确认无横条；若仍有，按 #2 处理柱硬边 |
+| 4 | **降水外观调参（待真机确认）** | 雨线 `0.05–0.09 m` + `RAIN_STREAK=20`（长度 1–1.8 m）；密度池 `16384/24576`、rate `60000/30000`；V 键包围盒雨雪都画 | 真机目视；调参入口 = `mmdViewer.cpp` 的 `RAIN_SIZE_*` / `RAIN_STREAK` / `RAIN_CAPACITY` / `SNOW_CAPACITY` |
+| 5 | **贴花可见性（待真机确认）** | `drawDecals(&viewProjection)` 传指针被 `sMAT44(bool)` 吃成单位矩阵，已修；`decal.pixels` 在 gpuCheck 通过 | 真机目视雨天地面水渍/溅射环；若仍不可见，查 `gatherDecalRenderItems` 返回值与地面 y 偏移（+0.02） |
+| 6 | **真实 GPU 验收缺口** | `make gpuCheck` 96→99/99 只在 llvmpipe 通过；绕序/正面/降水朝向的修正**未经 RADV 复验** | 桌面执行 `VK_ICD_FILENAMES= make gpuCheck`（不设 ICD，走真机驱动）并贴回结果 |
+| 7 | **MMD 正反/左右未目视验收** | 绕序/法线一致性已用探针 + 单测锁定（`mode.pmd` agree=6189/disagree=40），但「正面是否朝 +Z、左右是否镜像」仍靠目视 | 真机看 `tests/うさうさ`；不通过则改 `mirrorZ` 或退方案 B（见 `AXIS_UNIFICATION_PLAN.md` §4.2） |
+| 8 | **`mmdViewer.cpp` 超行数上限** | 有效代码 1156 行 > 1000（多重功能文件，lint 违规），本次局部修改后未拆 | 拆成相机 / 降水 / 贴花 / 叠层 4 个文件（含共享头）；拆完跑 `lintCodeModularity --naming --comments` |
+| 9 | **异盘备份未完成** | 沙箱把 `/run/media/*` 全部挂成只读（底层 rw），收尾备份写不出去 | 收尾时用一次更宽权限重试 `tar --zstd` + `zstd -t` + 解包 `rsync --checksum` 校验 |
+| 10 | **T3 GI G0 / T4 cCAMERA 未开始** | `docs/GI_PLAN.md` G0–G5、`docs/CAMERA_PLAN.md` C0–C4 均未动 | 按各自阶段表推进；G0 建议先做附件改名+枚举、subpass 依赖、resize 重建 |
 
 ## 1. 现状与差距
 
@@ -38,6 +69,9 @@
 | 骨骼 | 无 | 无关节层级、蒙皮、glTF |
 | 布料 | 无 | 无 XPBD/动态网格 |
 | 管线 | 每种 pass 手写 `VkPipeline`（`GN_Vk.h:197-278`） | 无统一描述/缓存/材质变体 |
+| 细节层次 | 无几何 LOD：`sMESH` 只有单套顶点/索引与一对 buffer（`GN_3Dmodel.h:20-48`） | 无多级网格、无屏幕误差选级、无切级过渡；`cMODEL` 已有世界 AABB/视锥剔除但未接绘制 |
+| 天空 / 天气 | 解析式天空 + FBM 云（S2a）、天气状态机、雾（S3）、三层中景云（S2b）、降水（S5）与查看器全天气接线已落地（`assets/shaders/gn3d_skybox.frag`、`assets/shaders/gn3d_cloud.*`、`assets/shaders/precipitation.*`、`src/graphics/weather.h`、`_Vulkan/vkCloud.cpp`、`_Vulkan/vkPrecipitation.cpp`） | HDR 天空/降水变体、动态 IBL 未做（P12，§3.7） |
+| 全局光照 | 静态 cubemap 伪 IBL（无 split-sum/无 LUT/mip 仅 1 级）；SSAO 着色器存在但未接线；G-Buffer 仅够延迟光照 | split-sum IBL、SSAO、SSGI、探针；G-Buffer 12 项缺失：无显式 subpass 依赖、resize 不重建、无 AO 目标/velocity/alpha cutout、附件命名错位等（§3.7） |
 
 ## 2. 目标架构
 
@@ -54,6 +88,8 @@ src/graphics/
   GN_3Dskeleton.h/.cpp       关节层级/绑定姿势/逆绑定/调色板
   GN_3Danim.h/.cpp           clip、采样、混合、状态机、事件
   GN_3Dskin.h/.cpp           蒙皮网格资源与绘制
+  GN_3Dlod.h/.cpp           多级网格、屏幕误差、选级与滞后（P10）
+  _Vulkan/vkLod.cpp         LOD 级别索引缓冲上传与绘制接线（P10b，需 GPU）
   GN_3Dcloth.h/.cpp          XPBD 布料求解器
   GN_3Dparticle.h/.cpp       3D 粒子发射器/粒子池/实例数据
   _Vulkan/vkPipeline.cpp     管线缓存实现
@@ -61,17 +97,32 @@ src/graphics/
   _Vulkan/vkCloth.cpp        布料动态缓冲上传/绘制；后续 compute
   _Vulkan/vkParticle.cpp     粒子实例缓冲/绘制
   _Vulkan/vkDebugDraw.cpp    物理/空间划分线框调试
+  weather.h/.cpp             天气状态机/预设/派生参数（P11-S1，已落地）
+  giParams.h/.cpp            GI 参数校验、SSAO 核、SH9、打包/解包、alpha cutoff（P12-G1）
+  _Vulkan/vkGbuffer.cpp      G-Buffer 创建/重建/附件枚举/subpass 依赖/调试视图（P12-G0）
+  _Vulkan/vkEnvironment.cpp  预滤波 cubemap、SH9、BRDF LUT（P12-G1/G3）
+  _Vulkan/vkSsao.cpp         SSAO 与双边模糊 pass（P12-G2）
+  _Vulkan/vkGi.cpp           GI UBO 与三个描述符集的 binding 写入（P12-G1）
+  _Vulkan/vkAtmosphere.cpp   独立 Weather UBO（P11-S3）
+  _Vulkan/vkCloud.cpp        中景 billboard 云层（P11-S2b）
+  _Vulkan/vkPrecipitation.cpp 降水管线（P11-S5）
 （测试程序待重新设计；原 samples/ 已移除）
   计划中的示例：skinned / cloth / physics / particles
 tests/unit/
   testSkeleton.cpp / testAnimation.cpp / testCloth.cpp
   testSpatial.cpp / testPhysics.cpp / testParticle.cpp / testPipeline.cpp
+  testWeather.cpp / testGi.cpp
 assets/models/*.glb
 assets/shaders/
   gn3d_skinned.vert/frag
   gn3d_cloth.vert/frag
   gn3d_particle.vert/frag
   gn3d_debug.vert/frag
+  gn3d_cloud.vert/frag
+  precipitation.vert/frag
+  gn3d_ssao.frag / gn3d_ssao_blur.frag
+  gn3d_ssgi.frag / gn3d_ssgi_denoise.frag
+  gn3d_gbuffer_debug.frag
 ```
 
 ### 2.1 通用着色器管线（所有新系统的地基）
@@ -296,8 +347,15 @@ struct sANIM_STATE {
 | P7（6d） | 3D 粒子：发射器/实例化/混合 | `GN_3Dparticle`、`14_particles` | 10k 粒子可交互；`testParticle` |
 | P8（7d） | 集成：视锥剔除接入渲染、调试绘制、示例/文档/ASan | 可见列表、`vkDebugDraw` | `make check/asan`；4 个示例桌面运行 |
 | P9（7d，可选） | GPU 蒙皮/GPU 布料/GPU 粒子、SSBO、批处理 | compute 路径 | 性能对比；CPU 回退可用 |
+| P10（5d，2026-10-29 新增） | 动态 LOD：多级网格 + 屏幕像素误差选级 + 滞后防抖 | `GN_3Dlod`、`sMESH` 多级字段、`testLod` | 三档距离选不同级；阈值往返微动切级 ≤2 次；单级模型行为不变；`make check` |
+| P11（2026-10-29 新增） | 天空/云/天气剩余：中景 billboard 云、独立雾 UBO、粒子池扩展、降水管线、HDR 变体与查看器集成 | `weather.*`、`vkAtmosphere`/`vkCloud`/`vkPrecipitation`、`gn3d_skybox.frag`、`precipitation.*` | S2b–S6 逐项验收；详见 §3.6 |
+| P12（2026-10-29 新增） | 全局光照 + G-Buffer 补齐：split-sum IBL、SSAO、同源环境烘焙、SSGI、探针 | `vkGbuffer`/`vkEnvironment`/`vkSsao`/`vkGi`、`gn3d_ssao*`/`gn3d_ssgi*` | G0–G5 逐项验收；详见 §3.7 |
 
 依赖：P1 → P2/P4/P5/P7；P4 ↔ P5（broadphase）；P5 → P6；P2 → P3；P8 在 P2–P7 后。总约 **72 人日**（约 15 周单人），不含资产制作，建议预留 20% 缓冲。
+P10（2026-10-29 新增，5 人日）依赖 P8 的剔除接入，可与 P9 并行；**不计入上述 72 人日基线**。
+P11/P12（2026-10-29 新增，工期待排）依赖 P1b 的管线缓存与 P8 的渲染接入；两者改同一批描述符 layout，
+必须先冻结槽位表（Weather 3/6/8、GI 4/7/9，见 §3.7），**不计入上述 72 人日基线**。
+建议推进顺序：G0（G-Buffer 修复）与 S3（冻结槽位 + 雾 UBO）先做，其余可并行；G1 与 S2b 互不依赖。
 
 ### 3.1 进度（2026-10-27）
 
@@ -305,10 +363,10 @@ struct sANIM_STATE {
 |---|---|---|
 | P0 | ✅ 完成 | 冻结 `GN_Spatial.h`、`GN_Shader.h`、`GN_Pipeline.h`（契约注释含语义与边界），接入 `GN.h` |
 | P1a | ✅ 完成（库+单测） | `GN_Shader.*`、`GN_Pipeline.*`、`_Vulkan/vkShader.cpp`、`_Vulkan/vkPipeline.cpp`、`testPipeline`（17 用例）；有效行 39/303/62/262/497 |
-| P1b | ✅ 完成（11 条管线全部接入） | 2D 四条混合 + 3D 前向/PBR/阴影 + 合成 + 天空盒 + G-Buffer(3 附件) + 延迟光照；`GN_VkContext::aPipelineCache` 统一持有，`GN_VkShutdown` 先 Release 再销毁 renderPass。**GPU 运行时未验证** |
+| P1b | ✅ 完成（11 条管线全部接入，GPU 桌面验收通过） | 2D 四条混合 + 3D 前向/PBR/阴影 + 合成 + 天空盒 + G-Buffer(3 附件) + 延迟光照；`GN_VkContext::aPipelineCache` 统一持有，`GN_VkShutdown` 先 Release 再销毁 renderPass。**GPU 桌面验收 31/31 PASS**（2026-10-29，AMD 780M/RADV，`make gpuCheck`） |
 | P1b 契约补充 | ✅ | `aDepthBiasEnable/Constant/Slope`（阴影 1.25/1.75）；`aColorAttachmentCount==0` = 深度专用（无 FS、subpass 0、颜色混合 0 附件） |
 | P1c（CPU 侧） | ✅ 描述/校验/去重键（Vulkan 描述符集留 P8） | `GN_Material.h`（35）/`GN_Material.cpp`（82）：`sMATERIAL_DESC`/`sMATERIAL_RES`、`ValidateMaterialDesc`、FNV-1a 64 位内容键、`MaterialDescEqual`、`cMATERIAL_CACHE` 去重表（句柄槽 `aDescriptorSet` 留 P8）；`testMaterial` 3 用例 |
-| P1c（GPU 侧） | ⏳ 未开始 | VkDescriptorSet 创建/写入、UBO/纹理绑定、与管线布局合并（GPU 桌面验证） |
+| P1c（GPU 侧） | ✅ 完成（2026-10-29，真实 GPU 验收） | `_Vulkan/vkMaterial.cpp`（241）：固定 set0（binding0 UBO / binding1 组合采样器）描述符集创建/写入/归还、材质管线经 `aPipelineCache`；`gn3d_material.vert/.frag`；`GN_VkMaterialCreate/Destroy/Draw3DMaterial`；`gpuCheck` 6 条 |
 | P4 | ✅ 完成 | `GN_Spatial.cpp`（AABB/射线/视锥）、`GN_SpatialBVH.cpp`、`GN_SpatialTree.cpp`、`testSpatial`（11 用例）；有效行 219/167/241/499 |
 | P5 | ✅ v1 + 胶囊 + warm start + CCD + DebugDraw + 关节 + 三角网 | `GN_Physics.h` 契约；`GN_Physics.cpp`（世界/宽相/休眠/射线/warm start 缓存，迭代 30 次，498）、`GN_PhysicsCollision.cpp`（dispatch，376）、`GN_PhysicsCollisionCapsule.cpp`（球/胶囊/盒-胶囊，319）、`GN_PhysicsBody.cpp`（构造/惯量/AABB，196）、`GN_PhysicsJoint.cpp`（距离/铰链/固定，380）、`GN_PhysicsMesh.cpp`（三角网+BVH，212）、`GN_PhysicsCcd.cpp`（扫掠 TOI，112）、`GN_PhysicsDebug.cpp`（线框/接触标记，108）、`GN_PhysicsSolver.cpp`（265）；`testPhysics` 19 + `testPhysicsCollision` 10 + `testPhysicsSolver` 14 + `testPhysicsCapsule` 12 + `testPhysicsDebug` 5 + `testPhysicsJoint` 6 + `testPhysicsMesh` 4 = 70 用例 |
 | P5 剩余 | ✅ 完成 | P5b 六项全部落地。**已知限制**：7 层及以上堆叠坍塌（30/40 次速度迭代都复现）；盒对静态三角网 v1 未实现（球/胶囊可用）；三角网接触不参与 warm start |
@@ -316,10 +374,17 @@ struct sANIM_STATE {
 | P7 | ✅ CPU 模拟（实例上传/绘制留 P8） | `GN_3Dparticle.h`（59）/`GN_3Dparticle.cpp`（170）：固定池、按速率发射、圆锥随机方向（固定 xorshift 种子）、重力/阻尼、寿命回收、颜色插值；`testParticle` 6 用例（参数、发射/寿终、容量、重力、确定性、Reset） |
 | P3 | ✅ CPU（glTF 导入留 P2，GPU 蒙皮留 P8/P9） | `GN_3Danim.h`（56）/`GN_3Danim.cpp`（190）：通道采样 STEP/LINEAR + 旋转 slerp、clip duration、`cANIM_PLAYER` 的 loop/crossFade/非循环停住；`testAnimation` 6 用例（采样/STEP/slerp、未覆盖节点、loop、crossFade、非循环停住） |
 | P2（骨骼部分） | ✅ CPU（glTF 导入待第三方头） | `GN_3Dskeleton.h`（21）/`GN_3Dskeleton.cpp`（43）：关节父链世界矩阵、palette = world*inverseBind、坏父索引按根降级；`testSkeleton` 6 用例（空、单根、父链、绑定姿势恒等、坏父、长度不符） |
-| P8（CPU 侧） | ✅ cMODEL 世界 AABB + 视锥剔除（渲染接入待 GPU） | `GN_3Dcull.cpp`（61）：顶点×变换求世界 AABB、`isVisibleIn`、`cullModels` 可见列表（上限/空指针安全）；`testCull` 3 用例（AABB/变换、视锥可见性、可见列表上限） |
+| P8（CPU 侧） | ✅ cMODEL 世界 AABB + 视锥剔除 + 剔除绘制 | `GN_3Dcull.cpp`：顶点×变换求世界 AABB、`isVisibleIn`、`cullModels` 可见列表（上限/空指针安全）、`cullDrawModelsPBR`（可见列表 → `DrawPBR`，返回绘制数）；`testCull` 5 用例 + `gpuCheck` 6 条 |
 | P2（glTF 导入 + 材质/纹理描述） | ✅ CPU | `GN_3Dasset.h/.cpp`（有效 286）：cgltf v1.15（已静态审计/登记）、节点/网格/皮肤/动画、材质与纹理 CPU 描述（`sASSET_MATERIAL` / `sASSET_TEXTURE` / primitive.aMaterial；不读图片字节）；`testAsset` 2 用例（全字段 fixture + 非法输入，含默认值断言） |
-| P2（场景装配 + 蒙皮 CPU） | ✅ CPU（GPU 蒙皮绘制留 P8） | `GN_3Dscene.h/.cpp`（105）：父链世界矩阵、每节点姿势采样、关节父映射、palette；`GN_3DSkin.h/.cpp`（82）：CPU LBS（权重归一化/越界钳制）与 `sSKIN_UBO` 打包；`_Vulkan/vkSkin.cpp`（41）：8KB 调色板 UBO 创建/销毁骨架（编译级）；`testScene` 5 + `testSkin` 6 用例 |
-| P2 剩余（GPU 蒙皮绘制/描述符集）/P1c GPU 侧/P8 渲染接入/P9 | ⏳ 未开始 | GPU 蒙皮描述符集与绘制、纹理解码/上传、VkDescriptorSet、绘制循环剔除接入、GPU 粒子/布料路径 |
+| P2（场景装配 + 蒙皮 CPU） | ✅ CPU（GPU 蒙皮绘制留 P8） | `GN_3Dscene.h/.cpp`（105）：父链世界矩阵、每节点姿势采样、关节父映射、palette；`GN_3DSkin.h/.cpp`（82）：CPU LBS（权重归一化/越界钳制）与 `sSKIN_UBO` 打包；`testScene` 5 + `testSkin` 6 用例 |
+| P2（GPU 蒙皮绘制） | ✅ 完成（2026-10-29，真实 GPU 验收） | `_Vulkan/vkSkin.cpp`（123）：3 槽 8KB 调色板环形 UBO；`_Vulkan/vkSkinDraw.cpp`（300）：`sSKINNED_VERTEX` 68B 六属性布局、set0（场景 UBO + 调色板 UBO）、蒙皮管线经 `aPipelineCache`、`GN_VkDraw3DSkinned`；`gn3d_skinned.vert/.frag`；`gpuCheck` 5 条 |
+| P1c GPU 纹理上传/glTF 纹理解码 | ✅ 完成（2026-10-29，真实 GPU 验收） | `GN_3Dtexture.h/.cpp`：PNG（libpng）/JPEG（libjpeg，可选）内存解码、data URI、格式嗅探；`_Vulkan/vkTexture.cpp`：RGBA8 → `R8G8B8A8_SRGB` VkImage（staging + 布局转换）+ glTF sampler 映射；`GN_VkCreateTextureRGBA8/DestroyTexture`；`sASSET_TEXTURE::aImageBytes` 在导入期保存 bufferView/外部文件字节；`testTexture` 7 用例 + `gpuCheck` 5 条 |
+| P8（调试线框） | ✅ 完成（2026-10-29，真实 GPU 验收） | `_Vulkan/vkDebugDraw.cpp`（200）：LINE_LIST 管线经 `aPipelineCache`、set0 场景 UBO、深度测试开/写关、`GN_VkDrawDebugLines`；`gn3d_debug.vert/.frag`；`gpuCheck` 2 条 |
+| P9（GPU 粒子部分） | ✅ 完成（2026-10-29，真实 GPU 验收） | `GN_3DparticleGPU.h/.cpp`（64B std430 布局 + CPU 回退/对拍）；`_Vulkan/vkParticleCompute.cpp`（host-visible SSBO + compute 管线经 `aPipelineCache` + fence 同步）、`_Vulkan/vkParticleDraw.cpp`（顶点 pulling 的 billboard 管线）；`gn3d_particle.comp/vert/frag`；`GN_VkParticleCreate/Upload/Simulate/Draw/Data/Destroy`；`testParticleGPU` 6 用例 + `gpuCheck` 7 条 |
+| P9（剩余：GPU 布料/SSBO 蒙皮/批处理） | ✅ 完成（2026-10-29，真实 GPU 验收） | `GN_3DclothGPU.h/.cpp` + `_Vulkan/vkClothCompute.cpp`（A/B SSBO 乒乓 + Jacobi）+ `_Vulkan/vkClothDraw.cpp` + `gn3d_cloth.comp/vert/frag`（`cloth.*` 5 条）；`_Vulkan/vkSkinSsbo.cpp` + `gn3d_skinned_ssbo.vert/frag`（4096 关节 SSBO + 3 槽环形调色板，`skin.ssbo.*` 4 条）；`GN_3Dbatch.h/.cpp`（稳定排序 + 切换统计，`batch.*` 3 条）；`testClothGPU` 5 + `testBatch` 5 用例 |
+| P10（动态 LOD） | ✅ 完成（2026-10-29，CPU 单测 + GPU 验收） | `GN_3Dlod.h/.cpp`：误差公式 + 带滞后选级（纯 CPU）；`sMESH_LOD` + `sMESH::aLods/aLodCount`、`DrawPBRLevel`、`cMODEL::DrawPBRWithLod`；`testLod` 6 用例；`gpuCheck` 4 条（`lod.select/indexCount/singleLevel/pixels`） |
+| P11（天空 / 天气） | ✅ 完成（2026-10-29；视觉 1..6 由用户验收） | S1 天气状态机 `weather.h/.cpp`（8 用例）+ S2a 解析式天空/FBM 云 + S3 雾（`_Vulkan/vkAtmosphere.cpp`、`GN_VkSetFog`、前向 3 / PBR 6 / 延迟 8）+ **S2b 三层云盘**（`_Vulkan/vkCloud.cpp`、`gn3d_cloud.vert/frag`，`gpuCheck` 4 条）+ **S4 粒子池扩展**（BOX / 回收盒 / 尺寸范围 / 风，`testParticle` 12 用例）+ **S5 降水管线**（`_Vulkan/vkPrecipitation.cpp`、`precipitation.vert/frag`，`gpuCheck` 4 条）+ **S6 查看器集成**（雾/云/雨雪接线、远平面容云层）；HDR 变体留 P12，路线图 §3.6 |
+| P12（全局光照） | ⏳ 仅规划（2026-10-29） | `docs/GI_PLAN.md`：IBL split-sum、SSAO、SSGI、探针与 G-Buffer 12 项缺失；G0–G5 均未开始，路线图 §3.7 |
 
 P4 的"剔除结果与暴力测试一致"验收已通过：BVH 512 盒 40 次 AABB 查询与暴力集合逐元素相等；射线 20 条与暴力最小 t 对照；
 视锥 300 点/300 盒分别与"投影后 NDC 判定"和"8 角点全在外侧"暴力判据对照；动态树 350 步随机 Insert/Update/Remove
@@ -468,6 +533,176 @@ CPU LBS（identity 不变、单关节平移、0.5/0.5 混合、越界关节/零�
 **三角网的边界**：只支持球/胶囊（盒 v1 跳过）；网格必须已是世界坐标（不读 `sMESH` 之外的变换）；
 三角网接触不参与 warm start；`AddStaticMesh` 每次追加后立即重建 BVH（大网格应合并后一次添加）。
 
+### 3.4 P10 动态 LOD（2026-10-29 落地；契约草案 → 实现偏差见下）
+
+**实现状态（2026-10-29）**：`GN_3Dlod.h/.cpp` + `sMESH_LOD`/`sMESH::aLods` + `DrawPBRLevel` +
+`cMODEL::DrawPBRWithLod` + `testLod` 6 用例 + `gpuCheck` 4 条（77/77 PASS）。
+与草案的三处偏差（实现时判定，均有理由）：
+1. 选级函数**显式传入世界 AABB**（`const sAABB&`）：草案签名没有它但公式需要，隐式假设模型在原点会算错距离。
+2. **不建每级 VkBuffer**：现有 PBR 路径每次绘制把顶点动态上传（`GN_VkDraw3DPBR`），`aLods` 只需 CPU 数据；
+   `UploadToGPU` 不处理 `aLods`。
+3. 草案验收里"镜头 2/20/200 m 选 0/1/2 级"的具体距离与默认 1.0 px 阈值不自洽（按公式 0.1 m 误差需 ≥93 m 才降一级），
+   测试改为按公式推导距离（10/100/1000 m）并保留滞后与单级回归用例。
+
+**目标**：同一模型按屏幕像素误差选择几何精度级别，砍掉远距离几何开销。**不做**运行时网格简化（级别在烘焙期生成），
+不改 `GN_VkDraw3D` / `GN_VkDrawPBR` / `cMODEL` 既有签名（新增字段与函数只追加）。
+
+**立项依据（实测）**：`sMESH` 只有一组 `aVertices`/`aIndices` 与一对 `VkBuffer`（`GN_3Dmodel.h:20-48`），
+`src docs tests assets` 全量检索 `lod` / `level of detail` / `细节层次` 零命中；`cMODEL` 已有
+`aWorldAABB`/`computeWorldAABB`/`isVisibleIn` 与 `cullModels`（`GN_3Dmodel.h:63-71`、`GN_3Dcull.cpp`），
+但绘制循环尚未接入（属 P8）。因此 P10 是**新增能力**，不是补全既有缺口。
+
+**数据结构（`GN_3Dmodel.h` 追加，不改既有字段语义）**：
+1. `sMESH_LOD`：`float *aVertices; uint32_t *aIndices; uint32_t aVertexCount/aIndexCount; float aMaxError;`
+   —— `aMaxError` 为该级相对 LOD0 的世界空间最大几何误差（米），由烘焙器算出并随资产存盘。
+2. `sMESH` 追加 `sMESH_LOD *aLods; uint32_t aLodCount; float aBoundRadius;`；
+   **`aLodCount == 0` 退化为现有单级行为**（向后兼容，所有既有测试/调用不变）。
+3. `aLods[0]` 即 LOD0，与现有 `aVertices`/`aIndices` 同源；`UploadToGPU` 按级各建一对 `VkBuffer`，
+   `ReleaseGPU` 一并释放；各级 `aWorldAABB` 必须一致（细级不得超出粗级包围盒）。
+
+**选级（`GN_3Dlod.h/.cpp`，纯 CPU、可单测）**：
+- `sLOD_VIEW { float aScreenHeight; float aFovYRad; GNg::sMAT44 aViewProj; GNg::sVEC3 aCamPos; }`
+- `float lodScreenError(const sMESH_LOD &lod, const sMESH &mesh, const sLOD_VIEW &view);`
+  公式 `S = aMaxError * aScreenHeight / (2 * d * tan(aFovYRad / 2))`，`d` 取相机到世界 AABB 的最近距离（保守）；
+  `d <= 近平面` 时返回 `+INF`（此情形不得降级）。
+- `uint32_t selectLod(const sMESH &mesh, const sLOD_VIEW &view, float aMaxScreenErrorPx,
+  uint32_t aPrevLevel);` —— 从粗到细找**第一个** `S > aMaxScreenErrorPx` 的级；
+  用双阈值滞后防抖（升档阈值 `aMaxScreenErrorPx`、降档阈值 `0.8 * aMaxScreenErrorPx`），
+  `aPrevLevel` 由调用方跨帧持有（无状态函数 + 显式输入，便于单测）。
+- 默认阈值 **1.0 px**；分辨率变化只改 `aScreenHeight`，阈值语义与 DPI 无关。
+
+**绘制接线（P10b，需 GPU 桌面验证）**：`sMESH::DrawPBR` 增加带选级结果的版本；`cMODEL::DrawPBR` 传入上一帧缓存级别，
+避免每网格每帧重算；**阴影/深度 pass 与主 pass 必须使用同一级**，否则影体错位。选级结果在 pass 外算一次、各 pass 复用。
+
+**验收（CPU，无 GPU 可做）**：新增 `testLod`：
+1. 三级合成网格（LOD0 1000 三角 / LOD1 200 / LOD2 20，误差 0 / 0.1 / 1.0 m），镜头距离 2 m / 20 m / 200 m 分别选 0 / 1 / 2 级；
+2. 距离在阈值附近往返微动 100 次，切级次数 ≤ 2（滞后生效）；
+3. 相机落在世界 AABB 内或近平面内时返回最细级，且不除零、不产生 NaN；
+4. `aLodCount == 0` 时选级返回 0，绘制路径与现有单级逐位一致（回归保护）；
+5. 桌面 GPU 验收（P10b）：同一场景两倍距离下 `vkCmdDrawIndexed` 的 `indexCount` 按级下降，截图无裂缝、无闪档。
+
+**边界 / 不做**：不做运行时 QEM 简化；不做 cluster/Nanite 类 GPU-driven LOD（量级远超本规划）；v1 不做几何 morph、
+不做 alpha 淡入淡出——**要求各级同拓扑烘焙**，跨拓扑切级若出现裂缝则加 skirt（P10b 再评估）；
+不处理 LOD 与蒙皮变形（本仓库 GPU 蒙皮未开始）；离线烘焙工具按项目规则进 `.tools` 载体，不写一次性脚本。
+
+### 3.5 P1c GPU / P2 GPU 蒙皮 / P8 渲染接入 / P9 全部（2026-10-29 落地）
+
+**公共 API（`GN_Vk.h`，新增、不改既有签名）**：
+`GN_VkMaterialCreate/Destroy/Draw3DMaterial`（固定 set0：binding0 UBO + binding1 组合采样器）、
+`GN_VkDraw3DSkinned`（`sSKINNED_VERTEX` 68B，set0 = 场景 UBO + 调色板 UBO）、
+`GN_VkDrawDebugLines`（世界坐标线段，LINE_LIST）、
+`GN_VkParticleCreate/Upload/Simulate/Draw/Data/Destroy`（P9：SSBO + compute + billboard）。
+
+**验收证据**（本机真实 GPU，AMD Radeon 780M / RADV PHOENIX，Wayland）：
+`make gpuCheck` = **73/73 PASS、0 FAIL、0 SKIP**；`make unit` = **256 cases 0 failed**；
+新增检查覆盖：
+
+- P1c：`material.desc/create/cache/draw/destroy/invalid` —— UBO(0.25,0.5,0.75) × 纯白纹理回读
+  `0.250,0.500,0.750`；两次绘制管线 miss 不增；非法描述（binding 种类/缺失）被拒且不改句柄。
+- P1c 纹理：`texture.decode`（2×2 PNG 逐字节）、`texture.glTF`（image data URI + sampler 经
+  `loadFromMemory` 解码）、`texture.upload`（RGBA8 → SRGB VkImage）、`texture.sample`
+  （(200,40,40) 采样 = sRGB→linear `0.578,0.021,0.021`）、`texture.destroy`（重复销毁 + 重建）。
+- P2：`skin.pipeline/invalidArgs/singleJoint/dualJoint/jointLimit` —— 单关节 +0.5x 与 CPU LBS 左边界差
+  `0.0016`（容差 0.03）；双关节 0.5/0.5 差 `0.0016`；129 关节截断到 128。
+- P8：`cull.draw.count/origin/plusX/minusX/empty`（3 个立方体剔掉 1 个，返回 2）、
+  `cull.debugLine/outside`（中心线颜色误差 0、线外仍是背景）。
+- P9：`particle.create`（容量 64 的 SSBO + 映射回读）、`particle.compute`（dt=0.1、重力 (0,-10,0)
+  ⇒ v.y=-1.000000、p.y=-0.100000）、`particle.cpuMatch`（64 粒子 GPU 与 `stepParticlesCpu`
+  逐粒子差 0）、`particle.death`（life=0.05 后 `aAlive=0`）、`particle.draw`（单个 billboard
+  中心像素 `0.200,0.800,0.300`）、`particle.invalid`（dt<=0/越界上传/pass 外/重复销毁）、
+  `particle.perf`（65536×4 步：GPU 0.26 ms/步、CPU 0.10 ms/步，末粒子结果一致）。
+- P9-a 布料：`cloth.create/compute`（20 步后 meanY 0 → -0.2153、四角位置逐位不变、全有限）、
+  `cloth.cpuMatch`（同初始数据 1 步后 GPU 与 `stepClothCpu` 差 0）、`cloth.draw`（中心像素
+  `0.700,0.300,0.200`）、`cloth.invalid`。
+- P9-b SSBO 蒙皮：`skin.ssbo.pipeline`（init 预建，绘制不再新增缓存项）、`skin.ssbo.joint200`
+  （200 关节、关节 150 平移 +0.5x 后像素 `0.572,0.254,0.127`）、`skin.ssbo.paletteRing`
+  （同帧两块不同调色板各自生效）、`skin.ssbo.invalid`（0/4097 关节、空指针、pass 外）。
+- P9-c 批处理：`batch.sort`（键单调 + aOrder 集合不变）、`batch.switches`（3 → 1）、
+  `batch.draw`（乱序/排序两帧同点颜色一致 `±0.02`）。
+
+**边界 / 已知限制**：
+1. 材质 v1 只支持"固定两个绑定"（UBO + 单张纹理）；纹理 v1 无 mipmap/各向异性，JPEG 依赖
+   `libjpeg`（pkg-config 缺失时只有 PNG 可用）；`loadFromMemory` 不解析外部图片文件（无 base 目录），
+   外部 uri 需走 `loadFromFile`。
+2. 蒙皮 v1 只做位置/法线 LBS；无 morph、无 GPU 动画、无 SSBO（128 关节 UBO 上限）。
+3. 蒙皮/调试线框复用 3D 动态顶点缓冲；`Ensure3DBufferCapacity` 在同一 pass 内扩容会销毁旧缓冲，
+   已记录为既有缺陷（未在本次改动中修）。
+4. `GN_VkInit3D()` 在 `GN_Vk.initialized = true` 之前调用各 `init3D*`，新增 init 一律以 `device/renderPass`
+   判空，不得检查 `initialized`。
+5. `CreateCubeModel` 的 `aVertexCount=36` 但只写 24 个顶点（`GN_3Dmodel.cpp:428/440`），
+   会导致 `computeWorldAABB()` 读到未初始化顶点；属既有缺陷、不在本轮写域，GPU 验收用测试内自建立方体规避。
+6. GPU 粒子 v1：SSBO 为 host-visible（不是 device-local + staging）；每个 `GN_VkParticleSimulate`
+   单独提交并等待 fence，不跨帧流水化——65536 粒子实测 GPU 0.26 ms/步 vs CPU 0.10 ms/步，
+   收益要等批量更大或改为跨帧流水化；寿命到只清 `aAlive`（不自动重生，重生由调用方重新 Upload）；
+   按 SSBO 顺序绘制，无半透明排序。
+7. P9-a 布料 v1：只有结构距离约束（无剪切/弯曲/球碰撞/自碰撞）、每步 fence 等待不跨帧流水化、
+   拓扑在 Create 时固定；CPU `cCLOTH`（XPBD，含剪切/弯曲/碰撞）保持独立，两者不互相调用。
+8. P9-b 蒙皮：SSBO 调色板上限 4096 关节，旧 128 关节 UBO 路径原样保留（未删、未改）；
+   无 GPU 动画/morph。P9-c 批处理只提供排序与切换统计，不合并几何、不做实例化，
+   调用方自行按排序结果提交。
+
+### 3.6 P11 天空 / 云 / 天气（2026-10-29 新增，S1/S2a 已落地）
+
+**范围**：天气状态机（CPU）→ 解析式天空 + FBM 云 → 雾 → CPU 降水模拟 + 透明管线 → HDR 变体与查看器集成。
+**已确认决策（2026-10-28）**：云 = 混合模式（远景 FBM + 中景 billboard，不做 raymarch）；雾 = 独立 Weather UBO（不扩 SceneUBO）；
+雨雪 v1 = CPU 展开 billboard；HDR 首版纳入；动态 IBL 放 v2。
+**证据与锚点**：`docs/SKY_WEATHER_PLAN.md` §1（现状表）与 §11（复算命令）。
+
+剩余子阶段：
+
+| 子阶段 | 内容 | 写域（新文件 camelCase） | 验收 |
+|---|---|---|---|
+| S2b | 中景 billboard 云层（视差、程序化 alpha、随风漂移） | `_Vulkan/vkCloud.cpp`、`gn3d_cloud.vert/frag` | ✅ 已完成（2026-10-29）：**3 层云盘**（高度 300/260/220 m，tile 与风速按层放大）、无顶点缓冲 tile 四边形、160 B UBO、alpha 混合/深度写关；`gpuCheck` 4 条（`cloud.outsidePass/draw/pixels/destroy`） |
+| S3 | 雾：独立 Weather UBO（binding 前向 3 / PBR 6 / 延迟 8）+ 3 个片元着色器 | `_Vulkan/vkAtmosphere.cpp`、`gn3d.frag`/`gn3d_pbr.frag`/`gn3d_deferred_light.frag` | ✅ 已完成（2026-10-29）：`GN_VkSetFog` + 3 条管线接线；`gpuCheck` 3 条（`fog.pbr/pbrReset/forward`） |
+| S4 | 粒子池扩展：BOX 形状、相机跟随循环回收、尺寸范围、风 | `GN_3Dparticle.h/.cpp`、`testParticle.cpp` | ✅ 已完成（2026-10-29）：`ParticleShape{CONE,BOX}`、`setRecycleBox`（逐轴 wrap）、`aSizeMin/aSizeMax`（独立随机流，老描述逐位不变）、`aWind/aWindResponse`；`testParticle` 6→12 用例 |
+| S5 | 降水管线：CPU billboard 展开、alpha 混合、深度不写、HDR 变体 | `_Vulkan/vkPrecipitation.cpp`、`precipitation.vert/frag` | ✅ 已完成（2026-10-29）：CPU 展开 6 顶点/粒子（stride 28B）、单 64 B push constant、alpha 混合/深度写关；`gpuCheck` 4 条（`precipitation.outsidePass/empty/draw/pixels`）；HDR 变体未做（P12） |
+| S6 | 查看器全天气集成、HDR 天空/降水变体、文档与 CHANGELOG | `tests/mmdViewer/mmdViewer.cpp`、`docs/` | ✅ 已完成（2026-10-29，视觉验收由用户执行）：`applyWeather` 接 `GN_VkSetFog`；3D pass 内 天空盒 → 云 → 地面 → 模型 → 贴花 → 降水；雨/雪 BOX 粒子跟随相机；远平面下限提到云层高度+2×tile（否则小模型裁掉云层）；HDR 变体未做（P12） |
+| S6b | 地面 + 地面贴花（雨滴溅射水渍/环，软边/环状 alpha） | `GN_3Ddecal.h/.cpp`、`_Vulkan/vkDecal.cpp`、`gn3d_decal.vert/frag` | ✅ 已完成（2026-10-29）：CPU 环形池 + 寿命渐隐；世界 XZ 平面四边形、alpha 混合/深度写关；`gpuCheck` 4 条（`decal.*`）+ `testDecal` 7 用例；降水形状 v2（细芯雨丝沿速度 / 径向雪团） |
+
+约束与风险：
+
+- 描述符槽位必须与 P12 共同冻结（§3.7 的表）；漏写一条管线 = 那条 pass 没雾。
+- 天空盒管线只绑 `renderPass3D`（`vk3dInitScene.cpp`），HDR 要再建一条 `hdrRenderPass` 管线，否则 HDR 下天空缺失。
+- 降水 v1 每帧上传约 8000×6 顶点 × 28 B ≈ 1.3 MB；上万粒子要等 `sVERTEX_ATTR` 支持 input rate 或走 GPU 粒子（P9）。
+- **降水 v1 只有一块动态顶点缓冲**：同一次 3D pass 内多次调用 `GN_VkDrawPrecipitation` 会互相覆盖 ⇒ 查看器每帧只提交一次（雨雪并存时合并粒子、streak 取折中值）。
+- 降水与云层管线用**固定 viewport**（创建时的 swapchainExtent），窗口 resize 后不跟随（与 vkClothDraw/vkParticleDraw 一致）。
+- 云层 3 层是同一 draw 内的程序化分层（高度/tile/风速按层缩放），不是 3 次 draw，因此只占一个 UBO。
+- IBL 与解析天空不同源：v1 接受，G3 用 GPU 6 面烘焙修（§3.7）。
+
+### 3.7 P12 全局光照（GI）+ G-Buffer 补齐（2026-10-29 新增）
+
+**范围**：间接光照（环境漫反射 + 镜面 + 可见性 + 一次弹射）；直接光照不在内。
+**现状**：静态 cubemap 伪 IBL（无 split-sum、无 BRDF LUT、cubemap 仅 1 级 mip）；SSAO 着色器存在但**无任何 C++ 引用**；
+G-Buffer 仅够延迟光照，GI 所需通道/同步/生命周期共 **12 项缺失**。
+**证据与锚点**：`docs/GI_PLAN.md` §1（现状）、§5（G-Buffer 缺失）、§12（复算命令）。
+
+剩余子阶段：
+
+| 子阶段 | 内容 | 写域（新文件 camelCase） | 验收 |
+|---|---|---|---|
+| G0 | G-Buffer 补齐：附件改名 + 枚举、显式 subpass 依赖、resize 重建、调试视图、alpha cutout | `_Vulkan/vkGbuffer.cpp`、`gn3d_gbuffer.frag`、`gn3d_gbuffer_debug.frag` | 同步验证层下 resize 无告警；调试视图四通道正确；MMD 头发不再实心 |
+| G1 | IBL split-sum：预滤波 cubemap + SH9 + BRDF LUT + GI UBO（256 B） | `_Vulkan/vkEnvironment.cpp`、`vkGi.cpp`、`giParams.*`、`testGi.cpp` | CPU 单测（SH9 常数环境、LUT 单调）；桌面粗糙度反射 |
+| G2 | G-Buffer 打包（24→16 B/px）+ AO 目标 + `invViewProj` + SSAO/模糊/合成 | `_Vulkan/vkSsao.cpp`、`gn3d_ssao*.frag` | `make check`；桌面 AO 无带状；关 SSAO 回退现状 |
+| G3 | 环境与解析天空同源（GPU 6 面烘焙，天气切换重烘） | `_Vulkan/vkEnvironment.cpp` | 桌面切天气后反射与背景一致 |
+| G4 | SSGI：半分辨率 ray march + 单帧双边（velocity 可选） | `gn3d_ssgi.frag`、`gn3d_ssgi_denoise.frag` | 桌面颜色渗色；帧时间在预算内 |
+| G5 | 探针：SH9 网格（DDGI 可选，需先补 compute dispatch） | 按 G5 开始时冻结（`GN_3Dprobe.*` 或 `vkProbe.cpp`） | 桌面屏幕外遮挡有间接光 |
+
+**G-Buffer 12 项缺失**（G0/G2 的验收清单）：附件命名错位、无显式 subpass 依赖、resize 不重建、无 alpha cutout、无调试视图、
+法线空间未约定、无 AO 目标、无 velocity、无 F0 通道、RGBA16F 浪费带宽、MSAA 不一致、每 draw 更新描述符；
+逐项证据与补齐动作见 `docs/GI_PLAN.md` §5.1。
+
+**待拍板（详见 §4 第 8/9 条）**：环境贴图来源（CPU 预滤波 / GPU 6 面烘焙 / 先不做）、G-Buffer AA（4× MSAA / 后处理 / 不管）、
+SSAO 是否只做延迟路径、SSGI 起步档、探针 SH9 vs DDGI。
+
+**槽位表（P11/P12 共同冻结）**：
+
+| 管线 | 现有 | Weather（P11-S3） | GI（P12-G1） |
+|---|---|---|---|
+| 前向 `gn3d` | 0,1,2 | 3 | 4 |
+| PBR | 0..5 | 6 | 7 |
+| 延迟 | 0..7 | 8 | 9 |
+| SSAO | — | — | 独立 set |
+
 ## 4. 关键决策（需拍板）
 
 1. **物理后端**：自研最小刚体（推荐，C++11、无新依赖）vs Bullet（大依赖、构建变重）；Jolt 需 C++17，暂不选。
@@ -476,6 +711,14 @@ CPU LBS（identity 不变、单关节平移、0.5/0.5 混合、越界关节/零�
 4. **布料/粒子**：CPU 先行（推荐），GPU compute 放 P9。
 5. **管线描述**：显式 `sPIPELINE_DESC`（推荐），不引 SPIRV-Cross。
 6. **骨骼上限**：128 关节 UBO（推荐），超出分批；P9 评估 SSBO。
+7. **LOD 生成与阈值**：离线烘焙 2–3 级 + `sMESH` 追加字段（推荐：复用现有绘制路径、零新依赖）vs 运行时 QEM（主线程不可控）
+   vs cluster/Nanite 类（需新管线，量级远超本规划）；选级用屏幕像素误差（与分辨率/DPI 无关），默认阈值 **1.0 px**，
+   降档阈值 `0.8×` 做滞后；级别同拓扑烘焙（避免裂缝处理进 v1）。
+8. **天空 / 天气**（2026-10-28 已确认）：云混合（远景 FBM + 中景 billboard）、雾独立 Weather UBO、
+   雨雪 v1 CPU billboard、HDR 首版、动态 IBL 放 v2。
+9. **全局光照**（2026-10-29 规划，待拍板）：v1 = split-sum IBL + SSAO（仅延迟路径）；v2 = SSGI 半分辨率 + 单帧双边；
+   v3 = 探针先 SH9（DDGI 需先补 compute dispatch）。**环境贴图来源**三选一（推荐 A：启动时 CPU 预滤波；
+   B：GPU 6 面烘焙放 G3）；**G-Buffer AA** 推荐 1× + 后处理 FXAA/SMAA；G-Buffer 必须先补齐（G0）再叠 GI。
 
 ## 5. 风险
 
@@ -485,6 +728,18 @@ CPU LBS（identity 不变、单关节平移、0.5/0.5 混合、越界关节/零�
 - 布料/粒子/蒙皮都依赖动态顶点/实例上传；复用 `Ensure3DBufferCapacity` 思路，避免每帧销毁重建。
 - 无 GPU 的 CI 只能验证 CPU 数学/构建；渲染正确性由桌面 GPU 测试确认（旧 `run.sh` 已移除，测试待重新设计）。
 - cgltf 为第三方头文件，需登记 `external/README.md` 并在 `make` 中只编译一次实现。
+- LOD 显存随级数线性增长（每级一对 `VkBuffer`）；静态大场景先估容量，且 `LoadOBJ`（只吃单文件）需扩展多级加载约定。
+- 选级必须在 pass 外算一次并跨 pass 复用：阴影/深度与主 pass 各自算一遍会出现影体错档。
+- 各级世界 AABB 必须一致（细级不得超出粗级包围盒），否则 BVH/视锥剔除与选级互相打架。
+- 跨拓扑切级会裂缝：v1 只允许同拓扑烘焙 + 滞后，不做 morph/淡入淡出。
+- 天气与 GI 抢描述符槽位：Weather 3/6/8、GI 4/7/9（§3.7 表）；两份子计划必须引用同一张表，改一处同步另一处。
+- 天空盒管线只绑 `renderPass3D`，HDR 路径要单独建管线；否则 HDR 下天空缺失。
+- 降水 v1 是 CPU 展开（≈1.9 MB/帧 @8000 雨滴）；2 万+ 需要 `sVERTEX_ATTR` 的 input rate 或 GPU 粒子。
+- G-Buffer 全仓无 `VkSubpassDependency`、`GN_VkResize` 只重建 swapchain/2D：不先修，SSAO/SSGI 的读可见性与改窗口后的画面都不可靠。
+- G-Buffer 附件命名与内容错位（`gAlbedoImage` 装 normalRough 等）：加 GI 附件前先改名 + 建立附件枚举。
+- SSAO 现有 shader 法线空间错误（世界法线 vs 视空间位置），照原样接线会得到「方向错误」的遮蔽。
+- HDR 双 Reinhard（`gn3d_pbr.frag` 与 `gn3d_composite.frag` 各一次）：GI 必须在线性空间注入，SSGI 前要统一到合成阶段。
+- GI/天气的 GPU 视觉在沙箱内无法验证（无 `/dev/dri`）：只能编译 + CPU 单测，以桌面截图与帧时间为准。
 
 ## 6. 建议的首个可交付
 
@@ -492,9 +747,22 @@ CPU LBS（identity 不变、单关节平移、0.5/0.5 混合、越界关节/零�
 
 **执行结果（2026-10-27）**：P1 拆成 P1a/P1b/P1c 后，P1a + P1b + P4 已完成并可无 GPU 验证；P1b 覆盖全部 11 条既有管线
 （2D 四条混合、3D 前向、PBR、阴影、合成、天空盒、G-Buffer(3 附件)、延迟光照），描述字段按站点逐项对齐旧 `VkPipelineCreateInfo`。
-1. **桌面验收（必须先做，GPU 环境才能做）**：用重新设计的 GPU 测试逐项对照（2D 四混合、前向、PBR/场景、阴影/延迟/天空盒/G-Buffer）；旧 `run.sh` 已移除；
+1. ✅ **桌面验收已完成**（2026-10-29，AMD Radeon 780M / RADV，31/31 PASS）：验收程序 `tests/gpu/`，
+   `make gpuCheck` 逐项对照（2D 四混合、前向、PBR/场景、阴影/延迟/天空盒/G-Buffer）；旧 `run.sh` 已移除；
    失败时按站点回滚（每站点内注释给出 desc 与旧状态的对应关系）。GPU 不可用的环境无法代替这一步。
-2. **P1c**：GPU 材质实例（管线 + 描述符集 + UBO/纹理），把 `GN3d::sMATERIAL`（CPU 属性）与 GPU 资源绑定分离。
-3. **P4 接入渲染**（P8 的前半）：`cMODEL` 增加世界 AABB + 可见列表，`GN_VkDraw3D` 前做 `sFRUSTUM::IntersectsAABB` 剔除；
-   验收：同一场景逐像素不变 + draw 次数下降。
-4. P2/P3（glTF/骨骼/动画）与 P5/P6（物理/布料）依赖 P1c 的材质实例与 P4 的 broadphase，建议在桌面验收通过后再并行。
+2. ✅ **P1c GPU 已完成**（2026-10-29）：材质实例描述符集 + 固定材质管线，`gpuCheck` 6 条 PASS；
+   glTF 纹理解码/上传仍留后续（见 §3.5 边界）。
+3. ✅ **P4 接入渲染已完成**（2026-10-29）：`cullDrawModelsPBR` 按视锥剔除后绘制，`GN_VkDrawDebugLines`
+   调试线框；验收 = 3 立方体剔掉 1 个 + 未绘制位置为背景色（§3.5）。
+4. ✅ **P2 GPU 蒙皮已完成**（2026-10-29）：`GN_VkDraw3DSkinned` + 调色板环形 UBO，`gpuCheck` 5 条 PASS。
+5. ✅ **P9 全部完成**（2026-10-29）：GPU 粒子（compute+SSBO+实例化 billboard，7 条）、
+   GPU 布料（A/B SSBO 乒乓 + Jacobi + 网格绘制，5 条）、SSBO 调色板蒙皮（>128 关节，4 条）、
+   绘制项批处理（稳定排序 + 切换统计，3 条）；`gpuCheck` 73/73，CPU 回退
+   （`stepParticlesCpu` / `stepClothCpu`）保留。
+   下一步：P10（LOD，契约见 §3.4）与 P11（天空/天气）。
+   **2026-10-29 追加的下一步**：P11 从 S3（雾 UBO，先冻结槽位表）与 S2b（云）继续；
+   P12 先做 G0（G-Buffer 修复）→ G1（IBL）→ G2（SSAO），详见 §3.6 / §3.7。
+6. ✅ **P10 / P11 已完成**（2026-10-29）：P10 动态 LOD（4 条 GPU 检查）+ P11 S2b 三层云盘 / S4 粒子池扩展 /
+   S5 降水管线（形状 v2：细芯雨丝 / 径向雪团）/ S6 查看器全天气集成 / **S6b 地面 + 贴花**
+   （cloud.* 4 条 + precipitation.* 6 条 + decal.* 4 条）；`make unit` = 275 cases 0 failed，
+   `make gpuCheck` = 94/94 PASS（AMD 780M / RADV）。剩余：P12 GI（G0–G5 未开始，§3.7）。

@@ -141,6 +141,7 @@ extern GN_API unsigned int GT_SystemInited; //标记引擎系统各部分是否�
 #include "GN_2Dmath.h" //2D图形处理用到的几何数学等功能
 #ifdef GN_USING_3D
 #include "GN_3Dmath.h" //3D图形处理用到的几何数学等功能
+#include "GN_Space.h" //坐标空间约定（世界轴/正面规则/UV/光照符号）
 #include "GN_3Dmodel.h" //3D模型加载与绘制等功能
 #include "GN_3Dlight.h" //3D光源系统
 #include "GN_3Dmaterial.h" //3D材质系统

@@ -1,0 +1,40 @@
+// gn3d_particle.comp — P9 GPU 粒子模拟：SSBO 内逐粒子积分（重力 + 阻尼 + 寿命）。
+//
+// 与 src/graphics/GN_3DparticleGPU.cpp 的 stepParticlesCpu 同一套公式：
+//   v = (v + gravity*dt) * 1/(1+drag*dt); p += v*dt; age += dt; age>=life ⇒ alive=0。
+// 布局必须与 GN_3DparticleGPU.h 的 sGPU_PARTICLE 逐字段一致（四个 vec4 = 64 字节）。
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(set = 0, binding = 0) uniform ParticleSimUBO {
+    vec4 gravity; // xyz = 重力, w = dt
+    vec4 params;  // x = drag, y = 累计时间, z = 本次粒子数, w = 保留
+} u;
+
+struct ParticleGPU {
+    vec4 posAge; // xyz = 位置, w = age
+    vec4 velLife; // xyz = 速度, w = life
+    vec4 color;
+    vec4 misc; // x = size, y = seed, z = alive, w = pad
+};
+
+layout(set = 0, binding = 1) buffer ParticleBuffer {
+    ParticleGPU particles[];
+};
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if(index >= uint(u.params.z)) return;
+
+    ParticleGPU p = particles[index];
+    if(p.misc.z < 0.5) return; // 空槽
+
+    float dt = u.gravity.w;
+    float damping = 1.0 / (1.0 + u.params.x * dt);
+    p.velLife.xyz = (p.velLife.xyz + u.gravity.xyz * dt) * damping;
+    p.posAge.xyz += p.velLife.xyz * dt;
+    p.posAge.w += dt;
+    p.misc.z = (p.posAge.w >= p.velLife.w) ? 0.0 : 1.0;
+    particles[index] = p;
+}

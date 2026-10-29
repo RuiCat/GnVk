@@ -407,7 +407,7 @@ void init3DSkybox() {
             dslb[0].binding = 0;
             dslb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             dslb[0].descriptorCount = 1;
-            dslb[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+            dslb[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
             dslb[1].binding = 1;
             dslb[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             dslb[1].descriptorCount = 1;
@@ -422,8 +422,8 @@ void init3DSkybox() {
             plci.pSetLayouts = &GN_Vk.skyboxDescriptorLayout;
             vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &GN_Vk.skyboxPipelineLayout);
 
-            // UBO (64 bytes: viewProj)
-            CreateBuf(64, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            // UBO (128 bytes: viewProj 64 + VkSkyParams 64)
+            CreateBuf(128, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                       GN_Vk.skyboxUBOBuffer, GN_Vk.skyboxUBOMemory);
 
@@ -434,7 +434,7 @@ void init3DSkybox() {
                 dai.descriptorSetCount = 1;
                 dai.pSetLayouts = &GN_Vk.skyboxDescriptorLayout;
                 vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.skyboxDescriptorSet);
-                VkDescriptorBufferInfo dbi = {GN_Vk.skyboxUBOBuffer, 0, 64};
+                VkDescriptorBufferInfo dbi = {GN_Vk.skyboxUBOBuffer, 0, 128};
                 VkDescriptorImageInfo dii = {GN_Vk.skyboxSampler, GN_Vk.skyboxView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
                 VkWriteDescriptorSet w[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
                 w[0].dstSet = GN_Vk.skyboxDescriptorSet;
@@ -502,7 +502,8 @@ void init3DGbuffer() {
         ii.format = gFormats[i];
         ii.tiling = VK_IMAGE_TILING_OPTIMAL;
         ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        ii.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ii.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ii.samples = VK_SAMPLE_COUNT_1_BIT;
         ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         vkCreateImage(GN_Vk.device, &ii, 0, gImages[i]);
@@ -532,7 +533,8 @@ void init3DGbuffer() {
         ii.format = GN_Vk.depthFormat;
         ii.tiling = VK_IMAGE_TILING_OPTIMAL;
         ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        ii.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ii.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ii.samples = VK_SAMPLE_COUNT_1_BIT;
         ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.gDepthImage);
@@ -702,7 +704,8 @@ void init3DGbuffer() {
             descGB.aDepthCompare = VK_COMPARE_OP_LESS;
             descGB.aDepthStencil = true;
             descGB.aCullBack = true;
-            descGB.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+            // 世界 CCW + 正高度视口 + 投影 Y 翻转 ⇒ 帧缓冲 CCW
+            descGB.aFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             descGB.aBlend = GN3d::eBLEND_NONE;
             descGB.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             descGB.aSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -730,8 +733,9 @@ void init3DDeferredLight() {
         auto dlv = LoadSPIRVFile("assets/shaders/gn3d_deferred_light.vert.spv");
         auto dlf = LoadSPIRVFile("assets/shaders/gn3d_deferred_light.frag.spv");
         if(!dlv.empty() && !dlf.empty()) {
-            // 描述符: 0=SceneUBO,1=gAlbedo,2=gNormal,3=gPBR,4=gDepth,5=shadow,6=skybox,7=LightUBO
-            VkDescriptorSetLayoutBinding dlb[8] = {};
+            // 描述符: 0=SceneUBO,1=gAlbedo,2=gNormal,3=gPBR,4=gDepth,5=shadow,6=skybox,7=LightUBO,
+            //         8=雾 UBO（P11-S3）
+            VkDescriptorSetLayoutBinding dlb[9] = {};
             dlb[0].binding = 0;
             dlb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             dlb[0].descriptorCount = 1;
@@ -754,8 +758,12 @@ void init3DDeferredLight() {
             dlb[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             dlb[7].descriptorCount = 1;
             dlb[7].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            dlb[8].binding = 8;
+            dlb[8].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            dlb[8].descriptorCount = 1;
+            dlb[8].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
             VkDescriptorSetLayoutCreateInfo dci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-            dci.bindingCount = 8;
+            dci.bindingCount = 9;
             dci.pBindings = dlb;
             vkCreateDescriptorSetLayout(GN_Vk.device, &dci, 0, &GN_Vk.deferredLightDescriptorLayout);
             {
@@ -779,8 +787,8 @@ void init3DDeferredLight() {
                 VkDescriptorImageInfo dii = {GN_Vk.gBufferSampler, GN_Vk.gDepthView, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
                 VkDescriptorImageInfo sii = {GN_Vk.shadowSampler, GN_Vk.shadowView, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
                 VkDescriptorImageInfo cii = {GN_Vk.skyboxSampler, GN_Vk.skyboxView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-                VkWriteDescriptorSet w[8] = {};
-                for(int i = 0; i < 8; i++) w[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                VkWriteDescriptorSet w[9] = {};
+                for(int i = 0; i < 9; i++) w[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 w[0].dstSet = GN_Vk.deferredLightDescriptorSet;
                 w[0].dstBinding = 0;
                 w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -821,7 +829,13 @@ void init3DDeferredLight() {
                 w[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                 w[7].descriptorCount = 1;
                 w[7].pBufferInfo = &dbi7;
-                vkUpdateDescriptorSets(GN_Vk.device, 8, w, 0, 0);
+                VkDescriptorBufferInfo dbi8 = {atmosphereFogBuffer(), 0, atmosphereFogRange()};
+                w[8].dstSet = GN_Vk.deferredLightDescriptorSet;
+                w[8].dstBinding = 8;
+                w[8].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                w[8].descriptorCount = 1;
+                w[8].pBufferInfo = &dbi8;
+                vkUpdateDescriptorSets(GN_Vk.device, 9, w, 0, 0);
             }
             // 延迟光照 RenderPass → swapchain (复用 composite render pass 格式)
             {
@@ -869,7 +883,7 @@ void init3DDeferredLight() {
             descDL.aDepthWrite = false;
             descDL.aDepthStencil = false;
             descDL.aCullBack = false;
-            descDL.aFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // 旧 pci 未设置 frontFace（默认 CCW）
+            descDL.aFrontFace = VK_FRONT_FACE_CLOCKWISE; // 世界 CCW + Y 翻转（全屏 pass，剔除已关）
             descDL.aBlend = GN3d::eBLEND_NONE;
             descDL.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             descDL.aSamples = VK_SAMPLE_COUNT_1_BIT;

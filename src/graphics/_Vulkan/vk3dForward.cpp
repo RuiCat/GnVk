@@ -7,6 +7,13 @@
 
 namespace GNg {
 
+// P10：最近一次 PBR 绘制提交的 indexCount（诊断/验收钩子）。
+namespace {
+uint32_t s_last3DIndexCount = 0;
+}
+
+uint32_t GN_VkLast3DIndexCount() { return s_last3DIndexCount; }
+
 void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                       const void *lightUBO, uint32_t lightUBOSize) {
     if(!GN_Vk.initialized || s_in3DPass) return;
@@ -206,6 +213,7 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
                     float roughness, float metallic, float ao,
                     const sIMAGE *albedoTex, const sIMAGE *normalTex) {
     if(!GN_Vk.initialized || !s_in3DPass || !vertices || vertexCount == 0) return;
+    s_last3DIndexCount = (indices && indexCount > 0) ? indexCount : 0;
 
     // ── 更新纹理描述符 (binding 1 = albedo, binding 3 = normal) ──
     {

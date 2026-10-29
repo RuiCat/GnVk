@@ -151,57 +151,15 @@ bool ImageLoadEx(const char *fn, sIMAGE *out, int w, int h) {
     return true;
 }
 
-// Load PNG from memory buffer
+// 从内存 PNG 载入纹理：解码复用 GN_3Dtexture 的 PNG 解码器（含 setjmp 错误回收），
+// 再走 CreateEmptyToData/DataFill 的延迟上传路径。
 bool ImageLoadFromMem(const void *data, int len, sIMAGE *out) {
     if(!data || len <= 0 || !out) return false;
-    // Use libpng with custom read from memory
-    struct MemReader {
-        const uint8_t *ptr;
-        int remaining;
-    };
-    MemReader mr = {(const uint8_t *)data, len};
-    auto readCB = [](png_structp png, png_bytep buf, png_size_t sz) {
-        MemReader *mr = (MemReader *)png_get_io_ptr(png);
-        if((int)sz > mr->remaining) sz = mr->remaining;
-        memcpy(buf, mr->ptr, sz);
-        mr->ptr += sz;
-        mr->remaining -= (int)sz;
-    };
-    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, 0, 0, 0);
-    if(!png) return false;
-    png_infop info = png_create_info_struct(png);
-    if(!info) {
-        png_destroy_read_struct(&png, 0, 0);
-        return false;
-    }
-    png_set_read_fn(png, &mr, readCB);
-    png_read_info(png, info);
-    int iw = png_get_image_width(png, info), ih = png_get_image_height(png, info);
-    // Expand to RGBA as in ImageLoad
-    if(png_get_color_type(png, info) == PNG_COLOR_TYPE_RGB)
-        png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
-    if(png_get_color_type(png, info) == PNG_COLOR_TYPE_PALETTE)
-        png_set_palette_to_rgb(png);
-    if(png_get_color_type(png, info) == PNG_COLOR_TYPE_GRAY && png_get_bit_depth(png, info) < 8)
-        png_set_expand_gray_1_2_4_to_8(png);
-    if(png_get_valid(png, info, PNG_INFO_tRNS))
-        png_set_tRNS_to_alpha(png);
-    if(png_get_color_type(png, info) == PNG_COLOR_TYPE_GRAY ||
-       png_get_color_type(png, info) == PNG_COLOR_TYPE_GRAY_ALPHA)
-        png_set_gray_to_rgb(png);
-    png_read_update_info(png, info);
-    iw = png_get_image_width(png, info);
-    ih = png_get_image_height(png, info);
-    png_bytep *rows = new png_bytep[ih];
-    uint8_t *px = new uint8_t[iw * ih * 4];
-    for(int i = 0; i < ih; i++) rows[i] = px + i * iw * 4;
-    png_read_image(png, rows);
-    png_destroy_read_struct(&png, &info, 0);
-    delete[] rows;
-    // Upload to GPU via DataFill
-    out->CreateEmptyToData(iw, ih, 1, 0, 1, false, false);
-    out->DataFill(px, CR_RGBA, iw, ih, 0, 0, 0, false);
-    delete[] px;
+    GN3d::sTEXTURE_IMAGE image;
+    if(!GN3d::decodePngMemory(data, (size_t)len, image)) return false;
+    out->CreateEmptyToData((int)image.aWidth, (int)image.aHeight, 1, 0, 1, false, false);
+    out->DataFill(image.aPixels.data(), CR_RGBA, (int)image.aWidth, (int)image.aHeight, 0, 0, 0,
+                  false);
     return true;
 }
 

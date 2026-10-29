@@ -1,0 +1,79 @@
+// gn3d_cloth.comp — P9-a GPU 布料：Verlet 积分与 Jacobi 距离约束（同一着色器两种模式）。
+//
+// 布局与 GN3d::sCLOTH_GPU_VERTEX（32B）逐字段一致：pos(0) prev(12) pinned(24) pad(28)。
+// set 0：binding 0 = 源顶点（只读语义），binding 1 = 目标顶点（写）。
+// push constant：gravityDt.xyz = 重力、gravityDt.w = dt；params0 = (spacing, damping, W, H)；
+//                params1.x = 模式（0 = 积分，1 = 约束迭代）。
+// 公式必须与 GN_3DclothGPU.cpp 的 stepClothCpu 一致（CPU 回退/对拍）。
+#version 450
+
+layout(local_size_x = 64) in;
+
+struct ClothVertex {
+    vec4 posPinned; // xyz = pos, w = pinned
+    vec4 prevPad; // xyz = prev, w = 0（保持与 C++ 32B 布局一致）
+};
+
+layout(set = 0, binding = 0) buffer SrcCloth {
+    ClothVertex srcVertices[];
+} src;
+
+layout(set = 0, binding = 1) buffer DstCloth {
+    ClothVertex dstVertices[];
+} dst;
+
+layout(push_constant) uniform ClothPC {
+    vec4 gravityDt;
+    vec4 params0; // x = spacing, y = damping, z = width, w = height
+    vec4 params1; // x = mode
+} pc;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    uint width = uint(pc.params0.z);
+    uint height = uint(pc.params0.w);
+    if(index >= width * height) return;
+
+    ClothVertex vertex = src.srcVertices[index];
+    bool pinned = vertex.posPinned.w >= 0.5;
+
+    if(pc.params1.x < 0.5) {
+        // ── 积分：v = (pos - prev) * (1 - damping); prev = pos; pos += v + g*dt*dt
+        if(!pinned) {
+            float dt = pc.gravityDt.w;
+            vec3 velocity = (vertex.posPinned.xyz - vertex.prevPad.xyz) * (1.0 - pc.params0.y);
+            vertex.prevPad.xyz = vertex.posPinned.xyz;
+            vertex.posPinned.xyz += velocity + pc.gravityDt.xyz * dt * dt;
+        }
+        dst.dstVertices[index] = vertex;
+        return;
+    }
+
+    // ── 约束：4 邻域（左、右、上、下）Jacobi 修正 ────────────
+    if(pinned) {
+        dst.dstVertices[index] = vertex;
+        return;
+    }
+    uint column = index % width;
+    uint row = index / width;
+    vec3 correction = vec3(0.0);
+    uint neighbourCount = 0u;
+    for(int k = 0; k < 4; ++k) {
+        int offsetX = (k == 0) ? -1 : (k == 1 ? 1 : 0);
+        int offsetY = (k == 2) ? -1 : (k == 3 ? 1 : 0);
+        int neighbourColumn = int(column) + offsetX;
+        int neighbourRow = int(row) + offsetY;
+        if(neighbourColumn < 0 || neighbourColumn >= int(width)) continue;
+        if(neighbourRow < 0 || neighbourRow >= int(height)) continue;
+        uint neighbour = uint(neighbourRow) * width + uint(neighbourColumn);
+        vec3 delta = src.srcVertices[neighbour].posPinned.xyz - vertex.posPinned.xyz;
+        float length = length(delta);
+        if(length <= 1e-6) continue;
+        correction += delta * ((length - pc.params0.x) / length * 0.5);
+        neighbourCount += 1u;
+    }
+    if(neighbourCount > 0u) {
+        vertex.posPinned.xyz += correction / float(neighbourCount);
+    }
+    dst.dstVertices[index] = vertex;
+}

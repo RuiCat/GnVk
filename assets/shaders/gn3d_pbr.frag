@@ -24,6 +24,19 @@ layout(binding = 3, set = 0) uniform sampler2D normalSampler;  // 法线贴图
 layout(binding = 4, set = 0) uniform sampler2DShadow shadowSampler; // 阴影贴图
 layout(binding = 5, set = 0) uniform samplerCube skyboxCubemap;     // 天空盒 IBL
 
+// P11-S3：雾（独立 Weather UBO，绑定 6；density == 0 时无效果）
+layout(binding = 6, set = 0) uniform FogUBO {
+    vec4 fogColor;
+    vec4 fogParams;  // x=density(1/m), y=heightFalloff(1/m), z=baseHeight(m), w=maxOpacity
+} fog;
+
+float fogAmountAt(vec3 worldPosition) {
+    float distanceToCamera = length(worldPosition - scene.cameraPos.xyz);
+    float heightScale = exp(-fog.fogParams.y * max(worldPosition.y - fog.fogParams.z, 0.0));
+    float amount = 1.0 - exp(-fog.fogParams.x * heightScale * distanceToCamera);
+    return clamp(amount, 0.0, fog.fogParams.w);
+}
+
 struct Light {
     vec4 color;
     vec4 position;
@@ -276,5 +289,5 @@ void main() {
     
     // 注: swapchain 为 SRGB 格式, 硬件自动 Gamma 编码, 无需手动 pow(1/2.2)
     
-    outColor = vec4(color, 1.0);
+    outColor = vec4(mix(fog.fogColor.rgb, color, 1.0 - fogAmountAt(fragWorldPos)), 1.0);
 }

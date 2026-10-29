@@ -163,8 +163,9 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
     // Binding 0: Scene UBO (uniform buffer) — 顶点+片段着色器
     // Binding 1: Texture sampler (combined image sampler) — 片段着色器
     // Binding 2: Light UBO (uniform buffer) — 片段着色器
+    // Binding 3: Fog/Weather UBO (uniform buffer) — 片段着色器（P11-S3）
     {
-        VkDescriptorSetLayoutBinding dslb[3] = {};
+        VkDescriptorSetLayoutBinding dslb[4] = {};
         dslb[0].binding = 0;
         dslb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         dslb[0].descriptorCount = 1;
@@ -177,8 +178,12 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
         dslb[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         dslb[2].descriptorCount = 1;
         dslb[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        dslb[3].binding = 3;
+        dslb[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        dslb[3].descriptorCount = 1;
+        dslb[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        dslci.bindingCount = 3;
+        dslci.bindingCount = 4;
         dslci.pBindings = dslb;
         vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.descriptorLayout3D);
     }
@@ -224,6 +229,7 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
         desc.aDepthCompare = VK_COMPARE_OP_LESS;
         desc.aDepthStencil = true;
         desc.aCullBack = true;
+        // 世界 CCW + 正高度视口 + 投影 Y 翻转 ⇒ 帧缓冲仍是 CCW（GN_Space::frontFaceForWorldPass(true)）
         desc.aFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         desc.aBlend = GN3d::eBLEND_NONE;
         desc.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -262,9 +268,11 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
         vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.descriptorSet3D);
         VkDescriptorBufferInfo dbi = {GN_Vk.uniformBuffer3D, 0, sizeof(VkSceneUBO)};
         VkDescriptorBufferInfo lbi = {GN_Vk.lightBuffer3D, 0, 1024};
+        VkDescriptorBufferInfo fbi = {atmosphereFogBuffer(), 0, atmosphereFogRange()};
         VkDescriptorImageInfo dii = {GN_Vk.defaultSampler, GN_Vk.defaultImageView,
                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet w[3] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+        VkWriteDescriptorSet w[4] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
         w[0].dstSet = GN_Vk.descriptorSet3D;
@@ -282,7 +290,12 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
         w[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         w[2].descriptorCount = 1;
         w[2].pBufferInfo = &lbi;
-        vkUpdateDescriptorSets(GN_Vk.device, 3, w, 0, 0);
+        w[3].dstSet = GN_Vk.descriptorSet3D;
+        w[3].dstBinding = 3;
+        w[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        w[3].descriptorCount = 1;
+        w[3].pBufferInfo = &fbi;
+        vkUpdateDescriptorSets(GN_Vk.device, 4, w, 0, 0);
     }
 }
 
@@ -293,7 +306,7 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
     //  PBR 描述符布局 (Binding 5 = skyboxCubemap for IBL)
     // ═══════════════════════════════════════════════════════
     {
-        VkDescriptorSetLayoutBinding dslb[6] = {};
+        VkDescriptorSetLayoutBinding dslb[7] = {};
         dslb[0].binding = 0;
         dslb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         dslb[0].descriptorCount = 1;
@@ -318,8 +331,13 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
         dslb[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         dslb[5].descriptorCount = 1;
         dslb[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        // P11-S3：binding 6 = 雾 UBO（与 §3.6 冻结槽位表一致）。
+        dslb[6].binding = 6;
+        dslb[6].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        dslb[6].descriptorCount = 1;
+        dslb[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        dslci.bindingCount = 6;
+        dslci.bindingCount = 7;
         dslci.pBindings = dslb;
         vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.descriptorLayoutPBR);
     }
@@ -340,7 +358,9 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
 
     // ── 加载 PBR 着色器并创建管线（P1b：走管线缓存）────
     if(!pbrVert.empty() && !pbrFrag.empty()) {
-        // 旧 PBR 管线：固定视口 y=H/h=-H（Y 翻转）、正面 CLOCKWISE、MSAA、深度 LESS、无混合
+        // PBR 管线：视口与前向管线一致（正高度、y=0）；竖直方向交给投影矩阵的 m[5]=-f。
+        // 以前这里用 y=H/height=-H 的负高度视口来「抵消投影 Y 翻转、保持 NDC CCW」，
+        // 代价是整条管线的画面上下镜像（地面被画到地平线之上），故改为翻 frontFace。
         GN3d::sVERTEX_LAYOUT layoutPBR;
         layoutPBR.Add(0, (uint32_t)offsetof(VkVertex3D, px), VK_FORMAT_R32G32B32_SFLOAT);
         layoutPBR.Add(1, (uint32_t)offsetof(VkVertex3D, nx), VK_FORMAT_R32G32B32_SFLOAT);
@@ -363,16 +383,16 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
         descPBR.aDepthCompare = VK_COMPARE_OP_LESS;
         descPBR.aDepthStencil = true;
         descPBR.aCullBack = true;
-        descPBR.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+        // 与 3D 前向一致：世界 CCW + Y 翻转 ⇒ CCW
+        descPBR.aFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         descPBR.aBlend = GN3d::eBLEND_NONE;
         descPBR.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         descPBR.aSamples = GN_Vk.msaaSamples;
         descPBR.aColorAttachmentCount = 1;
         descPBR.aDynamicViewport = false;
         descPBR.aDynamicScissor = false;
-        descPBR.aViewport = VkViewport{0.0f, (float)GN_Vk.swapchainExtent.height,
-                                       (float)GN_Vk.swapchainExtent.width,
-                                       -(float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
+        descPBR.aViewport = VkViewport{0.0f, 0.0f, (float)GN_Vk.swapchainExtent.width,
+                                       (float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
         descPBR.aScissor = VkRect2D{{0, 0}, GN_Vk.swapchainExtent};
         descPBR.aCustomBlend = false;
         GN_Vk.pipelinePBR = GN_Vk.aPipelineCache.GetOrCreate(descPBR);
@@ -396,7 +416,8 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         ii.format = VK_FORMAT_D32_SFLOAT;
         ii.tiling = VK_IMAGE_TILING_OPTIMAL;
         ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        ii.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ii.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ii.samples = VK_SAMPLE_COUNT_1_BIT;
         ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.shadowImage);
@@ -538,6 +559,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         descShadow.aDepthBiasConstant = 1.25f;
         descShadow.aDepthBiasSlope = 1.75f;
         descShadow.aCullBack = true;
+        // 阴影用 Mat44OrthoVK（无 Y 翻转）⇒ 世界 CCW 被垂直镜像成帧缓冲 CW
         descShadow.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
         descShadow.aBlend = GN3d::eBLEND_NONE;
         descShadow.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;

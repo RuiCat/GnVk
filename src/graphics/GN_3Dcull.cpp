@@ -4,10 +4,12 @@
 //   * 世界 AABB = 所有网格顶点（VkVertex3D 布局，取前 3 个 float）经 aTransform 变换后的包围盒。
 //   * 可见性 = aVisible && 世界 AABB 与 sFRUSTUM 相交（保守：贴面算相交）；空盒/未计算 ⇒ 不可见。
 //   * cullModels 只写 outIndices，不修改模型；最多写 maxOut 个，返回实际写入数。
+//   * cullDrawModelsPBR 复用 cullModels 的可见列表，只对可见模型调用 DrawPBR。
 #include <GN.h>
 #include "GN_3Dmodel.h"
 
 #include <cfloat>
+#include <vector>
 
 namespace GN3d {
 
@@ -70,6 +72,21 @@ uint32_t cullModels(const sFRUSTUM &frustum, const cMODEL *const *models, uint32
         outIndices[visibleCount] = i;
         ++visibleCount;
     }
+    return visibleCount;
+}
+
+uint32_t cullDrawModelsPBR(const sFRUSTUM &frustum, cMODEL *const *models, uint32_t count,
+                           uint32_t *outVisible) {
+    if(outVisible) *outVisible = 0;
+    if(models == 0 || count == 0) return 0;
+
+    // 复用 cullModels 的可见列表：可见下标按模型顺序写入，再逐个绘制。
+    std::vector<uint32_t> visibleIndices(count);
+    const uint32_t visibleCount = cullModels(frustum, models, count, visibleIndices.data(), count);
+    for(uint32_t i = 0; i < visibleCount; ++i) {
+        models[visibleIndices[i]]->DrawPBR();
+    }
+    if(outVisible) *outVisible = visibleCount;
     return visibleCount;
 }
 

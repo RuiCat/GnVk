@@ -20,6 +20,11 @@ namespace GNg {
 
 GN_VkContext GN_Vk;
 
+// 2D 叠层通道（GN_VkBegin2DPass 用）：loadOp=LOAD，把 HUD/文本叠加在 3D 画面上。
+// 与主 renderPass 的附件格式/采样一致，因此 2D 管线可直接复用。
+static VkRenderPass s_renderPass2DOverlay = VK_NULL_HANDLE;
+static VkFramebuffer *s_framebuffers2DOverlay = nullptr;
+
 // ── RenderTarget 静态变量 (需在 shutdown 之前) ────────
 static VkRenderPass s_rtRenderPass = VK_NULL_HANDLE;
 static VkFramebuffer s_rtFramebuffer = VK_NULL_HANDLE;
@@ -162,7 +167,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     sci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     sci.imageExtent = GN_Vk.swapchainExtent;
     sci.imageArrayLayers = 1;
-    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     sci.preTransform = caps.currentTransform;
     sci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -298,6 +303,40 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
         vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.framebuffers[i]);
     }
 
+    // 2D 叠层通道：3D pass 之后用它把 HUD/文本画在 3D 画面上（loadOp=LOAD 保留已有画面）。
+    // 3D pass 的 resolve 附件 finalLayout 是 PRESENT_SRC_KHR，所以这里也从 PRESENT_SRC 开始。
+    if(s_renderPass2DOverlay == VK_NULL_HANDLE) {
+        VkAttachmentDescription adOverlay = {};
+        adOverlay.format = GN_Vk.swapchainFormat;
+        adOverlay.samples = VK_SAMPLE_COUNT_1_BIT;
+        adOverlay.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        adOverlay.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        adOverlay.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        adOverlay.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        VkAttachmentReference arOverlay = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+        VkSubpassDescription spOverlay = {};
+        spOverlay.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        spOverlay.colorAttachmentCount = 1;
+        spOverlay.pColorAttachments = &arOverlay;
+        VkRenderPassCreateInfo rpiOverlay = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        rpiOverlay.attachmentCount = 1;
+        rpiOverlay.pAttachments = &adOverlay;
+        rpiOverlay.subpassCount = 1;
+        rpiOverlay.pSubpasses = &spOverlay;
+        vkCreateRenderPass(GN_Vk.device, &rpiOverlay, 0, &s_renderPass2DOverlay);
+        s_framebuffers2DOverlay = new VkFramebuffer[GN_Vk.swapchainImageCount];
+        for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
+            VkFramebufferCreateInfo fciOverlay = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+            fciOverlay.renderPass = s_renderPass2DOverlay;
+            fciOverlay.attachmentCount = 1;
+            fciOverlay.pAttachments = &GN_Vk.swapchainViews[i];
+            fciOverlay.width = GN_Vk.swapchainExtent.width;
+            fciOverlay.height = GN_Vk.swapchainExtent.height;
+            fciOverlay.layers = 1;
+            vkCreateFramebuffer(GN_Vk.device, &fciOverlay, 0, &s_framebuffers2DOverlay[i]);
+        }
+    }
+
     // Command pool
     VkCommandPoolCreateInfo cpci = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     cpci.queueFamilyIndex = GN_Vk.graphicsFamily;
@@ -325,10 +364,15 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     vkCreateSampler(GN_Vk.device, &sci2, 0, &GN_Vk.defaultSampler);
 
     // Descriptor pool (必须在默认纹理之前创建)
-    VkDescriptorPoolSize dps[2] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1024}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024}};
+    // P9：新增 STORAGE_BUFFER 尺寸（粒子 SSBO：compute set + 绘制 set 各一份）。
+    VkDescriptorPoolSize dps[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1024},
+                                   {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024},
+                                   {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 256}};
     VkDescriptorPoolCreateInfo dpci = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    // P1c：允许材质实例单独归还描述符集（GN_VkMaterialDestroy），否则创建/销毁循环会耗尽池。
+    dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     dpci.maxSets = 1024;
-    dpci.poolSizeCount = 2;
+    dpci.poolSizeCount = 3;
     dpci.pPoolSizes = dps;
     vkCreateDescriptorPool(GN_Vk.device, &dpci, 0, &GN_Vk.descriptorPool);
 
@@ -447,6 +491,24 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     GN_Vk.initialized = true;
 }
 
+// 在 3D pass 之后重新打开 2D 叠层通道：之后排队的 2D/UI/文本顶点会在 GN_VkEndFrame
+// 的批次刷新里被画进这个通道（loadOp=LOAD，不清掉 3D 画面），再随帧提交呈现。
+void GN_VkBegin2DPass() {
+    if(!GN_Vk.initialized || s_inRenderPass) return; // 已有活跃通道时不重复开
+    if(s_renderPass2DOverlay == VK_NULL_HANDLE || s_framebuffers2DOverlay == nullptr) return;
+    VkCommandBuffer commandBuffer = GN_Vk.commandBuffers[GN_Vk.currentFrame];
+    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rpi.renderPass = s_renderPass2DOverlay;
+    rpi.framebuffer = s_framebuffers2DOverlay[GN_Vk.currentFrame];
+    rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
+    rpi.clearValueCount = 0; // loadOp=LOAD：沿用 3D 的结果
+    vkCmdBeginRenderPass(commandBuffer, &rpi, VK_SUBPASS_CONTENTS_INLINE);
+    s_inRenderPass = true;
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipeline);
+    VkRect2D fullScreen = {{0, 0}, GN_Vk.swapchainExtent};
+    vkCmdSetScissor(commandBuffer, 0, 1, &fullScreen);
+}
+
 // ── 设备与交换链关闭：先等 GPU 空闲，再释放 3D/2D 资源与设备对象 ──
 void GN_VkShutdown() {
     if(!GN_Vk.initialized) return;
@@ -482,6 +544,16 @@ void GN_VkShutdown() {
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) vkDestroyFramebuffer(GN_Vk.device, GN_Vk.framebuffers[i], 0);
     delete[] GN_Vk.framebuffers;
     delete[] GN_Vk.commandBuffers;
+    if(s_framebuffers2DOverlay) {
+        for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++)
+            vkDestroyFramebuffer(GN_Vk.device, s_framebuffers2DOverlay[i], 0);
+        delete[] s_framebuffers2DOverlay;
+        s_framebuffers2DOverlay = nullptr;
+    }
+    if(s_renderPass2DOverlay != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(GN_Vk.device, s_renderPass2DOverlay, 0);
+        s_renderPass2DOverlay = VK_NULL_HANDLE;
+    }
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) vkDestroyImageView(GN_Vk.device, GN_Vk.swapchainViews[i], 0);
     delete[] GN_Vk.swapchainViews;
     delete[] GN_Vk.swapchainImages;
@@ -697,7 +769,7 @@ void GN_VkResize(int w, int h) {
     sci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     sci.imageExtent = GN_Vk.swapchainExtent;
     sci.imageArrayLayers = 1;
-    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     sci.preTransform = caps.currentTransform;
     sci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -755,6 +827,8 @@ VkFramebuffer *s_framebuffers3D = nullptr;
 // ── 3D 初始化编排：各阶段实现见 vk3dInit.cpp ──
 void GN_VkInit3D() {
     init3DTargets();
+    // P11-S3：雾 UBO 最先创建（前向/PBR/延迟三条管线的描述符集都要绑定它）。
+    if(!init3DAtmosphere()) fprintf(stderr, "[GN_Vk] 警告: 雾 UBO 不可用（P11-S3）\n");
 
     // ── 加载 3D 着色器 ───────────────────────────────
     auto vertSpv = LoadSPIRVFile("assets/shaders/gn3d.vert.spv");
@@ -804,7 +878,8 @@ void GN_VkInit3D() {
         VkDescriptorImageInfo diiShadow = {GN_Vk.shadowSampler, GN_Vk.shadowView,
                                            VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
 
-        VkWriteDescriptorSet w[5] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+        VkWriteDescriptorSet w[6] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
@@ -834,7 +909,14 @@ void GN_VkInit3D() {
         w[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         w[4].descriptorCount = 1;
         w[4].pImageInfo = &diiShadow;
-        vkUpdateDescriptorSets(GN_Vk.device, 5, w, 0, 0);
+        // P11-S3：binding 6 = 雾 UBO（binding 5 留给天空盒 cubemap，在天空盒初始化后更新）。
+        VkDescriptorBufferInfo dbiFog = {atmosphereFogBuffer(), 0, atmosphereFogRange()};
+        w[5].dstSet = GN_Vk.descriptorSetPBR;
+        w[5].dstBinding = 6;
+        w[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        w[5].descriptorCount = 1;
+        w[5].pBufferInfo = &dbiFog;
+        vkUpdateDescriptorSets(GN_Vk.device, 6, w, 0, 0);
         // Binding 5 (skybox cubemap) 将在天空盒初始化后更新
     }
 
@@ -843,6 +925,17 @@ void GN_VkInit3D() {
     init3DSkybox();
     init3DGbuffer();
     init3DDeferredLight();
+
+    // P1c / P2 / P8：新增子系统（管线各自经 aPipelineCache 创建；失败只告警）
+    if(!init3DMaterial()) fprintf(stderr, "[GN_Vk] 警告: 材质实例管线不可用（P1c）\n");
+    if(!init3DSkinned()) fprintf(stderr, "[GN_Vk] 警告: GPU 蒙皮管线不可用（P2）\n");
+    if(!init3DDebugLines()) fprintf(stderr, "[GN_Vk] 警告: 调试线框管线不可用（P8）\n");
+    // P9：GPU 粒子（compute 模拟 + 实例化绘制）；SSBO 在 GN_VkParticleCreate 时分配。
+    if(!init3DParticle()) fprintf(stderr, "[GN_Vk] 警告: GPU 粒子 compute 不可用（P9）\n");
+    if(!init3DParticleDraw()) fprintf(stderr, "[GN_Vk] 警告: GPU 粒子绘制管线不可用（P9）\n");
+    // P9 剩余片：SSBO 蒙皮（>128 关节）与 GPU 布料（管线预建，缓冲在各自 Create 时分配）。
+    if(!init3DSkinnedSsbo()) fprintf(stderr, "[GN_Vk] 警告: SSBO 蒙皮管线不可用（P9）\n");
+    if(!init3DCloth()) fprintf(stderr, "[GN_Vk] 警告: GPU 布料管线不可用（P9）\n");
 }
 
 #endif // GN_USING_3D

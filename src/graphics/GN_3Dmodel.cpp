@@ -20,9 +20,25 @@ namespace GN3d {
 using namespace GNg;
 
 // ═══════════════════════════════════════════════════════════
+//  sMESH_LOD 实现（P10：烘焙级的 CPU 数据，PBR 路径每次绘制动态上传）
+// ═══════════════════════════════════════════════════════════
+sMESH_LOD::sMESH_LOD()
+    : aVertices(0), aIndices(0), aVertexCount(0), aIndexCount(0), aMaxError(0.0f) {}
+
+sMESH_LOD::~sMESH_LOD() {
+    delete[] aVertices;
+    delete[] aIndices;
+    aVertices = 0;
+    aIndices = 0;
+    aVertexCount = 0;
+    aIndexCount = 0;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  sMESH 实现
 // ═══════════════════════════════════════════════════════════
-sMESH::sMESH() : aVertices(0), aIndices(0), aVertexCount(0), aIndexCount(0)
+sMESH::sMESH() : aVertices(0), aIndices(0), aVertexCount(0), aIndexCount(0),
+                 aLods(0), aLodCount(0), aBoundRadius(0.0f)
 #ifdef GN_USING_3D
                  ,
                  aVertexBuffer(VK_NULL_HANDLE), aVertexMemory(VK_NULL_HANDLE), aIndexBuffer(VK_NULL_HANDLE), aIndexMemory(VK_NULL_HANDLE)
@@ -55,6 +71,12 @@ void sMESH::Release() {
         delete[] aIndices;
         aIndices = 0;
     }
+    if(aLods) {
+        delete[] aLods; // sMESH_LOD 的析构负责各级数组
+        aLods = 0;
+    }
+    aLodCount = 0;
+    aBoundRadius = 0.0f;
     aVertexCount = 0;
     aIndexCount = 0;
 }
@@ -104,7 +126,9 @@ void sMESH::Draw(const sMAT44 *modelMatrix) const {
 #endif
 }
 
-void sMESH::DrawPBR(const sMAT44 *modelMatrix) const {
+void sMESH::DrawPBR(const sMAT44 *modelMatrix) const { DrawPBRLevel(modelMatrix, 0); }
+
+void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level) const {
 #ifdef GN_USING_3D
     float dr = 0.8f, dg = 0.8f, db = 0.8f, rough = 0.5f, metal = 0.0f, ao = 1.0f;
     const GNg::sIMAGE *albTex = aAlbedoTex;
@@ -122,14 +146,29 @@ void sMESH::DrawPBR(const sMAT44 *modelMatrix) const {
         dg = aDiffuse[1];
         db = aDiffuse[2];
     }
-    GNg::GN_VkDraw3DPBR(aVertices, aVertexCount,
-                        aIndices, aIndexCount,
+    // 选级：越界/该级无数据时退回 LOD0（aVertices/aIndices），保证单级路径逐位一致。
+    const float *vertices = aVertices;
+    const uint32_t *indices = aIndices;
+    uint32_t vertexCount = aVertexCount;
+    uint32_t indexCount = aIndexCount;
+    if(aLods && level < aLodCount) {
+        const sMESH_LOD &lod = aLods[level];
+        if(lod.aVertices && lod.aVertexCount > 0) {
+            vertices = lod.aVertices;
+            indices = lod.aIndices;
+            vertexCount = lod.aVertexCount;
+            indexCount = lod.aIndexCount;
+        }
+    }
+    GNg::GN_VkDraw3DPBR(vertices, vertexCount,
+                        indices, indexCount,
                         modelMatrix,
                         dr, dg, db,
                         rough, metal, ao,
                         albTex, nrmTex);
 #else
     (void)modelMatrix;
+    (void)level;
 #endif
 }
 
@@ -181,10 +220,13 @@ void cMODEL::Draw() const {
     }
 }
 
-void cMODEL::DrawPBR() const {
+void cMODEL::DrawPBR() const { DrawPBRWithLod(0, 0); }
+
+void cMODEL::DrawPBRWithLod(const uint32_t *levels, uint32_t levelCount) const {
     if(!aVisible || !aMeshes) return;
     for(uint32_t i = 0; i < aMeshCount; ++i) {
-        aMeshes[i].DrawPBR(&aTransform);
+        const uint32_t level = (levels && i < levelCount) ? levels[i] : 0u;
+        aMeshes[i].DrawPBRLevel(&aTransform, level);
     }
 }
 
@@ -241,7 +283,8 @@ bool cMODEL::LoadOBJ(const char *filename) {
             float u, v = 0;
             if(sscanf(line + 3, "%f %f", &u, &v) >= 1) {
                 texcoords.push_back(u);
-                texcoords.push_back(v < 0 ? -v : v);
+                // OBJ 的 v 原点在左下，而图像/UV 统一为左上原点 + v 向下 ⇒ 导入时翻转。
+                texcoords.push_back(GN3d::flipTextureV(v));
             }
         } else if(strncmp(line, "f ", 2) == 0) {
             ObjFace f;
@@ -577,11 +620,11 @@ cMODEL *CreatePlaneModel(float width, float depth, float r, float g, float b) {
     sv(22, hw, 0, hd, 1, 1);
     sv(33, -hw, 0, hd, 0, 1);
     idx[0] = 0;
-    idx[1] = 1;
-    idx[2] = 2;
+    idx[1] = 2;
+    idx[2] = 1;
     idx[3] = 0;
-    idx[4] = 2;
-    idx[5] = 3; // CCW
+    idx[4] = 3;
+    idx[5] = 2; // CCW（法线 +Y；世界约定见 GN_Space.h）
 
     m->aMeshes[0].aVertices = v;
     m->aMeshes[0].aIndices = idx;

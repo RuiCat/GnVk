@@ -16,7 +16,8 @@
 | 库 | 用途 |
 |----|------|
 | Vulkan + GLFW | 图形渲染 |
-| libpng | PNG 纹理加载 |
+| libpng | PNG 纹理加载 / glTF PNG 纹理解码 |
+| libjpeg（可选，pkg-config） | glTF JPEG 纹理解码；缺失时只支持 PNG |
 | FreeType | TTF 字体渲染 |
 | OpenAL | 音频播放 |
 | FFmpeg (libavcodec/format/swscale) | 视频播放 |
