@@ -16,6 +16,10 @@ make gpuCheck
 - 退出码 `1`：有 FAIL，输出里逐条给出实际/期望值。
 - 退出码 `2`：没有可用 Vulkan 设备（SKIP）；**SKIP 不算验收通过**。
 
+> 2026-10-31 实测：AMD Radeon 780M（RADV PHOENIX，Mesa 26.2.5）`make gpuCheck` = **99/99 PASS / 0 fail / 0 skip**。
+> 注意 DSH 沙箱默认看不到 `/dev/dri`（`workspace-write` 下 `vkCreateInstance` 报 `INCOMPATIBLE_DRIVER`），需在桌面终端
+> 或 `danger-full-access` 会话运行。
+
 没有 `/dev/dri` 的环境只能用 flatpak runtime 自带的 lavapipe 做软件预验：
 
 ```bash
@@ -24,7 +28,7 @@ VK_ICD_FILENAMES="$PWD/.local/probes/lvp_icd.json" make gpuCheck
 
 软件预验（llvmpipe）只证明验收程序可运行、断言可判定；**不能替代真实 GPU 验收**。
 
-## 检查项（94 条）
+## 检查项（2026-10-31 实测 99 条，全 PASS）
 
 | 组 | 检查 | 判据 |
 |---|---|---|

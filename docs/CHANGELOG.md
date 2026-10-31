@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-31（四） — 真 GPU `gpuCheck` 99/99 PASS（RADV PHOENIX）
+
+- **环境**：AMD Radeon 780M Graphics（RADV PHOENIX，Mesa 26.2.5，`renderD128`，Wayland `:1`）。
+- **此前 SKIP 原因**：`workspace-write` 沙箱隐藏 `/dev/dri`，`vkCreateInstance` 报 `INCOMPATIBLE_DRIVER`（并非驱动缺失）；
+  换 `danger-full-access` 后同一命令正常。
+- **结果**：`make gpuCheck` = **99/99 PASS / 0 fail / 0 skip**。覆盖 2D 混合、3D forward/PBR/阴影/G-Buffer/延迟、
+  GPU 蒙皮（SSBO >128 关节）、批处理、LOD、雾、云、降水、贴花、地面、`gpu.shutdown`。
+- **仍未覆盖（待人工目视）**：GI/SSAO/SSGI/探针视觉（无 gpuCheck 断言）、拖拽 resize + 验证层、
+  MMD 头发/裙边 BLEND、MMD 正反/左右（`tests/うさうさ`）。
+- **验收**：`make unit` = 371/0 不变；本次仅改文档与 §0 状态。
+
 ## 2026-10-31（三） — resize 后全部固定视口管线重建（修调试 AABB 错位/反向随相机）+ 文档状态清理
 
 - **现象**：窗口 resize 后模型 AABB/坐标轴错位，并随相机反向移动；根因是这些管线用创建时的固定 viewport/scissor，
