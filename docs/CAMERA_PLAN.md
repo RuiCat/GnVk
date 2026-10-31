@@ -444,15 +444,15 @@ float SetCameraLookObj(cCAMERA &camera, const sCAMERA_TARGET &target,
 | **C2** 移动 | ✅ 2026-10-30：`SelfMove/SelfRot*/ToMove/SetWorldPos` + `sCAMERA_INPUT` 控制层 + 5 用例 | `GN_3DcameraMove.cpp`、`GN_3DcameraControl.cpp` | `make unit` | 5/5 PASS；方向/角度与查看器符号一致 | — |
 | **C3** 轨道/跟随 | ✅ 2026-10-30：轨道状态机、跟随平滑、自动对准（含地平线平衡）、`Update(dt)` + 7 用例 | `GN_3DcameraOrbit.cpp`、`GN_3DcameraFollow.cpp` | `make unit` | 7/7 PASS；收敛/无过冲/dt=0/非法目标/无 roll | — |
 | **C4** 取景 | ✅ 2026-10-30：`SetCameraLookDirection/Range/Obj`、`FovToOrthoH/FovConvert` + 4 用例 | `GN_3DcameraFit.cpp` | `make unit` | 4/4 PASS；互逆/拟合断言 | — |
-| **C5** 接线 | ✅ 2026-10-30（编译级）：查看器相机段已换成 `GN3d::cCAMERA`（唯一实例 `gCamera`），输入只填 `sCAMERA_INPUT`→`ApplyInput`，视图/投影由 `BuildViewProj` 产出；新增 F 自由↔轨道、轨道滚轮缩放、中键平移；R 重置仍自由模式且默认视角与旧实现等价 | `mmdViewerCamera.cpp`、`mmdViewerShared.h`、`mmdViewer.cpp` | `make unit`、`make mmdViewer`、桌面 `make gpuCheck` | 编译通过 + 单测 371/0 + lint 0 违规；**运行期手感待桌面** | 任一回归 → 只回退 C5（相机文件保留） |
+| **C5** 接线 | ✅ 2026-10-30（编译级）+ 2026-10-31 目视通过：查看器相机段已换成 `GN3d::cCAMERA`（唯一实例 `gCamera`），输入只填 `sCAMERA_INPUT`→`ApplyInput`，视图/投影由 `BuildViewProj` 产出；新增 F 自由↔轨道、轨道滚轮缩放、中键平移；R 重置仍自由模式且默认视角与旧实现等价 | `mmdViewerCamera.cpp`、`mmdViewerShared.h`、`mmdViewer.cpp` | `make unit`、`make mmdViewer`、桌面 `make gpuCheck` | 编译通过 + 单测 371/0 + lint 0 违规；运行期由用户目视确认无问题（2026-10-31） | 任一回归 → 只回退 C5（相机文件保留） |
 
 > **C0–C4 实测（2026-10-30；2026-10-31 更新）**：22 个 `TEST_CASE` 全 PASS；套件总量随其它模块增长，当前 `make unit` = **371 cases / 0 failed**
 > （= 292 基线 + 本规划 22 + 并行 GI CPU 16）；`make` 构建 exit 0；`lintCodeModularity src/graphics tests/unit --naming --comments`
 > 对新增 8 文件 0 违规（全仓仅存量 `GN_2Dmath.cpp` 超长违规与 spv 头 no-split 告警）。
-> **运行期未验证**（本机无 `/dev/dri`）；另发现既有 `GN_3Dmath.cpp:381` `Mat44OrthoVK` 的 `m[10] = -fn` 与 VK [0,1] 深度符号不符
+> 运行期由用户目视确认无问题（2026-10-31，真 GPU RADV）；另发现既有 `GN_3Dmath.cpp:381` `Mat44OrthoVK` 的 `m[10] = -fn` 与 VK [0,1] 深度符号不符
 > （near→-2e-4、far→-1.0002），正交相机深度不可用；属既有数学库缺陷，未在本规划内修改（见风险）。
 
-> 用例数是**目标值**；实测：camera 22 用例全 PASS，套件总量 371/0（2026-10-31）。C0–C5 全部代码级完成。
+> 用例数是**目标值**；实测：camera 22 用例全 PASS，套件总量 371/0（2026-10-31）。C0–C5 全部完成（2026-10-31 目视通过）。
 
 ### 5.2 `testCamera` 用例清单（22 条）
 

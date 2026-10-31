@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-31（五） — 桌面目视验收通过 + 文档收口
+
+- **目视验收通过**（2026-10-31，用户确认）：拖拽 resize（模型/AABB 无错位）、默认 GI IBL 画面、
+  MMD 头发/裙边 BLEND、MMD 正反/左右。
+- **真 GPU**：`make gpuCheck` = **99/99 PASS / 0 fail / 0 skip**（AMD Radeon 780M / RADV PHOENIX，Mesa 26.2.5）。
+- **文档收口**：3D_FEATURE_PLAN §0 顶部与 #2–#8、#10–#12 标完成（仅 #1 S2b 云层未解决）、P12 状态表与 §3.7 清理
+  「待桌面」字样；GI_PLAN §9/§10、CAMERA_PLAN §5.1 同步「目视通过」。
+- **遗留**：SSAO/SSGI/探针默认关闭，开启后的视觉未单独记录；S2b 云层仍需重做贴片尺度/接缝后再默认开。
+
 ## 2026-10-31（四） — 真 GPU `gpuCheck` 99/99 PASS（RADV PHOENIX）
 
 - **环境**：AMD Radeon 780M Graphics（RADV PHOENIX，Mesa 26.2.5，`renderD128`，Wayland `:1`）。

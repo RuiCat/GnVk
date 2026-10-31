@@ -418,14 +418,16 @@ G-buffer → SSAO → SSGI(半分辨率) → 双边去噪 → 延迟光照
 | G4 | ✅ 代码级 | `_Vulkan/vkSsgi.cpp` + `gn3d_ssgi*.frag`：半分辨率 8×8 march + 5×5 双边；`envParams.w` 开关，**默认 0** | 渗色/性能 |
 | G5a | ✅ 单测 | `GN_3Dprobe.h/.cpp` + `testProbe` 10 用例（8×4×8 网格/三线性/Recenter） | — |
 | G5b | ✅ 代码级 | `_Vulkan/vkProbe.cpp`：9 张 3D 纹理 + 延迟 layout 23 + shader 采样；`GN_VkSetProbeWeight` 默认 0 | weight>0 视觉 |
-| MMD 接线 | ✅ 编译级 | 模型 `DrawPBR` + `GN_VkEnableGI(true)`；SSAO/SSGI/探针仅延迟路径（查看器前向无 G-Buffer） | 目视 |
+| MMD 接线 | ✅ 编译级 + 目视通过（2026-10-31） | 模型 `DrawPBR` + `GN_VkEnableGI(true)`；SSAO/SSGI/探针仅延迟路径（查看器前向无 G-Buffer） | 默认 GI IBL 由用户目视通过；SSAO/SSGI/探针默认关闭 |
 
 > 当前 `make unit` = **371 cases / 0 failed**（含 camera 22、GI/SSAO/SSGI/探针 CPU 用例）。
-> 本机无 GPU（`/dev/dri` 不存在、无 lavapipe）：`make gpuCheck` 只能编译、运行 SKIP；上表「剩余」全部待桌面验收。
+> 真 GPU（AMD Radeon 780M / RADV PHOENIX）`make gpuCheck` = **99/99 PASS / 0 skip**（2026-10-31）；
+> 默认 GI IBL 画面由用户目视验收通过；SSAO/SSGI/探针仍默认关闭。
 > 已知限制：GI/SSAO/SSGI/探针默认关闭（需 `GN_VkSetGI`/`GN_VkSetProbeWeight` 开启）；BLEND 只做前向 PBR（网格级排序）；SSGI 步数固定 8。
 
 每阶段收尾：`make check`、`bash ~/.dsh/skills/code-modularity/scripts/lintCodeModularity.sh <写域> --naming --comments`、
-GLSL 用 `glslangValidator -V` 编译通过。沙箱内**无 `/dev/dri`**，Vulkan 运行时视觉一律以你桌面实测为准。
+GLSL 用 `glslangValidator -V` 编译通过。`workspace-write` 沙箱隐藏 `/dev/dri`（`make gpuCheck` SKIP），
+真机验收用 `danger-full-access` 或桌面终端跑同一命令。
 
 ## 10. 风险与待决
 
@@ -442,7 +444,7 @@ GLSL 用 `glslangValidator -V` 编译通过。沙箱内**无 `/dev/dri`**，Vulk
 11. **HDR 双 Reinhard**：`gn3d_pbr.frag:275` 与 `gn3d_composite.frag:43` 各做一次。GI 必须在线性空间注入，建议 G1 前先统一到合成阶段，否则 SSGI 亮度无法校准。
 12. **无 compute dispatch**：DDGI 的前置工作；SH9 探针不需要。
 13. **启动成本**：CPU 预滤波约 31M 采样，若启动明显变慢就降到 64²，或挪到 G3 的 GPU 烘焙。
-14. **无 GPU 验证**：所有 Vulkan 运行时路径以你桌面实测为准，沙箱只能给编译 + CPU 单测。
+14. ✅ 已解决（2026-10-31）：真 GPU `make gpuCheck` = 99/99 PASS；默认 GI IBL 画面用户目视通过。此前沙箱无 `/dev/dri` 的 SKIP 已查明是 `workspace-write` 隐藏设备节点。
 
 ## 11. 待你确认（≤5）
 
