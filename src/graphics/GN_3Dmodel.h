@@ -64,7 +64,8 @@ struct sMESH {
     void Draw(const GNg::sMAT44 *modelMatrix) const;
     void DrawPBR(const GNg::sMAT44 *modelMatrix) const; // PBR 模式绘制
     // P10：按指定级绘制（level 越界/该级无数据时退回 LOD0，即 aVertices/aIndices）。
-    void DrawPBRLevel(const GNg::sMAT44 *modelMatrix, uint32_t level) const;
+    // forceBlend：true 时即使材质不是 eALPHA_BLEND 也走混合管线（供排序绘制第二趟使用）。
+    void DrawPBRLevel(const GNg::sMAT44 *modelMatrix, uint32_t level, bool forceBlend = false) const;
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -75,6 +76,8 @@ class cMODEL {
     char aName[128];
     sMESH *aMeshes;
     uint32_t aMeshCount;
+    sMATERIAL *aMaterials; // 材质池（cMODEL 拥有；网格 aMaterial 指向其中，可为空）
+    uint32_t aMaterialCount;
     GNg::sMAT44 aTransform;
     GNg::sVEC3 aPosition;
     GNg::sQUAT aRotation;
@@ -97,6 +100,9 @@ class cMODEL {
     void UpdateTransform();
     void Draw() const;
     void DrawPBR() const; // PBR 模式绘制所有网格
+    // 透明排序绘制：先 OPAQUE/MASK（原顺序），再 BLEND 按网格世界 AABB 中心到相机
+    // 由远到近逐个绘制（仅网格级排序，非逐三角形）。
+    void DrawPBRSorted(const GNg::sVEC3 &cameraPos) const;
     // P10：按每个网格的选级结果绘制；levels 可空（空 = 全部 LOD0，等价 DrawPBR）。
     void DrawPBRWithLod(const uint32_t *levels, uint32_t levelCount) const;
 

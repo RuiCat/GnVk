@@ -2,9 +2,10 @@
 // ╔══════════════════════════════════════════════════════════╗
 // ║  GN_mini — G-Buffer 片段着色器 (延迟渲染 MRT)           ║
 // ║  将几何信息写入 3 个颜色附件 + 深度附件                  ║
-// ║  附件0: Normal(RGB,N*0.5+0.5) + Roughness(A)            ║
-// ║  附件1: Albedo(RGB) + Metallic(A)                       ║
-// ║  附件2: AO(R)                                           ║
+// ║  G2a 打包（16 B/px）：                                    ║
+// ║  附件0 RGBA16F: Normal(RGB,N*0.5+0.5) + Roughness(A)     ║
+// ║  附件1 RGBA8_SRGB: Albedo(线性写入,硬件编码) + Metallic(A)║
+// ║  附件2 RGBA8_UNORM: R=AO G=反射率 B=材质ID A=alpha       ║
 // ╚══════════════════════════════════════════════════════════╝
 
 // ── 顶点着色器输出 (插值后) ────────────────────────────
@@ -46,20 +47,24 @@ void main() {
     }
 
     // ── 材质参数 (从 Push Constant 获取) ─────────────
-    vec3 albedo    = texture(texSampler, fragUV).rgb * pc.diffuse.rgb;
+    vec4 albedoSample = texture(texSampler, fragUV);
+    vec3 albedo = albedoSample.rgb * pc.diffuse.rgb;
     float roughness = clamp(pc.specular.x, 0.04, 1.0); // 粗糙度下限 0.04 防除零
     float metallic  = clamp(pc.specular.y, 0.0,  1.0);
     float ao        = clamp(pc.specular.z, 0.0,  1.0);
+    // G2a：alpha 通道打包进附件 2 的 A。alphaCutoff 预留于 pc.specular.w（0=不裁）；
+    // 当前 C++ 侧恒写 0，因此默认路径不会 discard；材质 alpha 模式接线留给 G0b。
+    float alpha = albedoSample.a * pc.diffuse.a;
+    float alphaCutoff = clamp(pc.specular.w, 0.0, 1.0);
+    if (alpha < alphaCutoff) discard;
 
     // ── 写入 G-Buffer ───────────────────────────────
-    // 法线: 从 [-1,1] 编码到 [0,1] (N*0.5+0.5)
-    // 粗糙度: 直接存储 (延迟着色器读取)
+    // 附件 0：法线从 [-1,1] 编码到 [0,1] (N*0.5+0.5) + 粗糙度（RGBA16F）
     gNormalRough = vec4(N * 0.5 + 0.5, roughness);
 
-    // Albedo: 反射率 (无光照颜色)
-    // Metallic: 金属度 (0=介质, 1=纯金属)
+    // 附件 1：Albedo 线性值（RGBA8_SRGB 由硬件自动 sRGB 编码）+ Metallic(A)
     gAlbedoMetal = vec4(albedo, metallic);
 
-    // AO: 环境遮蔽 (1=无遮蔽, 0=全遮蔽)
-    gAo = vec4(ao, 0.0, 0.0, 1.0);
+    // 附件 2：R=AO、G=反射率（暂用介电 F0 0.04，材质通路待 G2b/G4）、B=材质ID、A=alpha
+    gAo = vec4(ao, 0.04, 0.0, alpha);
 }

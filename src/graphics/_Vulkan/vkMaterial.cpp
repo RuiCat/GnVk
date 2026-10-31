@@ -68,41 +68,8 @@ bool createMaterialPipeline(const std::vector<uint32_t> &vertSpv,
         return false;
     }
 
-    // ── 材质图形管线（经 P1b 管线缓存创建）───────────────
-    GN3d::sVERTEX_LAYOUT layout;
-    layout.Add(0, (uint32_t)offsetof(VkVertex3D, px), VK_FORMAT_R32G32B32_SFLOAT);
-    layout.Add(1, (uint32_t)offsetof(VkVertex3D, u), VK_FORMAT_R32G32_SFLOAT);
-    layout.aStride = (uint32_t)sizeof(VkVertex3D);
-
-    GN3d::sPIPELINE_DESC desc;
-    desc.aKind = GN3d::ePIPE_GRAPHICS;
-    desc.aVertSpv = vertSpv.data();
-    desc.aVertSize = vertSpv.size() * sizeof(uint32_t);
-    desc.aFragSpv = fragSpv.data();
-    desc.aFragSize = fragSpv.size() * sizeof(uint32_t);
-    desc.aVertexLayout = layout;
-    desc.aRenderPass = GN_Vk.renderPass3D;
-    desc.aSubpass = 0;
-    desc.aLayout = s_materialPipelineLayout;
-    desc.aDepthTest = true;
-    desc.aDepthWrite = true;
-    desc.aDepthCompare = VK_COMPARE_OP_LESS;
-    desc.aDepthStencil = true;
-    desc.aCullBack = true;
-    desc.aFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // 世界 CCW + 正高度视口 + Y 翻转
-    desc.aBlend = GN3d::eBLEND_NONE;
-    desc.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    desc.aSamples = GN_Vk.msaaSamples;
-    desc.aColorAttachmentCount = 1;
-    desc.aDynamicViewport = false;
-    desc.aDynamicScissor = false;
-    desc.aViewport = VkViewport{0.0f, 0.0f, (float)GN_Vk.swapchainExtent.width,
-                                (float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
-    desc.aScissor = VkRect2D{{0, 0}, GN_Vk.swapchainExtent};
-    desc.aCustomBlend = false;
-    s_materialPipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
-    if(!s_materialPipeline) {
-        fprintf(stderr, "[GN_Vk] 材质管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+    // 固定视口管线走可重入 helper（init 与 resize 共用同一份描述）。
+    if(!recreateMaterialPipeline()) {
         return false;
     }
     return true;
@@ -238,6 +205,51 @@ void GN_VkDraw3DMaterial(const void *vertices, uint32_t vertexCount,
     } else {
         vkCmdDraw(cb, vertexCount, 1, 0, 0);
     }
+}
+
+// task-26：按当前 swapchainExtent 重建材质固定视口管线（init 与 resize 共用）。
+bool recreateMaterialPipeline() {
+    if(s_materialPipelineLayout == VK_NULL_HANDLE) return false;
+    auto vertSpv = LoadSPIRVFile("assets/shaders/gn3d_material.vert.spv");
+    auto fragSpv = LoadSPIRVFile("assets/shaders/gn3d_material.frag.spv");
+    if(vertSpv.empty() || fragSpv.empty()) return false;
+    GN3d::sVERTEX_LAYOUT layout;
+    layout.Add(0, (uint32_t)offsetof(VkVertex3D, px), VK_FORMAT_R32G32B32_SFLOAT);
+    layout.Add(1, (uint32_t)offsetof(VkVertex3D, u), VK_FORMAT_R32G32_SFLOAT);
+    layout.aStride = (uint32_t)sizeof(VkVertex3D);
+    GN3d::sPIPELINE_DESC desc;
+    desc.aKind = GN3d::ePIPE_GRAPHICS;
+    desc.aVertSpv = vertSpv.data();
+    desc.aVertSize = vertSpv.size() * sizeof(uint32_t);
+    desc.aFragSpv = fragSpv.data();
+    desc.aFragSize = fragSpv.size() * sizeof(uint32_t);
+    desc.aVertexLayout = layout;
+    desc.aRenderPass = GN_Vk.renderPass3D;
+    desc.aSubpass = 0;
+    desc.aLayout = s_materialPipelineLayout;
+    desc.aDepthTest = true;
+    desc.aDepthWrite = true;
+    desc.aDepthCompare = VK_COMPARE_OP_LESS;
+    desc.aDepthStencil = true;
+    desc.aCullBack = true;
+    desc.aFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    desc.aBlend = GN3d::eBLEND_NONE;
+    desc.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    desc.aSamples = GN_Vk.msaaSamples;
+    desc.aColorAttachmentCount = 1;
+    desc.aDynamicViewport = false;
+    desc.aDynamicScissor = false;
+    desc.aViewport = VkViewport{0.0f, 0.0f, (float)GN_Vk.swapchainExtent.width,
+                                (float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
+    desc.aScissor = VkRect2D{{0, 0}, GN_Vk.swapchainExtent};
+    desc.aCustomBlend = false;
+    VkPipeline pipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
+    if(pipeline == VK_NULL_HANDLE) {
+        fprintf(stderr, "[GN_Vk] 材质管线重建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        return false;
+    }
+    s_materialPipeline = pipeline;
+    return true;
 }
 
 } // namespace GNg

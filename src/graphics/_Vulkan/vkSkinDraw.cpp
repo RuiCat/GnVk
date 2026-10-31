@@ -297,4 +297,11 @@ bool GN_VkDraw3DSkinned(const void *vertices, uint32_t vertexCount,
     return true;
 }
 
+// task-26：按当前 swapchainExtent 重建蒙皮固定视口管线（init 与 resize 共用）。
+bool recreateSkinnedPipeline() {
+    if(s_skinPipelineLayout == VK_NULL_HANDLE) return false;
+    if(s_skinVertSpv.empty() || s_skinFragSpv.empty()) return false;
+    return createSkinPipeline();
+}
+
 } // namespace GNg

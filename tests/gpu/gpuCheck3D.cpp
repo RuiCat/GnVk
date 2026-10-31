@@ -4,6 +4,7 @@
 #include <GN.h>
 #include "GN_Vk.h"
 #include "GN_3Dlight.h"
+#include "giParams.h" // G2a：srgbDecode（G-Buffer 附件 1 为 RGBA8_SRGB）
 
 #include "gpuCheckReport.h"
 #include "gpuPixelRead.h"
@@ -305,6 +306,11 @@ void RunDeferredChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
     }
     GNg::GN_VkBegin3DPassDeferred(&identity, &eye, &light, sizeof(light));
     DrawGBufferQuadRaw(quad, model, 0.9f, 0.1f, 0.2f, 0.5f, 0.0f, 1.0f);
+    // G2b/G4：延迟路径的可选 pass（默认 GI UBO 开关为 0 时两者直接返回，不改变本用例结果）。
+    // 放在 DeferredLighting 之前，保证桌面验收开启 SSAO/SSGI 时真的有调用点。
+    GNg::GN_VkSSAOPass();
+    GNg::GN_VkSSGIPass();
+    GNg::GN_VkUpdateProbes(); // G5b-2：探针每帧更新入口（weight=0 时直接返回，no-op）
     GNg::GN_VkDeferredLighting(&identity, &eye, &light, sizeof(light));
     EndFrameAndWait();
 
@@ -312,9 +318,8 @@ void RunDeferredChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
     else ReportFail("3d.deferred.light", "swapchain readback failed");
 
     std::vector<uint8_t> albedo;
-    // 引擎的 gAlbedo* 实际是附件 0（着色器 location 0 = normal+rough），
-    // 附件 1（gNormal*）才是 albedo+metallic；这里读附件 1 验证 G-Buffer 真的写入。
-    if(!ReadColorImage(GNg::GN_Vk.gNormalImage, VK_FORMAT_R16G16B16A16_SFLOAT,
+    // G2a：附件 1 = RGBA8_SRGB（4 B/px）；读取原始 sRGB 字节后用 srgbDecode 还原线性值比较。
+    if(!ReadColorImage(GNg::GN_Vk.gAlbedoMetalImage, VK_FORMAT_R8G8B8A8_SRGB,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                        GNg::GN_Vk.swapchainExtent.width, GNg::GN_Vk.swapchainExtent.height,
                        albedo)) {
@@ -323,15 +328,15 @@ void RunDeferredChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
     }
     const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
     const size_t offset = ((size_t)(GNg::GN_Vk.swapchainExtent.height / 2) * width +
-                           width / 2) * 8u;
-    const float r = HalfToFloat((uint16_t)(albedo[offset + 0] | (albedo[offset + 1] << 8)));
-    const float g = HalfToFloat((uint16_t)(albedo[offset + 2] | (albedo[offset + 3] << 8)));
-    const float b = HalfToFloat((uint16_t)(albedo[offset + 4] | (albedo[offset + 5] << 8)));
+                           width / 2) * 4u;
+    const float r = GN3d::srgbDecode((float)albedo[offset + 0] / 255.0f);
+    const float g = GN3d::srgbDecode((float)albedo[offset + 1] / 255.0f);
+    const float b = GN3d::srgbDecode((float)albedo[offset + 2] / 255.0f);
     char detail[160];
     std::snprintf(detail, sizeof(detail), "gbufferAlbedo=%.3f,%.3f,%.3f expected~0.9,0.1,0.2",
                   r, g, b);
-    if(std::fabs(r - 0.9f) < 0.03f && std::fabs(g - 0.1f) < 0.03f &&
-       std::fabs(b - 0.2f) < 0.03f) {
+    if(std::fabs(r - 0.9f) < 0.01f && std::fabs(g - 0.1f) < 0.01f &&
+       std::fabs(b - 0.2f) < 0.01f) {
         ReportPass("3d.deferred.gbuffer", detail);
     } else {
         ReportFail("3d.deferred.gbuffer", detail);

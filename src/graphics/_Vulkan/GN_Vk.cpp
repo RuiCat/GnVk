@@ -39,6 +39,9 @@ static VkFramebuffer s_rtFramebuffer = VK_NULL_HANDLE;
 // ── 前向声明 (RenderTarget 辅助函数) ──────────────────
 static void BeginRTRenderPass();
 static void EndRTRenderPass();
+// 2D 叠层 framebuffer 以 swapchainView 为附件：resize 换新 view 时必须重建。
+static void destroyOverlayFramebuffers();
+static void createOverlayFramebuffers();
 extern sIMAGE *s_activeRT;
 extern bool s_rtInProgress;
 
@@ -324,17 +327,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
         rpiOverlay.subpassCount = 1;
         rpiOverlay.pSubpasses = &spOverlay;
         vkCreateRenderPass(GN_Vk.device, &rpiOverlay, 0, &s_renderPass2DOverlay);
-        s_framebuffers2DOverlay = new VkFramebuffer[GN_Vk.swapchainImageCount];
-        for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
-            VkFramebufferCreateInfo fciOverlay = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-            fciOverlay.renderPass = s_renderPass2DOverlay;
-            fciOverlay.attachmentCount = 1;
-            fciOverlay.pAttachments = &GN_Vk.swapchainViews[i];
-            fciOverlay.width = GN_Vk.swapchainExtent.width;
-            fciOverlay.height = GN_Vk.swapchainExtent.height;
-            fciOverlay.layers = 1;
-            vkCreateFramebuffer(GN_Vk.device, &fciOverlay, 0, &s_framebuffers2DOverlay[i]);
-        }
+        createOverlayFramebuffers();
     }
 
     // Command pool
@@ -544,12 +537,7 @@ void GN_VkShutdown() {
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) vkDestroyFramebuffer(GN_Vk.device, GN_Vk.framebuffers[i], 0);
     delete[] GN_Vk.framebuffers;
     delete[] GN_Vk.commandBuffers;
-    if(s_framebuffers2DOverlay) {
-        for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++)
-            vkDestroyFramebuffer(GN_Vk.device, s_framebuffers2DOverlay[i], 0);
-        delete[] s_framebuffers2DOverlay;
-        s_framebuffers2DOverlay = nullptr;
-    }
+    destroyOverlayFramebuffers();
     if(s_renderPass2DOverlay != VK_NULL_HANDLE) {
         vkDestroyRenderPass(GN_Vk.device, s_renderPass2DOverlay, 0);
         s_renderPass2DOverlay = VK_NULL_HANDLE;
@@ -732,6 +720,95 @@ static void EndRTRenderPass() {
     s_activeRT = nullptr;
 }
 
+// 2D 叠层 framebuffer 以 swapchainView 为附件：创建/销毁成对，resize 随 view 一起换。
+static void destroyOverlayFramebuffers() {
+    if(!s_framebuffers2DOverlay) return;
+    for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
+        if(s_framebuffers2DOverlay[i]) {
+            vkDestroyFramebuffer(GN_Vk.device, s_framebuffers2DOverlay[i], 0);
+        }
+    }
+    delete[] s_framebuffers2DOverlay;
+    s_framebuffers2DOverlay = nullptr;
+}
+
+static void createOverlayFramebuffers() {
+    if(s_renderPass2DOverlay == VK_NULL_HANDLE) return;
+    s_framebuffers2DOverlay = new VkFramebuffer[GN_Vk.swapchainImageCount];
+    for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
+        s_framebuffers2DOverlay[i] = VK_NULL_HANDLE;
+        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        fci.renderPass = s_renderPass2DOverlay;
+        fci.attachmentCount = 1;
+        fci.pAttachments = &GN_Vk.swapchainViews[i];
+        fci.width = GN_Vk.swapchainExtent.width;
+        fci.height = GN_Vk.swapchainExtent.height;
+        fci.layers = 1;
+        vkCreateFramebuffer(GN_Vk.device, &fci, 0, &s_framebuffers2DOverlay[i]);
+    }
+}
+
+// task-26：2D 叠层管线也是固定视口（仅在 scissor 上动态），resize 后按新 extent 重建。
+static bool recreate2DPipelines() {
+    if(GN_Vk.pipelineLayout == VK_NULL_HANDLE || GN_Vk.renderPass == VK_NULL_HANDLE) return false;
+    auto vertSpv = LoadSPIRVFile("assets/shaders/gn2d.vert.spv");
+    auto fragSpv = LoadSPIRVFile("assets/shaders/gn2d.frag.spv");
+    if(vertSpv.empty() || fragSpv.empty()) return false;
+    GN3d::sVERTEX_LAYOUT layout2D;
+    layout2D.Add(0, (uint32_t)offsetof(VkVertex, x), VK_FORMAT_R32G32_SFLOAT);
+    layout2D.Add(1, (uint32_t)offsetof(VkVertex, u), VK_FORMAT_R32G32_SFLOAT);
+    layout2D.Add(2, (uint32_t)offsetof(VkVertex, r), VK_FORMAT_R32G32B32A32_SFLOAT);
+    layout2D.aStride = (uint32_t)sizeof(VkVertex);
+    GN3d::sPIPELINE_DESC desc2D;
+    desc2D.aKind = GN3d::ePIPE_GRAPHICS;
+    desc2D.aVertSpv = vertSpv.data();
+    desc2D.aVertSize = vertSpv.size() * sizeof(uint32_t);
+    desc2D.aFragSpv = fragSpv.data();
+    desc2D.aFragSize = fragSpv.size() * sizeof(uint32_t);
+    desc2D.aVertexLayout = layout2D;
+    desc2D.aRenderPass = GN_Vk.renderPass;
+    desc2D.aSubpass = 0;
+    desc2D.aLayout = GN_Vk.pipelineLayout;
+    desc2D.aDepthTest = false;
+    desc2D.aDepthWrite = false;
+    desc2D.aDepthStencil = false;
+    desc2D.aCullBack = true;
+    desc2D.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+    desc2D.aBlend = GN3d::eBLEND_NONE;
+    desc2D.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    desc2D.aSamples = VK_SAMPLE_COUNT_1_BIT;
+    desc2D.aColorAttachmentCount = 1;
+    desc2D.aDynamicViewport = false;
+    desc2D.aViewport = VkViewport{0.0f, 0.0f, (float)GN_Vk.swapchainExtent.width,
+                                  (float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
+    desc2D.aDynamicScissor = true;
+    desc2D.aScissor = VkRect2D{{0, 0}, GN_Vk.swapchainExtent};
+    desc2D.aCustomBlend = true;
+    desc2D.aBlendSrcColor = VK_BLEND_FACTOR_SRC_ALPHA;
+    desc2D.aBlendDstColor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    desc2D.aBlendSrcAlpha = VK_BLEND_FACTOR_ONE;
+    desc2D.aBlendDstAlpha = VK_BLEND_FACTOR_ZERO;
+    VkPipeline pipeline = GN_Vk.aPipelineCache.GetOrCreate(desc2D);
+    desc2D.aBlendDstColor = VK_BLEND_FACTOR_ONE;
+    VkPipeline pipelineBright = GN_Vk.aPipelineCache.GetOrCreate(desc2D);
+    desc2D.aBlendSrcColor = VK_BLEND_FACTOR_DST_COLOR;
+    desc2D.aBlendDstColor = VK_BLEND_FACTOR_ZERO;
+    VkPipeline pipelineMultiply = GN_Vk.aPipelineCache.GetOrCreate(desc2D);
+    desc2D.aCustomBlend = false;
+    desc2D.aBlend = GN3d::eBLEND_NONE;
+    VkPipeline pipelineNull = GN_Vk.aPipelineCache.GetOrCreate(desc2D);
+    if(!pipeline || !pipelineBright || !pipelineMultiply || !pipelineNull) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后 2D 管线重建失败: %s\n",
+                GN_Vk.aPipelineCache.GetLastError());
+        return false;
+    }
+    GN_Vk.pipeline = pipeline;
+    GN_Vk.pipelineBright = pipelineBright;
+    GN_Vk.pipelineMultiply = pipelineMultiply;
+    GN_Vk.pipelineNull = pipelineNull;
+    return true;
+}
+
 // ── 窗口尺寸变化：重建 swapchain、视图与 framebuffer（3D 目标需随窗口重建） ──
 void GN_VkResize(int w, int h) {
     if(w <= 0 || h <= 0) return;
@@ -740,6 +817,14 @@ void GN_VkResize(int w, int h) {
     if(!GN_Vk.initialized) return;
     // 重建 swapchain 和相关资源以适应新尺寸
     vkDeviceWaitIdle(GN_Vk.device);
+    // 引用旧 swapchainView / 旧尺寸 view 的 framebuffer 必须在销毁 view 之前释放；新 view 建好后重建。
+    destroyOverlayFramebuffers();
+#ifdef GN_USING_3D
+    destroy3DCompositeFramebuffers();
+    destroy3DDeferredLightFramebuffers();
+    destroy3DForwardFramebuffers(); // s_framebuffers3D 引用旧 swapchainView/旧 msaa/depth
+    destroy3DHdrTargets();          // HDR fb + image/view/sampler 都是旧尺寸
+#endif
     // 销毁旧 swapchain 资源
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) vkDestroyFramebuffer(GN_Vk.device, GN_Vk.framebuffers[i], 0);
     delete[] GN_Vk.framebuffers;
@@ -793,6 +878,71 @@ void GN_VkResize(int w, int h) {
         fci.layers = 1;
         vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.framebuffers[i]);
     }
+    createOverlayFramebuffers();
+    recreate2DPipelines(); // task-26：2D 叠层固定视口也随新尺寸重建（失败只告警）
+#ifdef GN_USING_3D
+    // ── 3D 资源按新尺寸完整重建（顺序敏感：fb 引用 view，管线固定视口）──
+    // MSAA/depth → 3D forward framebuffer（修复 s_framebuffers3D 引用旧 swapchainView 的悬垂）。
+    recreate3DTargets();
+    // HDR 目标（image/view/sampler + hdrFramebuffers）随尺寸重建；HDR render pass 与格式无关，保留。
+    recreate3DHdrTargets();
+    // G-Buffer 不引用 swapchainView，但图像/视图/内存/framebuffer 与固定视口管线都依赖尺寸。
+    recreate3DGbufferTargets();
+    // G2b：SSAO 目标/管线随尺寸重建，并重写引用 G-Buffer normal/depth 的描述符。
+    recreate3DSsaoTargets();
+    // G4：SSGI 半分辨率目标/管线随尺寸重建，并重写引用 G-Buffer 的描述符与延迟 binding13。
+    recreate3DSsgiTargets();
+    // 延迟光照：新 swapchainView 的 framebuffer + 指向新 G-Buffer 视图的 binding 1..4 + 新尺寸管线。
+    create3DDeferredLightTargets();
+    // G0b：调试视图管线固定视口，按新 extent 重建（旧管线留在缓存）。
+    recreate3DGbufferDebugPipeline();
+    // 合成：framebuffer（新 swapchainView）+ 描述符 binding1（新 hdrView）+ 固定视口管线。
+    recreate3DCompositeTargets();
+    // 固定视口管线：前向/PBR/天空盒（从 assets 重新加载 SPIR-V；缺失只告警，旧管线仍可用）。
+    auto vertSpv = LoadSPIRVFile("assets/shaders/gn3d.vert.spv");
+    auto fragSpv = LoadSPIRVFile("assets/shaders/gn3d.frag.spv");
+    if(vertSpv.empty() || fragSpv.empty()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 时前向着色器缺失，继续沿用旧管线\n");
+    } else {
+        create3DForwardPipeline(vertSpv, fragSpv);
+    }
+    auto pbrVert = LoadSPIRVFile("assets/shaders/gn3d_pbr.vert.spv");
+    auto pbrFrag = LoadSPIRVFile("assets/shaders/gn3d_pbr.frag.spv");
+    if(pbrVert.empty() || pbrFrag.empty()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 时 PBR 着色器缺失，继续沿用旧管线\n");
+    } else {
+        create3DPbrPipeline(pbrVert, pbrFrag);
+    }
+    create3DSkyboxPipeline();
+    // task-26：其余固定视口管线（曾遗漏，导致 resize 后包围盒/坐标轴偏移）按新 extent 重建。
+    if(!recreateDebugLinesPipeline()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后调试线框管线未重建（沿用旧管线）\n");
+    }
+    if(!recreateMaterialPipeline()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后材质管线未重建（沿用旧管线）\n");
+    }
+    if(!recreateSkinnedPipeline()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后蒙皮管线未重建（沿用旧管线）\n");
+    }
+    if(!recreateParticleDrawPipeline()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后粒子管线未重建（沿用旧管线）\n");
+    }
+    if(!recreateClothDrawPipeline()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后布料管线未重建（沿用旧管线）\n");
+    }
+    if(!recreateDecalPipeline()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后贴花管线未重建（沿用旧管线）\n");
+    }
+    if(!recreatePrecipitationPipeline()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后降水管线未重建（沿用旧管线）\n");
+    }
+    if(!recreateCloudPipeline()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后云层管线未重建（沿用旧管线）\n");
+    }
+    if(!recreateSkinnedSsboPipeline()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后 SSBO 蒙皮管线未重建（沿用旧管线）\n");
+    }
+#endif
 }
 
 // ── 帧结束入口：转发到 vkFrame2d.cpp 的 GN_VkEndFrame ──
@@ -923,8 +1073,18 @@ void GN_VkInit3D() {
     init3DHdr();
 
     init3DSkybox();
+    // G1a：环境来源方案 B——GPU 6 面烘焙解析天空，回读后 CPU 预滤波并上传 GI 资源。
+    init3DEnvironment();
     init3DGbuffer();
     init3DDeferredLight();
+    // G0b：G-Buffer 四通道调试视图（复用延迟 render pass/描述符集；管线归 aPipelineCache）。
+    init3DGbufferDebug();
+    // G2b：SSAO 资源（默认关；依赖 G-Buffer 视图与延迟描述符集）。
+    init3DSsao();
+    // G4：SSGI 资源（默认关；依赖 G-Buffer 视图、延迟描述符集与 GI UBO）。
+    init3DSsgi();
+    // G5b-2：SH9 探针 9× 3D 纹理（固定尺寸；默认 weight=0，不采样）。
+    init3DProbes();
 
     // P1c / P2 / P8：新增子系统（管线各自经 aPipelineCache 创建；失败只告警）
     if(!init3DMaterial()) fprintf(stderr, "[GN_Vk] 警告: 材质实例管线不可用（P1c）\n");
@@ -936,6 +1096,8 @@ void GN_VkInit3D() {
     // P9 剩余片：SSBO 蒙皮（>128 关节）与 GPU 布料（管线预建，缓冲在各自 Create 时分配）。
     if(!init3DSkinnedSsbo()) fprintf(stderr, "[GN_Vk] 警告: SSBO 蒙皮管线不可用（P9）\n");
     if(!init3DCloth()) fprintf(stderr, "[GN_Vk] 警告: GPU 布料管线不可用（P9）\n");
+    // G1b：三套描述符集与 G1a 资源均已存在，写入 GI 槽位（默认倍率 0 = 关闭，回退旧 IBL）。
+    init3DGiBindings();
 }
 
 #endif // GN_USING_3D

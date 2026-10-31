@@ -258,4 +258,18 @@ bool GN_VkClothDraw(const sMAT44 &viewProj, float r, float g, float b) {
     return true;
 }
 
+// task-26：按当前 swapchainExtent 重建布料固定视口管线（init 与 resize 共用）。
+bool recreateClothDrawPipeline() {
+    if(s_clothDrawPipelineLayout == VK_NULL_HANDLE) return false;
+    if(s_clothDrawVertSpv.empty() || s_clothDrawFragSpv.empty()) return false;
+    GN3d::sPIPELINE_DESC desc = makeClothDrawPipelineDesc();
+    VkPipeline pipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
+    if(pipeline == VK_NULL_HANDLE) {
+        fprintf(stderr, "[GN_Vk] 布料绘制管线重建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        return false;
+    }
+    s_clothDrawPipeline = pipeline;
+    return true;
+}
+
 } // namespace GNg

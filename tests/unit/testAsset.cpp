@@ -44,7 +44,7 @@ std::string base64Encode(const std::vector<unsigned char> &data) {
     return out;
 }
 
-// 最小 glTF：1 个三角形网格 + 2 个节点 + 1 关节 skin + 1 条平移动画 + 2 材质 + 2 纹理。
+// 最小 glTF：1 个三角形网格 + 2 个节点 + 1 关节 skin + 1 条平移动画 + 3 材质（含 alpha）+ 2 纹理。
 // buffer 布局：位置 0..35、索引 36..41、IBM 44..107、时间 108..115、平移 116..139、图片 140..147。
 std::string makeGltfFixture() {
     std::vector<unsigned char> buffer(148, 0);
@@ -71,10 +71,12 @@ std::string makeGltfFixture() {
     json += "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1,"
             "\"material\":0}]}],";
     json += "\"skins\":[{\"joints\":[1],\"inverseBindMatrices\":2}],";
-    json += "\"materials\":[{\"name\":\"mat0\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.5,"
+    json += "\"materials\":[{\"name\":\"mat0\",\"alphaMode\":\"MASK\",\"alphaCutoff\":0.35,"
+            "\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.5,"
             "0.25,0.125,1.0],\"metallicFactor\":0.25,\"roughnessFactor\":0.75,"
             "\"baseColorTexture\":{\"index\":0}},\"normalTexture\":{\"index\":0},"
-            "\"emissiveFactor\":[0.1,0.2,0.3]},{\"name\":\"matDefault\"}],";
+            "\"emissiveFactor\":[0.1,0.2,0.3]},{\"name\":\"matDefault\"},"
+            "{\"name\":\"matBlend\",\"alphaMode\":\"BLEND\",\"alphaCutoff\":0.25}],";
     json += "\"images\":[{\"name\":\"img0\",\"bufferView\":5,\"mimeType\":\"image/png\"},"
             "{\"name\":\"img1\",\"uri\":\"images/tex1.png\"}],";
     json += "\"textures\":[{\"name\":\"tex0\",\"sampler\":0,\"source\":0},{\"name\":\"tex1\","
@@ -116,7 +118,7 @@ TEST_CASE(assetLoadFromMemory) {
     CHECK_EQ(asset.aMeshes.size(), 1u);
     CHECK_EQ(asset.aSkins.size(), 1u);
     CHECK_EQ(asset.aAnimations.size(), 1u);
-    CHECK_EQ(asset.aMaterials.size(), 2u);
+    CHECK_EQ(asset.aMaterials.size(), 3u);
     CHECK_EQ(asset.aTextures.size(), 2u);
 
     CHECK_EQ(asset.aNodes[0].aMesh, 0);
@@ -192,6 +194,33 @@ TEST_CASE(assetLoadFromMemory) {
     CHECK(animation.aClip.sample(1u, 0.5f, transform));
     CHECK_NEAR(transform.aTranslation.x, 0.5f, 1e-4f);
     CHECK_NEAR(transform.aTranslation.y, 0.0f, 1e-6f);
+}
+
+// 材质 alpha：MASK 保留 cutoff；BLEND 走混合管线（cMODEL::DrawPBRSorted 排序）；缺省 OPAQUE + cutoff 0.5。
+TEST_CASE(assetMaterialAlphaModes) {
+    const std::string json = makeGltfFixture();
+    sASSET asset;
+    CHECK(asset.loadFromMemory(json.data(), json.size()));
+    CHECK_EQ(asset.aMaterials.size(), 3u);
+    if(asset.aMaterials.size() != 3u) return;
+    CHECK(asset.aMaterials[0].aAlphaMode == eALPHA_MASK);
+    CHECK_NEAR(asset.aMaterials[0].aAlphaCutoff, 0.35f, 1e-6f);
+    CHECK(asset.aMaterials[1].aAlphaMode == eALPHA_OPAQUE);
+    CHECK_NEAR(asset.aMaterials[1].aAlphaCutoff, 0.5f, 1e-6f); // cgltf 规范缺省
+    CHECK(asset.aMaterials[2].aAlphaMode == eALPHA_BLEND);
+    CHECK_NEAR(asset.aMaterials[2].aAlphaCutoff, 0.25f, 1e-6f);
+}
+
+// sMATERIAL 的 alpha 默认值：OPAQUE + 0.5，SetDefault 会复位。
+TEST_CASE(materialAlphaDefaults) {
+    sMATERIAL material;
+    CHECK(material.aAlphaMode == eALPHA_OPAQUE);
+    CHECK_NEAR(material.aAlphaCutoff, 0.5f, 1e-6f);
+    material.aAlphaMode = eALPHA_MASK;
+    material.aAlphaCutoff = 0.1f;
+    material.SetDefault();
+    CHECK(material.aAlphaMode == eALPHA_OPAQUE);
+    CHECK_NEAR(material.aAlphaCutoff, 0.5f, 1e-6f);
 }
 
 // 非法输入：非 JSON、空指针、不存在的文件都返回 false 且不残留数据。

@@ -30,11 +30,52 @@ layout(binding = 6, set = 0) uniform FogUBO {
     vec4 fogParams;  // x=density(1/m), y=heightFalloff(1/m), z=baseHeight(m), w=maxOpacity
 } fog;
 
+// ── G1b：GI UBO（binding 7）+ 预滤波环境 cubemap（8）+ BRDF LUT（9，RG16F）──
+layout(binding = 7, set = 0) uniform GIUBO {
+    vec4 indirect;   // x=漫反射倍率 y=镜面倍率 z=AO 强度 w=SSAO 开关
+    vec4 aoParams;
+    vec4 envParams;  // x=环境旋转 y=预滤波 mip 数
+    vec4 sh[9];      // SH9 辐照度系数（rgb + padding）
+    mat4 invViewProj;
+} gi;
+layout(binding = 8, set = 0) uniform samplerCube envPrefilteredCube;
+layout(binding = 9, set = 0) uniform sampler2D brdfLutTex;
+
+// 与 giParams::evalSh9 一致：y 向上世界空间，余弦卷积 A_l = π, 2π/3, π/4。
+vec3 evalSH9(vec3 n) {
+    float b0 = 0.2820947918;
+    float b1 = 0.4886025119 * n.y;
+    float b2 = 0.4886025119 * n.z;
+    float b3 = 0.4886025119 * n.x;
+    float b4 = 1.0925484306 * n.x * n.y;
+    float b5 = 1.0925484306 * n.y * n.z;
+    float b6 = 0.3153915653 * (3.0 * n.z * n.z - 1.0);
+    float b7 = 1.0925484306 * n.x * n.z;
+    float b8 = 0.5462742153 * (n.x * n.x - n.y * n.y);
+    vec3 irr = (PI * b0) * gi.sh[0].rgb;
+    irr += (2.0 * PI / 3.0) * (b1 * gi.sh[1].rgb + b2 * gi.sh[2].rgb + b3 * gi.sh[3].rgb);
+    irr += (PI / 4.0) * (b4 * gi.sh[4].rgb + b5 * gi.sh[5].rgb + b6 * gi.sh[6].rgb
+                         + b7 * gi.sh[7].rgb + b8 * gi.sh[8].rgb);
+    return max(irr, vec3(0.0));
+}
+
 float fogAmountAt(vec3 worldPosition) {
     float distanceToCamera = length(worldPosition - scene.cameraPos.xyz);
     float heightScale = exp(-fog.fogParams.y * max(worldPosition.y - fog.fogParams.z, 0.0));
     float amount = 1.0 - exp(-fog.fogParams.x * heightScale * distanceToCamera);
     return clamp(amount, 0.0, fog.fogParams.w);
+}
+
+// 环境图只有天空（下半球偏暗/为空）。朝上的大平面（地面）反射方向落入下半球时，
+// 会把环境图下半球的暗色投到地面，而且这块暗区随视角滑动（看起来像跟随相机的影子）。
+// 对朝上表面把反射方向抬到地平线以上，避开下半球；模型表面保持原反射。
+vec3 iblReflection(vec3 V, vec3 N) {
+    vec3 R = reflect(-V, N);
+    if (N.y > 0.7 && R.y < 0.02) {
+        R.y = 0.02;
+        R = normalize(R);
+    }
+    return R;
 }
 
 struct Light {
@@ -56,11 +97,11 @@ layout(binding = 2, set = 0) uniform LightUBO {
 } lightData;
 
 // PBR 模式下 push_constant 重映射:
-// specular.x = roughness, specular.y = metallic, specular.z = ao
+// specular.x = roughness, specular.y = metallic, specular.z = ao, specular.w = alphaCutoff
 layout(push_constant) uniform ModelPC {
     mat4 model;
     vec4 diffuse;       // albedo
-    vec4 specular;      // .x=roughness, .y=metallic, .z=ao
+    vec4 specular;      // .x=roughness, .y=metallic, .z=ao, .w=alphaCutoff（0=不裁）
 } pc;
 
 layout(location = 0) out vec4 outColor;
@@ -227,6 +268,14 @@ vec3 CalcPBRLight(Light L, vec3 N, vec3 V, vec3 albedo, float roughness, float m
 // ═══════════════════════════════════════════════════════════
 
 void main() {
+    // 材质 alpha test（MASK）：cutoff=0 时不裁，与接线前行为一致。
+    // 放在最前面，被裁掉的片元不进入法线/光照/阴影采样。
+    float alphaCutoff = pc.specular.w;
+    if (alphaCutoff > 0.0) {
+        float alpha = texture(texSampler, fragUV).a * pc.diffuse.a;
+        if (alpha < alphaCutoff) discard;
+    }
+
     // 法线贴图采样
     vec3 N;
     vec3 texNormal = texture(normalSampler, fragUV).rgb;
@@ -259,28 +308,39 @@ void main() {
     
     // ═══════════════════════════════════════════════════════
     //  Skybox-based IBL (基于天空盒 Cubemap 的全局照明)
-    //  替代纯分析近似, 使用实际天空颜色
+    //  G1b：GI 倍率 > 0 走 split-sum + SH9；为 0（默认）保持接线前观感
     // ═══════════════════════════════════════════════════════
-    vec3 ambientColor = scene.ambientLight.rgb * lightData.ambientLight.rgb;
-
-    // 采样天空盒: 法线方向 (漫反射) + 反射方向 (镜面反射)
-    vec3 skyDiffuse  = texture(skyboxCubemap, N).rgb;
-    vec3 R = reflect(-V, N);
-    vec3 skySpecular = texture(skyboxCubemap, R).rgb;
-
-    // Fresnel → 漫反射/镜面反射比例
-    vec3 F = FresnelSchlick(NdotV, F0);
-    vec3 kS = F;
-    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-
-    // ─ 漫反射 IBL: 天空漫反射 × albedo, 混合分析环境光作为保底
-    vec3 diffuseIBL = kD * albedo * mix(ambientColor, skyDiffuse, 0.7) * ao;
-
-    // ─ 镜面反射 IBL: 天空反射 × Fresnel(非F0!) × 粗糙度调制
-    float specularOcclusion = 1.0 - roughness * 0.7;
-    vec3 specularIBL = skySpecular * F * specularOcclusion * 0.5;
-
-    vec3 ambient = diffuseIBL + specularIBL;
+    vec3 ambient;
+    if (gi.indirect.x + gi.indirect.y <= 0.0) {
+        vec3 ambientColor = scene.ambientLight.rgb * lightData.ambientLight.rgb;
+        // 采样天空盒: 法线方向 (漫反射) + 反射方向 (镜面反射)
+        vec3 skyDiffuse  = texture(skyboxCubemap, N).rgb;
+        vec3 R = iblReflection(V, N);
+        vec3 skySpecular = texture(skyboxCubemap, R).rgb;
+        // Fresnel → 镜面比例；漫反射 IBL 用 F0 做能量分配（不随视角在掠射角归零），
+        // 否则地面在掠射角会整片变暗，形成随相机滑动的暗带。
+        vec3 F = FresnelSchlick(NdotV, F0);
+        vec3 kD = (vec3(1.0) - F0) * (1.0 - metallic);
+        // ─ 漫反射 IBL: 天空漫反射 × albedo, 混合分析环境光作为保底
+        vec3 diffuseIBL = kD * albedo * mix(ambientColor, skyDiffuse, 0.7) * ao;
+        // ─ 镜面反射 IBL: 天空反射 × Fresnel(非F0!) × 粗糙度调制
+        float specularOcclusion = 1.0 - roughness * 0.7;
+        vec3 specularIBL = skySpecular * F * specularOcclusion * 0.5;
+        ambient = diffuseIBL + specularIBL;
+    } else {
+        // ─ split-sum IBL：SH9 漫反射 + 预滤波 cubemap × BRDF LUT 镜面 ─
+        vec3 F = FresnelSchlick(NdotV, F0);
+        // 漫反射求和的能量项用 F0 近似（常见 IBL 做法）：用 NdotV 的 Fresnel 会让
+        // 掠射角 kD→0，地面出现随视角/相机位置滑动的暗带。
+        vec3 kD = (vec3(1.0) - F0) * (1.0 - metallic);
+        vec3 diffuseIBL = kD * albedo * evalSH9(N) * gi.indirect.x * ao;
+        vec3 R = iblReflection(V, N);
+        float maxMip = max(gi.envParams.y - 1.0, 0.0);
+        vec3 prefiltered = textureLod(envPrefilteredCube, R, roughness * maxMip).rgb;
+        vec2 ab = texture(brdfLutTex, vec2(NdotV, roughness)).rg;
+        vec3 specularIBL = prefiltered * (F0 * ab.x + ab.y) * gi.indirect.y;
+        ambient = diffuseIBL + specularIBL;
+    }
     
     vec3 color = ambient + Lo;
     
@@ -289,5 +349,8 @@ void main() {
     
     // 注: swapchain 为 SRGB 格式, 硬件自动 Gamma 编码, 无需手动 pow(1/2.2)
     
-    outColor = vec4(mix(fog.fogColor.rgb, color, 1.0 - fogAmountAt(fragWorldPos)), 1.0);
+    // 输出 alpha：BLEND 管线（srcAlpha/oneMinusSrcAlpha）靠它做透明；不透明/MASK
+    // 管线忽略 alpha 通道，行为不变。雾只混 rgb，不把透明片元的不透明度拉满。
+    float outAlpha = texture(texSampler, fragUV).a * pc.diffuse.a;
+    outColor = vec4(mix(fog.fogColor.rgb, color, 1.0 - fogAmountAt(fragWorldPos)), outAlpha);
 }

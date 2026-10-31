@@ -195,10 +195,8 @@ bool init3DSkinnedSsbo() {
         }
     }
 
-    GN3d::sPIPELINE_DESC desc = makeSkinSsboPipelineDesc();
-    s_ssboPipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
-    if(!s_ssboPipeline) {
-        fprintf(stderr, "[GN_Vk] SSBO 蒙皮管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+    // 固定视口管线走可重入 helper（init 与 resize 共用同一份描述）。
+    if(!recreateSkinnedSsboPipeline()) {
         destroySkinnedSsbo();
         return false;
     }
@@ -301,6 +299,26 @@ bool GN_VkDraw3DSkinnedSsbo(const void *vertices, uint32_t vertexCount,
     } else {
         vkCmdDraw(commandBuffer, vertexCount, 1, 0, 0);
     }
+    return true;
+}
+
+// task-27：按当前 swapchainExtent 重建 SSBO 蒙皮固定视口管线（init 与 resize 共用）。
+bool recreateSkinnedSsboPipeline() {
+    if(s_ssboPipelineLayout == VK_NULL_HANDLE || GN_Vk.renderPass3D == VK_NULL_HANDLE) return false;
+    if(s_ssboVertSpv.empty()) {
+        s_ssboVertSpv = LoadSPIRVFile("assets/shaders/gn3d_skinned_ssbo.vert.spv");
+    }
+    if(s_ssboFragSpv.empty()) {
+        s_ssboFragSpv = LoadSPIRVFile("assets/shaders/gn3d_skinned_ssbo.frag.spv");
+    }
+    if(s_ssboVertSpv.empty() || s_ssboFragSpv.empty()) return false;
+    GN3d::sPIPELINE_DESC desc = makeSkinSsboPipelineDesc();
+    VkPipeline pipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
+    if(pipeline == VK_NULL_HANDLE) {
+        fprintf(stderr, "[GN_Vk] SSBO 蒙皮管线重建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        return false;
+    }
+    s_ssboPipeline = pipeline;
     return true;
 }
 

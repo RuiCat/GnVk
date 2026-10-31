@@ -439,14 +439,20 @@ float SetCameraLookObj(cCAMERA &camera, const sCAMERA_TARGET &target,
 
 | 阶段 | 内容 | 文件 | 验收命令 | 通过判据 | 失败怎么办 |
 |---|---|---|---|---|---|
-| **C0** 契约 | 头文件 + 空实现骨架 + `GN.h` include + `testCamera` 空框架 | `GN_3Dcamera.h`、`GN_3Dcamera*.cpp`、`GN.h`、`testCamera.cpp` | `make unit` | 275 cases 仍全绿（新增空文件不改变用例数） | 编译错误就地修，不回退阶段 |
-| **C1** 核心 | 状态/镜头参数校验/`BuildViewProj`（透视+正交）/`Forward/Right/Up` | `GN_3Dcamera.cpp` + 6 用例 | `make unit` | ≥281 cases，0 failed；矩阵断言（§5.2）通过 | 失败只重跑该用例，不改动其它用例 |
-| **C2** 移动 | `SelfMove/SelfRot*/ToMove/SetWorldPos` + `sCAMERA_INPUT` 控制层 | `GN_3DcameraMove.cpp`、`GN_3DcameraControl.cpp` + 5 用例 | `make unit` | ≥286 cases；方向/角度断言与查看器符号一致 | 同上 |
-| **C3** 轨道/跟随 | 轨道状态机、跟随平滑、自动对准（含地平线平衡）、`Update(dt)` | `GN_3DcameraOrbit.cpp`、`GN_3DcameraFollow.cpp` + 7 用例 | `make unit` | ≥293 cases；收敛/无过冲/dt=0/非法目标/无 roll | 同上 |
-| **C4** 取景 | `SetCameraLookDirection/Range/Obj`、`FovToOrthoH/FovConvert` | `GN_3DcameraFit.cpp` + 4 用例 | `make unit` | ≥297 cases；互逆/拟合断言 | 同上 |
-| **C5** 接线 | 查看器替换相机段 + 操作说明 + 手动清单 | `mmdViewer.cpp` | `make unit`、`make mmdViewer`、桌面 `make gpuCheck` | 297 cases；viewer 编译通过；gpuCheck **95/95**；手动清单全过 | 任一回归 → 只回退 C5（相机文件保留） |
+| **C0** 契约 | ✅ 2026-10-30：头文件 + 实现骨架 + `GN.h` include + `testCamera` | `GN_3Dcamera.h`、`GN_3Dcamera*.cpp`、`GN.h`、`testCamera.cpp` | `make unit` | 通过（实测见下） | — |
+| **C1** 核心 | ✅ 2026-10-30：状态/镜头参数校验/`BuildViewProj`（透视+正交）/`Forward/Right/Up` + 6 用例 | `GN_3Dcamera.cpp` | `make unit` | 6/6 PASS | — |
+| **C2** 移动 | ✅ 2026-10-30：`SelfMove/SelfRot*/ToMove/SetWorldPos` + `sCAMERA_INPUT` 控制层 + 5 用例 | `GN_3DcameraMove.cpp`、`GN_3DcameraControl.cpp` | `make unit` | 5/5 PASS；方向/角度与查看器符号一致 | — |
+| **C3** 轨道/跟随 | ✅ 2026-10-30：轨道状态机、跟随平滑、自动对准（含地平线平衡）、`Update(dt)` + 7 用例 | `GN_3DcameraOrbit.cpp`、`GN_3DcameraFollow.cpp` | `make unit` | 7/7 PASS；收敛/无过冲/dt=0/非法目标/无 roll | — |
+| **C4** 取景 | ✅ 2026-10-30：`SetCameraLookDirection/Range/Obj`、`FovToOrthoH/FovConvert` + 4 用例 | `GN_3DcameraFit.cpp` | `make unit` | 4/4 PASS；互逆/拟合断言 | — |
+| **C5** 接线 | ✅ 2026-10-30（编译级）：查看器相机段已换成 `GN3d::cCAMERA`（唯一实例 `gCamera`），输入只填 `sCAMERA_INPUT`→`ApplyInput`，视图/投影由 `BuildViewProj` 产出；新增 F 自由↔轨道、轨道滚轮缩放、中键平移；R 重置仍自由模式且默认视角与旧实现等价 | `mmdViewerCamera.cpp`、`mmdViewerShared.h`、`mmdViewer.cpp` | `make unit`、`make mmdViewer`、桌面 `make gpuCheck` | 编译通过 + 单测 371/0 + lint 0 违规；**运行期手感待桌面** | 任一回归 → 只回退 C5（相机文件保留） |
 
-> 用例数是**目标值**，实测后回填；每阶段各自可提交、可回退；C0–C4 只新增文件，不触碰既有 API。
+> **C0–C4 实测（2026-10-30；2026-10-31 更新）**：22 个 `TEST_CASE` 全 PASS；套件总量随其它模块增长，当前 `make unit` = **371 cases / 0 failed**
+> （= 292 基线 + 本规划 22 + 并行 GI CPU 16）；`make` 构建 exit 0；`lintCodeModularity src/graphics tests/unit --naming --comments`
+> 对新增 8 文件 0 违规（全仓仅存量 `GN_2Dmath.cpp` 超长违规与 spv 头 no-split 告警）。
+> **运行期未验证**（本机无 `/dev/dri`）；另发现既有 `GN_3Dmath.cpp:381` `Mat44OrthoVK` 的 `m[10] = -fn` 与 VK [0,1] 深度符号不符
+> （near→-2e-4、far→-1.0002），正交相机深度不可用；属既有数学库缺陷，未在本规划内修改（见风险）。
+
+> 用例数是**目标值**；实测：camera 22 用例全 PASS，套件总量 371/0（2026-10-31）。C0–C5 全部代码级完成。
 
 ### 5.2 `testCamera` 用例清单（22 条）
 
@@ -475,7 +481,7 @@ float SetCameraLookObj(cCAMERA &camera, const sCAMERA_TARGET &target,
 | 21 | `camera.lookObjFit` | 给 AABB 的 `sCAMERA_TARGET`，取景后四角投影落在 NDC [-1,1] 内 |
 | 22 | `camera.fovConvert` | X↔Y 互逆（aspect=2）、XY 对角关系 `tanD²=tanX²+tanY²` |
 
-### 5.3 查看器接线清单（C5）
+### 5.3 查看器接线清单（C5，已完成 ✅）
 
 | 位置 | 现状 | 改法 |
 |---|---|---|
@@ -489,10 +495,10 @@ float SetCameraLookObj(cCAMERA &camera, const sCAMERA_TARGET &target,
 | 新增按键 | — | `F` 切自由/轨道（不与天气 `1-6`、`G`、`R` 冲突）；轨道下滚轮缩放（`GN::Mouse1[GM_TOP/BOTTOM]`）、中键拖动平移（`GM_MIDDLE`） |
 | 操作提示 | `:763` 的 `printf` | 补充 F/滚轮/中键说明 |
 
-### 5.4 全量验收命令（C5 收尾）
+### 5.4 全量验收命令（C5，已完成 ✅）
 
 ```bash
-make unit                       # 期望 297 cases, 0 failed（实测回填）
+make unit                       # camera 22 用例全 PASS；套件总量 371/0（2026-10-31）
 make check                      # 构建 + 单测
 make mmdViewer                  # 查看器编译（不要求 GPU）
 make gpuCheck                   # 仅桌面 GPU；期望 95/95 PASS

@@ -256,6 +256,20 @@ void importMaterials(const cgltf_data *data, sASSET &out) {
         target.aMetallic = pbr.metallic_factor;
         target.aRoughness = pbr.roughness_factor;
         for(int k = 0; k < 3; ++k) target.aEmissive[k] = material.emissive_factor[k];
+        // glTF alphaMode：MASK 保留 cutout；BLEND 走前向 PBR 混合管线（cMODEL::DrawPBRSorted
+        // 负责由远到近排序）；其余（含缺省）为 OPAQUE。alphaCutoff 由 cgltf 按规范缺省 0.5。
+        switch(material.alpha_mode) {
+        case cgltf_alpha_mode_mask:
+            target.aAlphaMode = eALPHA_MASK;
+            break;
+        case cgltf_alpha_mode_blend:
+            target.aAlphaMode = eALPHA_BLEND;
+            break;
+        default:
+            target.aAlphaMode = eALPHA_OPAQUE;
+            break;
+        }
+        target.aAlphaCutoff = material.alpha_cutoff;
         target.aAlbedoTexture = textureIndexOf(data, pbr.base_color_texture.texture);
         target.aNormalTexture = textureIndexOf(data, material.normal_texture.texture);
     }

@@ -242,4 +242,24 @@ void GN_VkDecalDestroy() {
     s_callInFrame = 0;
 }
 
+// task-26：按当前 swapchainExtent 重建贴花固定视口管线（init 与 resize 共用）。
+bool recreateDecalPipeline() {
+    if(s_pipelineLayout == VK_NULL_HANDLE) return false;
+    auto vertSpv = LoadSPIRVFile("assets/shaders/gn3d_decal.vert.spv");
+    auto fragSpv = LoadSPIRVFile("assets/shaders/gn3d_decal.frag.spv");
+    if(vertSpv.empty() || fragSpv.empty()) return false;
+    GN3d::sPIPELINE_DESC desc = makePipelineDesc();
+    desc.aVertSpv = vertSpv.data();
+    desc.aVertSize = vertSpv.size() * sizeof(uint32_t);
+    desc.aFragSpv = fragSpv.data();
+    desc.aFragSize = fragSpv.size() * sizeof(uint32_t);
+    VkPipeline pipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
+    if(pipeline == VK_NULL_HANDLE) {
+        fprintf(stderr, "[GN_Vk] 贴花管线重建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        return false;
+    }
+    s_pipeline = pipeline;
+    return true;
+}
+
 } // namespace GNg

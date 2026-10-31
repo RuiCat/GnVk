@@ -301,4 +301,24 @@ void GN_VkPrecipitationDestroy() {
     s_callInFrame = 0;
 }
 
+// task-26：按当前 swapchainExtent 重建降水固定视口管线（init 与 resize 共用）。
+bool recreatePrecipitationPipeline() {
+    if(s_pipelineLayout == VK_NULL_HANDLE) return false;
+    auto vertSpv = LoadSPIRVFile("assets/shaders/precipitation.vert.spv");
+    auto fragSpv = LoadSPIRVFile("assets/shaders/precipitation.frag.spv");
+    if(vertSpv.empty() || fragSpv.empty()) return false;
+    GN3d::sPIPELINE_DESC desc = makePipelineDesc();
+    desc.aVertSpv = vertSpv.data();
+    desc.aVertSize = vertSpv.size() * sizeof(uint32_t);
+    desc.aFragSpv = fragSpv.data();
+    desc.aFragSize = fragSpv.size() * sizeof(uint32_t);
+    VkPipeline pipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
+    if(pipeline == VK_NULL_HANDLE) {
+        fprintf(stderr, "[GN_Vk] 降水管线重建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        return false;
+    }
+    s_pipeline = pipeline;
+    return true;
+}
+
 } // namespace GNg

@@ -257,4 +257,18 @@ void GN_VkCloudDestroy() {
     s_cloudFragSpv.clear();
 }
 
+// task-26：按当前 swapchainExtent 重建云层固定视口管线（init 与 resize 共用）。
+bool recreateCloudPipeline() {
+    if(s_cloudPipelineLayout == VK_NULL_HANDLE) return false;
+    if(s_cloudVertSpv.empty() || s_cloudFragSpv.empty()) return false;
+    GN3d::sPIPELINE_DESC desc = makeCloudPipelineDesc();
+    VkPipeline pipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
+    if(pipeline == VK_NULL_HANDLE) {
+        fprintf(stderr, "[GN_Vk] 云层管线重建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        return false;
+    }
+    s_cloudPipeline = pipeline;
+    return true;
+}
+
 } // namespace GNg

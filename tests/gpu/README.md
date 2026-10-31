@@ -37,7 +37,7 @@ VK_ICD_FILENAMES="$PWD/.local/probes/lvp_icd.json" make gpuCheck
 | 3D | `3d.forward` / `.cull` / `.depth` | 可视绕序为绿；反绕序被剔除成 clear 色；深度 LESS 近平面覆盖远平面 |
 | 3D | `3d.pbr` / `.cull` | PBR 可见（非黑）/反绕序被剔除（黑） |
 | 3D | `3d.deferred.light` | 延迟光照输出非黑 |
-| 3D | `3d.deferred.gbuffer` | 直接读 G-Buffer 附件 1（引擎命名为 `gNormal*`）的 albedo ≈ 0.9/0.1/0.2 |
+| 3D | `3d.deferred.gbuffer` | 直接读 G-Buffer 附件 1（`gAlbedoMetal*`，G0 改名后与内容一致）的 albedo ≈ 0.9/0.1/0.2 |
 | 3D | `3d.composite` | PBR HDR + 合成后输出非黑 |
 | 3D | `3d.skybox` | 天空盒输出不等于前向 clear 色 |
 | P1c | `material.desc/create/cache` | 合法描述键稳定；描述符集创建成功；两次绘制管线 miss 不增 |

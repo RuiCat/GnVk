@@ -54,6 +54,16 @@ void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize) {
 }
 
 void GN_VkShutdown3D() {
+    // G0b：调试视图管线布局（管线本体归 aPipelineCache，已先于本函数释放）。
+    destroy3DGbufferDebug();
+    // G5b-2：探针 9× 3D 纹理/sampler/UBO（固定尺寸，不随 resize）。
+    destroy3DProbes();
+    // G4：SSGI 半分辨率目标/管线/描述符（管线归 aPipelineCache）。
+    destroy3DSsgi();
+    // G2b：SSAO 目标/管线/描述符（管线归 aPipelineCache，这里释放图像/布局/UBO/采样器）。
+    destroy3DSsao();
+    // G1a：环境烘焙/预滤波 cubemap/BRDF LUT/GI UBO（先于描述符池与设备销毁；管线归缓存）。
+    destroy3DEnvironment();
     // P1c / P2 / P8：先释放新增子系统的缓冲/布局（此时 device 仍有效）
     destroyMaterial();
     destroySkinned();
@@ -158,39 +168,16 @@ void GN_VkShutdown3D() {
         GN_Vk.descriptorLayout3D = VK_NULL_HANDLE;
     }
     if(s_framebuffers3D) {
-        for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++)
-            if(s_framebuffers3D[i]) vkDestroyFramebuffer(GN_Vk.device, s_framebuffers3D[i], 0);
-        delete[] s_framebuffers3D;
-        s_framebuffers3D = nullptr;
+        destroy3DForwardFramebuffers();
     }
     if(GN_Vk.renderPass3D) {
         vkDestroyRenderPass(GN_Vk.device, GN_Vk.renderPass3D, 0);
         GN_Vk.renderPass3D = VK_NULL_HANDLE;
     }
-    if(GN_Vk.depthView) {
-        vkDestroyImageView(GN_Vk.device, GN_Vk.depthView, 0);
-        GN_Vk.depthView = VK_NULL_HANDLE;
-    }
-    if(GN_Vk.depthImage) {
-        vkDestroyImage(GN_Vk.device, GN_Vk.depthImage, 0);
-        GN_Vk.depthImage = VK_NULL_HANDLE;
-    }
-    if(GN_Vk.depthMemory) {
-        vkFreeMemory(GN_Vk.device, GN_Vk.depthMemory, 0);
-        GN_Vk.depthMemory = VK_NULL_HANDLE;
-    }
-    // MSAA
-    if(GN_Vk.msaaColorView) {
-        vkDestroyImageView(GN_Vk.device, GN_Vk.msaaColorView, 0);
-        GN_Vk.msaaColorView = VK_NULL_HANDLE;
-    }
-    if(GN_Vk.msaaColorImage) {
-        vkDestroyImage(GN_Vk.device, GN_Vk.msaaColorImage, 0);
-        GN_Vk.msaaColorImage = VK_NULL_HANDLE;
-    }
-    if(GN_Vk.msaaColorMemory) {
-        vkFreeMemory(GN_Vk.device, GN_Vk.msaaColorMemory, 0);
-        GN_Vk.msaaColorMemory = VK_NULL_HANDLE;
+    // task-8：MSAA/depth 目标走与 resize 相同的 destroy helper（深度视图/图像/内存 + MSAA 三者）。
+    if(GN_Vk.depthView || GN_Vk.depthImage || GN_Vk.depthMemory || GN_Vk.msaaColorView ||
+       GN_Vk.msaaColorImage || GN_Vk.msaaColorMemory) {
+        destroy3DMsaaTargets();
     }
     // HDR + Composite
     if(GN_Vk.compositeDescriptorSet) { GN_Vk.compositeDescriptorSet = VK_NULL_HANDLE; }
@@ -205,37 +192,14 @@ void GN_VkShutdown3D() {
         vkDestroyDescriptorSetLayout(GN_Vk.device, GN_Vk.compositeDescriptorLayout, 0);
         GN_Vk.compositeDescriptorLayout = VK_NULL_HANDLE;
     }
-    if(GN_Vk.compositeFramebuffers) {
-        for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++)
-            if(GN_Vk.compositeFramebuffers[i]) vkDestroyFramebuffer(GN_Vk.device, GN_Vk.compositeFramebuffers[i], 0);
-        delete[] GN_Vk.compositeFramebuffers;
-        GN_Vk.compositeFramebuffers = nullptr;
-    }
+    destroy3DCompositeFramebuffers();
     if(GN_Vk.compositeRenderPass) {
         vkDestroyRenderPass(GN_Vk.device, GN_Vk.compositeRenderPass, 0);
         GN_Vk.compositeRenderPass = VK_NULL_HANDLE;
     }
-    if(GN_Vk.hdrSampler) {
-        vkDestroySampler(GN_Vk.device, GN_Vk.hdrSampler, 0);
-        GN_Vk.hdrSampler = VK_NULL_HANDLE;
-    }
-    if(GN_Vk.hdrView) {
-        vkDestroyImageView(GN_Vk.device, GN_Vk.hdrView, 0);
-        GN_Vk.hdrView = VK_NULL_HANDLE;
-    }
-    if(GN_Vk.hdrImage) {
-        vkDestroyImage(GN_Vk.device, GN_Vk.hdrImage, 0);
-        GN_Vk.hdrImage = VK_NULL_HANDLE;
-    }
-    if(GN_Vk.hdrMemory) {
-        vkFreeMemory(GN_Vk.device, GN_Vk.hdrMemory, 0);
-        GN_Vk.hdrMemory = VK_NULL_HANDLE;
-    }
-    if(GN_Vk.hdrFramebuffers) {
-        for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++)
-            if(GN_Vk.hdrFramebuffers[i]) vkDestroyFramebuffer(GN_Vk.device, GN_Vk.hdrFramebuffers[i], 0);
-        delete[] GN_Vk.hdrFramebuffers;
-        GN_Vk.hdrFramebuffers = nullptr;
+    if(GN_Vk.hdrSampler || GN_Vk.hdrView || GN_Vk.hdrImage || GN_Vk.hdrMemory ||
+       GN_Vk.hdrFramebuffers) {
+        destroy3DHdrTargets();
     }
     if(GN_Vk.hdrRenderPass) {
         vkDestroyRenderPass(GN_Vk.device, GN_Vk.hdrRenderPass, 0);
@@ -282,36 +246,11 @@ void GN_VkShutdown3D() {
     if(GN_Vk.deferredLightPipelineLayout) { vkDestroyPipelineLayout(GN_Vk.device, GN_Vk.deferredLightPipelineLayout, 0); }
     if(GN_Vk.deferredLightDescriptorLayout) { vkDestroyDescriptorSetLayout(GN_Vk.device, GN_Vk.deferredLightDescriptorLayout, 0); }
     if(GN_Vk.deferredLightFramebuffers) {
-        for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++)
-            if(GN_Vk.deferredLightFramebuffers[i]) vkDestroyFramebuffer(GN_Vk.device, GN_Vk.deferredLightFramebuffers[i], 0);
-        delete[] GN_Vk.deferredLightFramebuffers;
+        destroy3DDeferredLightFramebuffers();
     }
     if(GN_Vk.deferredLightRenderPass) { vkDestroyRenderPass(GN_Vk.device, GN_Vk.deferredLightRenderPass, 0); }
-    if(GN_Vk.gBufferPipeline) { GN_Vk.gBufferPipeline = VK_NULL_HANDLE; }
-    if(GN_Vk.gBufferPipelineLayout) { vkDestroyPipelineLayout(GN_Vk.device, GN_Vk.gBufferPipelineLayout, 0); }
-    if(GN_Vk.gBufferDescriptorLayout) { vkDestroyDescriptorSetLayout(GN_Vk.device, GN_Vk.gBufferDescriptorLayout, 0); }
-    if(GN_Vk.gBufferSampler) { vkDestroySampler(GN_Vk.device, GN_Vk.gBufferSampler, 0); }
-    if(GN_Vk.gBufferFramebuffers) { delete[] GN_Vk.gBufferFramebuffers; }
-    if(GN_Vk.gBufferRenderPass) { vkDestroyRenderPass(GN_Vk.device, GN_Vk.gBufferRenderPass, 0); }
-    {
-        VkImageView *vs[] = {&GN_Vk.gAlbedoView, &GN_Vk.gNormalView, &GN_Vk.gPBRView, &GN_Vk.gDepthView};
-        VkImage *ims[] = {&GN_Vk.gAlbedoImage, &GN_Vk.gNormalImage, &GN_Vk.gPBRImage, &GN_Vk.gDepthImage};
-        VkDeviceMemory *ms[] = {&GN_Vk.gAlbedoMemory, &GN_Vk.gNormalMemory, &GN_Vk.gPBRMemory, &GN_Vk.gDepthMemory};
-        for(int i = 0; i < 4; i++) {
-            if(*vs[i]) {
-                vkDestroyImageView(GN_Vk.device, *vs[i], 0);
-                *vs[i] = VK_NULL_HANDLE;
-            }
-            if(*ims[i]) {
-                vkDestroyImage(GN_Vk.device, *ims[i], 0);
-                *ims[i] = VK_NULL_HANDLE;
-            }
-            if(*ms[i]) {
-                vkFreeMemory(GN_Vk.device, *ms[i], 0);
-                *ms[i] = VK_NULL_HANDLE;
-            }
-        }
-    }
+    // G-Buffer 统一销毁（vkGbuffer.cpp）：图像/视图/内存/framebuffer/render pass/布局/采样器一处释放。
+    destroy3DGbuffer();
 }
 
 } // namespace GNg

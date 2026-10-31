@@ -87,6 +87,10 @@ bool buildModel(const std::vector<MeshSpec> &specs, const std::vector<int32_t> &
 
     outModel.aMeshCount = static_cast<uint32_t>(ranges.size());
     outModel.aMeshes = new GN3d::sMESH[ranges.size()];
+    // MMD 材质没有显式 alphaMode：头发/裙边/睫毛靠贴图 alpha 做 cutout。统一按 MASK + 0.5
+    // 导入（贴图无 alpha 时 a=1，与不裁等价）；BLEND（透明排序/双 pass）未实现，见头文件边界。
+    outModel.aMaterials = new GN3d::sMATERIAL[ranges.size()];
+    outModel.aMaterialCount = static_cast<uint32_t>(ranges.size());
 
     for (size_t meshIndex = 0; meshIndex < ranges.size(); ++meshIndex) {
         const MeshRange &range = ranges[meshIndex];
@@ -100,6 +104,21 @@ bool buildModel(const std::vector<MeshSpec> &specs, const std::vector<int32_t> &
         mesh.aSpecular[1] = range.spec->specular[1];
         mesh.aSpecular[2] = range.spec->specular[2];
         mesh.aShininess = clampShininess(range.spec->shininess);
+
+        // 每网格一份材质（内存归 cMODEL 的 aMaterials 池）：前向 PBR 从 aMaterial 取
+        // 颜色/粗糙度与 alpha 模式；纹理仍挂在 mesh.aAlbedoTex（查看器加载后才填）。
+        GN3d::sMATERIAL &material = outModel.aMaterials[meshIndex];
+        material.SetDefault();
+        material.aDiffuse.x = range.spec->diffuse[0];
+        material.aDiffuse.y = range.spec->diffuse[1];
+        material.aDiffuse.z = range.spec->diffuse[2];
+        material.aSpecular.x = range.spec->specular[0];
+        material.aSpecular.y = range.spec->specular[1];
+        material.aSpecular.z = range.spec->specular[2];
+        material.aShininess = clampShininess(range.spec->shininess);
+        material.aAlphaMode = GN3d::eALPHA_MASK;
+        material.aAlphaCutoff = 0.5f;
+        mesh.aMaterial = &material;
 
         std::vector<int32_t> remap(vertexCount, -1);
         std::vector<float> vertices;

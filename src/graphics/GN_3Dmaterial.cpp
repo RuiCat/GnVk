@@ -25,6 +25,8 @@ void sMATERIAL::SetDefault() {
     aEmissive.z = 0.0f;
     aRoughness = 0.5f;
     aMetallic = 0.0f;
+    aAlphaMode = eALPHA_OPAQUE;
+    aAlphaCutoff = 0.5f;
     aAlbedoTex = nullptr;
     aNormalTex = nullptr;
 }

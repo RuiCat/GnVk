@@ -13,10 +13,13 @@
 // 最终约定见 GN_Space.h：世界 CCW + 外向法线。
 //
 // 边界：
-//   * 只生成 CPU 顶点/索引与材质颜色，不读贴图字节、不碰 Vulkan；
+//   * 只生成 CPU 顶点/索引与材质描述，不读贴图字节、不碰 Vulkan；
 //   * 蒙皮暂不参与：顶点为绑定姿势（PMD/PMX 文件内的原始位置）；
 //   * 不实现 MMD 的卡通贴图/球面贴图/透明混合，只带漫反射贴图路径；
-//   * 只使用漫反射 RGB、镜面 RGB 与光泽度（MMD power 夹到 1..256）。
+//   * 只使用漫反射 RGB、镜面 RGB 与光泽度（MMD power 夹到 1..256）；
+//   * 每个网格生成一份 sMATERIAL（由 cMODEL::aMaterials 拥有）：alphaMode=MASK、
+//     cutoff=0.5（MMD 头发/裙边靠贴图 alpha 做 cutout；BLEND 未实现，PMX 透明材质
+//     暂按硬边裁剪处理）；纹理仍由调用方挂 mesh.aAlbedoTex。
 #include <GN.h>
 #include "pmdModel.h"
 #include "pmxModel.h"

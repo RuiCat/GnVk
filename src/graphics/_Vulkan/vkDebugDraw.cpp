@@ -106,42 +106,8 @@ bool init3DDebugLines() {
         vkUpdateDescriptorSets(GN_Vk.device, 1, &write, 0, 0);
     }
 
-    GN3d::sVERTEX_LAYOUT vertexLayout;
-    vertexLayout.Add(0, (uint32_t)offsetof(sDEBUG_VERTEX, aPosition), VK_FORMAT_R32G32B32_SFLOAT);
-    vertexLayout.Add(1, (uint32_t)offsetof(sDEBUG_VERTEX, aColor), VK_FORMAT_R32G32B32A32_SFLOAT);
-    vertexLayout.aStride = (uint32_t)sizeof(sDEBUG_VERTEX);
-
-    const uint32_t width = GN_Vk.swapchainExtent.width;
-    const uint32_t height = GN_Vk.swapchainExtent.height;
-    GN3d::sPIPELINE_DESC desc;
-    desc.aKind = GN3d::ePIPE_GRAPHICS;
-    desc.aVertSpv = vertSpv.data();
-    desc.aVertSize = vertSpv.size() * sizeof(uint32_t);
-    desc.aFragSpv = fragSpv.data();
-    desc.aFragSize = fragSpv.size() * sizeof(uint32_t);
-    desc.aVertexLayout = vertexLayout;
-    desc.aRenderPass = GN_Vk.renderPass3D;
-    desc.aSubpass = 0;
-    desc.aLayout = s_debugPipelineLayout;
-    desc.aDepthTest = true; // 线框参与深度比较
-    desc.aDepthWrite = false; // 不写深度：后续绘制不被线框遮挡
-    desc.aDepthCompare = VK_COMPARE_OP_LESS_OR_EQUAL;
-    desc.aDepthStencil = true;
-    desc.aCullBack = false; // 线段无正反面
-    desc.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
-    desc.aBlend = GN3d::eBLEND_ALPHA; // 允许 0xAARRGGBB 的 alpha 生效
-    desc.aTopology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-    desc.aSamples = GN_Vk.msaaSamples;
-    desc.aColorAttachmentCount = 1;
-    desc.aDynamicViewport = false;
-    desc.aDynamicScissor = false;
-    desc.aViewport = VkViewport{0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f};
-    desc.aScissor = VkRect2D{{0, 0}, {width, height}};
-    desc.aCustomBlend = false;
-
-    s_debugPipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
-    if(!s_debugPipeline) {
-        std::fprintf(stderr, "[GN_Vk] 调试线框管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+    // 固定视口管线走可重入 helper（init 与 resize 共用同一份描述）。
+    if(!recreateDebugLinesPipeline()) {
         destroyDebugLines();
         return false;
     }
@@ -196,6 +162,54 @@ void GN_VkDrawDebugLines(const void *lines, uint32_t lineCount, unsigned int col
     vkCmdBindVertexBuffers(cmd, 0, 1, &GN_Vk.vertexBuffer3D, &offset);
     s_vtxOfs3D += vertexSize;
     vkCmdDraw(cmd, vertexCount, 1, 0, 0);
+}
+
+// task-26：按当前 swapchainExtent 重建调试线框固定视口管线（init 与 resize 共用）。
+bool recreateDebugLinesPipeline() {
+    if(GN_Vk.device == VK_NULL_HANDLE || GN_Vk.renderPass3D == VK_NULL_HANDLE ||
+       s_debugPipelineLayout == VK_NULL_HANDLE) {
+        return false;
+    }
+    auto vertSpv = LoadSPIRVFile("assets/shaders/gn3d_debug.vert.spv");
+    auto fragSpv = LoadSPIRVFile("assets/shaders/gn3d_debug.frag.spv");
+    if(vertSpv.empty() || fragSpv.empty()) return false;
+    GN3d::sVERTEX_LAYOUT vertexLayout;
+    vertexLayout.Add(0, (uint32_t)offsetof(sDEBUG_VERTEX, aPosition), VK_FORMAT_R32G32B32_SFLOAT);
+    vertexLayout.Add(1, (uint32_t)offsetof(sDEBUG_VERTEX, aColor), VK_FORMAT_R32G32B32A32_SFLOAT);
+    vertexLayout.aStride = (uint32_t)sizeof(sDEBUG_VERTEX);
+    GN3d::sPIPELINE_DESC desc;
+    desc.aKind = GN3d::ePIPE_GRAPHICS;
+    desc.aVertSpv = vertSpv.data();
+    desc.aVertSize = vertSpv.size() * sizeof(uint32_t);
+    desc.aFragSpv = fragSpv.data();
+    desc.aFragSize = fragSpv.size() * sizeof(uint32_t);
+    desc.aVertexLayout = vertexLayout;
+    desc.aRenderPass = GN_Vk.renderPass3D;
+    desc.aSubpass = 0;
+    desc.aLayout = s_debugPipelineLayout;
+    desc.aDepthTest = true;
+    desc.aDepthWrite = false;
+    desc.aDepthCompare = VK_COMPARE_OP_LESS_OR_EQUAL;
+    desc.aDepthStencil = true;
+    desc.aCullBack = false;
+    desc.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+    desc.aBlend = GN3d::eBLEND_ALPHA;
+    desc.aTopology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    desc.aSamples = GN_Vk.msaaSamples;
+    desc.aColorAttachmentCount = 1;
+    desc.aDynamicViewport = false;
+    desc.aDynamicScissor = false;
+    desc.aViewport = VkViewport{0.0f, 0.0f, (float)GN_Vk.swapchainExtent.width,
+                                (float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
+    desc.aScissor = VkRect2D{{0, 0}, GN_Vk.swapchainExtent};
+    desc.aCustomBlend = false;
+    VkPipeline pipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
+    if(pipeline == VK_NULL_HANDLE) {
+        fprintf(stderr, "[GN_Vk] 调试线框管线重建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        return false;
+    }
+    s_debugPipeline = pipeline;
+    return true;
 }
 
 } // namespace GNg

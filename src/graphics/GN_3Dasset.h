@@ -18,6 +18,7 @@
 //   * 相机/灯光不导入。
 #include "GN_3Dmath.h"
 #include "GN_3Danim.h"
+#include "GN_3Dmaterial.h"
 
 #include <cstdint>
 #include <cstddef>
@@ -87,6 +88,8 @@ struct sASSET_MATERIAL {
     float aMetallic;
     float aRoughness;
     float aEmissive[3];
+    eALPHA_MODE aAlphaMode; // glTF alphaMode；BLEND 本轮按 MASK 存（TODO：透明排序/双 pass）
+    float aAlphaCutoff; // alpha test 阈值（glTF 缺省 0.5）
     int32_t aAlbedoTexture; // baseColorTexture 索引，-1 = 无
     int32_t aNormalTexture; // normalTexture 索引，-1 = 无
 };

@@ -12,10 +12,11 @@
 layout(location = 0) in vec2 fragUV;    // 屏幕空间 UV (全屏三角形)
 
 // ── G-Buffer 输入纹理 ────────────────────────────────
-layout(binding = 1) uniform sampler2D gNormalRoughTex; // RGB=编码法线(N*0.5+0.5), A=粗糙度
-layout(binding = 2) uniform sampler2D gAlbedoMetalTex; // RGB=反射率, A=金属度
-layout(binding = 3) uniform sampler2D gAOTex;          // R=环境遮蔽(AO)
-layout(binding = 4) uniform sampler2D gDepthTex;       // R=深度 (Vulkan NDC [0,1])
+// G2a：附件 1 为 RGBA8_SRGB（采样时硬件自动 sRGB→linear）；附件 2 为 RGBA8_UNORM。
+layout(binding = 1) uniform sampler2D gNormalRoughTex; // RGBA16F: RGB=编码法线(N*0.5+0.5), A=粗糙度
+layout(binding = 2) uniform sampler2D gAlbedoMetalTex; // RGBA8_SRGB: RGB=albedo(线性), A=金属度
+layout(binding = 3) uniform sampler2D gAOTex;          // RGBA8_UNORM: R=AO G=反射率 B=材质ID A=alpha
+layout(binding = 4) uniform sampler2D gDepthTex;       // D32 深度 (Vulkan NDC [0,1])
 
 // ── 阴影 + 天空盒 ────────────────────────────────────
 layout(binding = 5) uniform sampler2DShadow shadowSampler;  // 阴影比较采样器
@@ -53,6 +54,85 @@ layout(binding = 8) uniform FogUBO {
     vec4 fogColor;
     vec4 fogParams;  // x=density(1/m), y=heightFalloff(1/m), z=baseHeight(m), w=maxOpacity
 } fog;
+
+// ── G1b：GI UBO（binding 9）+ 预滤波环境 cubemap（10）+ BRDF LUT（11，RG16F）──
+layout(binding = 9) uniform GIUBO {
+    vec4 indirect;   // x=漫反射倍率 y=镜面倍率 z=AO 强度 w=SSAO 开关
+    vec4 aoParams;
+    vec4 envParams;  // x=环境旋转 y=预滤波 mip 数
+    vec4 sh[9];      // SH9 辐照度系数（rgb + padding）
+    mat4 invViewProj;
+} gi;
+layout(binding = 10) uniform samplerCube envPrefilteredCube;
+layout(binding = 11) uniform sampler2D brdfLutTex;
+// G2b：blurAO（R8）；GI UBO 的 indirect.w = 1 时才参与合成。
+layout(binding = 12) uniform sampler2D ssaoTex;
+// G4：半分辨率去噪 SSGI（RGBA16F）；GI UBO 的 envParams.w=0 时不参与（逐像素等同现状）。
+layout(binding = 13) uniform sampler2D ssgiTex;
+// G5b-2：探针 UBO（48 B）+ 9 张 SH9 探针 3D 纹理（RGBA16F 8×4×8，各存 1 个 vec4 系数）。
+layout(binding = 14) uniform PROBE_UBO {
+    vec4 origin;        // xyz = 网格原点
+    vec4 spacingCounts; // x=spacing, y=countX, z=countY, w=countZ
+    vec4 weight;        // x=权重（0=关）
+} probe;
+layout(binding = 15) uniform sampler3D probeT0;
+layout(binding = 16) uniform sampler3D probeT1;
+layout(binding = 17) uniform sampler3D probeT2;
+layout(binding = 18) uniform sampler3D probeT3;
+layout(binding = 19) uniform sampler3D probeT4;
+layout(binding = 20) uniform sampler3D probeT5;
+layout(binding = 21) uniform sampler3D probeT6;
+layout(binding = 22) uniform sampler3D probeT7;
+layout(binding = 23) uniform sampler3D probeT8;
+
+// 与 giParams::evalSh9 一致：y 向上世界空间，余弦卷积 A_l = π, 2π/3, π/4。
+vec3 evalSH9(vec3 n) {
+    float b0 = 0.2820947918;
+    float b1 = 0.4886025119 * n.y;
+    float b2 = 0.4886025119 * n.z;
+    float b3 = 0.4886025119 * n.x;
+    float b4 = 1.0925484306 * n.x * n.y;
+    float b5 = 1.0925484306 * n.y * n.z;
+    float b6 = 0.3153915653 * (3.0 * n.z * n.z - 1.0);
+    float b7 = 1.0925484306 * n.x * n.z;
+    float b8 = 0.5462742153 * (n.x * n.x - n.y * n.y);
+    vec3 irr = (PI * b0) * gi.sh[0].rgb;
+    irr += (2.0 * PI / 3.0) * (b1 * gi.sh[1].rgb + b2 * gi.sh[2].rgb + b3 * gi.sh[3].rgb);
+    irr += (PI / 4.0) * (b4 * gi.sh[4].rgb + b5 * gi.sh[5].rgb + b6 * gi.sh[6].rgb
+                         + b7 * gi.sh[7].rgb + b8 * gi.sh[8].rgb);
+    return max(irr, vec3(0.0));
+}
+
+// G5b-2：三线性采样 9 张探针纹理（硬件 3D 线性 + CLAMP），再按 SH9 基函数求辐照度。
+// 世界→格坐标 → texel 中心归一 (gridCoord+0.5)/counts；weight=0 时调用点不进入本函数。
+vec3 sampleProbeSh(vec3 wp, vec3 n) {
+    vec3 counts = max(probe.spacingCounts.yzw, vec3(1.0));
+    vec3 grid = (wp - probe.origin.xyz) / max(probe.spacingCounts.x, 1e-6);
+    grid = clamp(grid, vec3(0.0), counts - vec3(1.0));
+    vec3 uvw = (grid + vec3(0.5)) / counts;
+    vec4 c0 = texture(probeT0, uvw);
+    vec4 c1 = texture(probeT1, uvw);
+    vec4 c2 = texture(probeT2, uvw);
+    vec4 c3 = texture(probeT3, uvw);
+    vec4 c4 = texture(probeT4, uvw);
+    vec4 c5 = texture(probeT5, uvw);
+    vec4 c6 = texture(probeT6, uvw);
+    vec4 c7 = texture(probeT7, uvw);
+    vec4 c8 = texture(probeT8, uvw);
+    float b0 = 0.2820947918;
+    float b1 = 0.4886025119 * n.y;
+    float b2 = 0.4886025119 * n.z;
+    float b3 = 0.4886025119 * n.x;
+    float b4 = 1.0925484306 * n.x * n.y;
+    float b5 = 1.0925484306 * n.y * n.z;
+    float b6 = 0.3153915653 * (3.0 * n.z * n.z - 1.0);
+    float b7 = 1.0925484306 * n.x * n.z;
+    float b8 = 0.5462742153 * (n.x * n.x - n.y * n.y);
+    vec3 irr = (PI * b0) * c0.rgb;
+    irr += (2.0 * PI / 3.0) * (b1 * c1.rgb + b2 * c2.rgb + b3 * c3.rgb);
+    irr += (PI / 4.0) * (b4 * c4.rgb + b5 * c5.rgb + b6 * c6.rgb + b7 * c7.rgb + b8 * c8.rgb);
+    return max(irr, vec3(0.0));
+}
 
 float fogAmountAt(vec3 worldPosition) {
     float distanceToCamera = length(worldPosition - scene.cp.xyz);
@@ -108,8 +188,9 @@ float pcf(vec4 fls, vec3 N, vec3 L, vec3 wp) {
 //  深度 → 世界位置重建
 // ═══════════════════════════════════════════════════════════
 vec3 wpFromDepth(float d, vec2 uv) {
+    // G2b：invViewProj 由 CPU 每帧写入 GI UBO 偏移 192（不再每像素 inverse）。
     vec4 clip = vec4(uv * 2.0 - 1.0, d, 1.0);
-    vec4 view = inverse(scene.vp) * clip;
+    vec4 view = gi.invViewProj * clip;
     return view.xyz / view.w;
 }
 
@@ -230,7 +311,10 @@ void main() {
     vec3 N        = normalize(gNR.rgb * 2.0 - 1.0);
     float roughness = clamp(gNR.a, 0.04, 1.0);        // 使用粗糙度!
     float metallic  = clamp(gAM.a, 0.0, 1.0);          // 使用金属度!
-    float ao        = gAo.r;
+    // G2b：materialAO 来自附件 2 的 .r；SSAO 开启（indirect.w=1）时与 blurAO 相乘。
+    float materialAO = gAo.r;
+    float ssao = (gi.indirect.w > 0.5) ? texture(ssaoTex, fragUV).r : 1.0;
+    float ao = materialAO * mix(1.0, ssao, clamp(gi.indirect.w, 0.0, 1.0));
 
     // ── 重建世界位置 + 视线方向 ─────────────────────
     vec3 wp = wpFromDepth(depth, fragUV);
@@ -249,30 +333,50 @@ void main() {
 
     // ═══════════════════════════════════════════════════════
     //  环境光 + IBL
+    //  G1b：GI 倍率 > 0 走 split-sum + SH9；为 0（默认）保持接线前观感
     // ═══════════════════════════════════════════════════════
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     float NdotV = max(dot(N, V), 0.0);
 
-    // 分析环境光
-    vec3 amb = scene.al.rgb * ld.ambientLight.rgb * 3.0;
-
-    // Skybox IBL
-    vec3 skyDiffuse  = texture(skyboxCubemap, N).rgb;
-    vec3 R = reflect(-V, N);
-    vec3 skySpecular = texture(skyboxCubemap, R).rgb;
-
-    // Fresnel → 漫反射/镜面反射比例
-    vec3 F = FresnelSchlick(NdotV, F0);
-    vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
-
-    // 漫反射 IBL: 天空漫反射 × albedo, 混合分析环境光
-    vec3 diffuseIBL = kD * albedo * mix(amb, skyDiffuse, 0.5) * ao;
-
-    // 镜面反射 IBL: 天空反射 × Fresnel × 粗糙度调制
-    float specularOcclusion = 1.0 - roughness * 0.7;
-    vec3 specularIBL = skySpecular * F * specularOcclusion * 0.5;
-
-    vec3 ambient = diffuseIBL + specularIBL;
+    vec3 ambient;
+    if (gi.indirect.x + gi.indirect.y <= 0.0) {
+        // 分析环境光
+        vec3 amb = scene.al.rgb * ld.ambientLight.rgb * 3.0;
+        // Skybox IBL
+        vec3 skyDiffuse  = texture(skyboxCubemap, N).rgb;
+        vec3 R = reflect(-V, N);
+        vec3 skySpecular = texture(skyboxCubemap, R).rgb;
+        // Fresnel → 漫反射/镜面反射比例
+        vec3 F = FresnelSchlick(NdotV, F0);
+        vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+        // 漫反射 IBL: 天空漫反射 × albedo, 混合分析环境光
+        vec3 diffuseIBL = kD * albedo * mix(amb, skyDiffuse, 0.5) * ao;
+        // 镜面反射 IBL: 天空反射 × Fresnel × 粗糙度调制
+        float specularOcclusion = 1.0 - roughness * 0.7;
+        vec3 specularIBL = skySpecular * F * specularOcclusion * 0.5;
+        ambient = diffuseIBL + specularIBL;
+    } else {
+        // ─ split-sum IBL：SH9 漫反射 + 预滤波 cubemap × BRDF LUT 镜面 ─
+        vec3 F = FresnelSchlick(NdotV, F0);
+        vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+        // G5b-2：probe weight=0 时走原 evalSH9（逐像素等同现状，不采样探针纹理）。
+        vec3 ambientEnv = evalSH9(N);
+        if (probe.weight.x > 0.0) {
+            ambientEnv = mix(ambientEnv, sampleProbeSh(wp, N), clamp(probe.weight.x, 0.0, 1.0));
+        }
+        vec3 envDiffuse = kD * albedo * ambientEnv * gi.indirect.x * ao;
+        // G4：SSGI 与 SH9 同尺度（SSGI shader 输出辐照度等价值）；w=0 时 mix 退化为 envDiffuse。
+        vec3 ssgiRadiance = texture(ssgiTex, fragUV).rgb;
+        vec3 ssgiDiffuse = kD * albedo * ssgiRadiance * gi.indirect.x * ao;
+        float ssgiWeight = clamp(gi.envParams.w, 0.0, 1.0);
+        vec3 diffuseIBL = mix(envDiffuse, ssgiDiffuse, ssgiWeight);
+        vec3 R = reflect(-V, N);
+        float maxMip = max(gi.envParams.y - 1.0, 0.0);
+        vec3 prefiltered = textureLod(envPrefilteredCube, R, roughness * maxMip).rgb;
+        vec2 ab = texture(brdfLutTex, vec2(NdotV, roughness)).rg;
+        vec3 specularIBL = prefiltered * (F0 * ab.x + ab.y) * gi.indirect.y;
+        ambient = diffuseIBL + specularIBL;
+    }
     vec3 color = ambient + Lo;
 
     // ── Reinhard 色调映射 (HDR→LDR) ─────────────────

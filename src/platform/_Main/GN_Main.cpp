@@ -11,6 +11,17 @@
 
 GLFWwindow *GT_MainWindow = nullptr;
 
+// task-24：framebuffer resize 回调只记录 pending（回调可能处于 pass 中，禁止直接调 GN_VkResize）；
+// 主循环在 glfwPollEvents 之后、FrameCycle 之前统一处理，同帧多次 resize 取最后值。
+static int GT_PENDING_RESIZE_W = 0;
+static int GT_PENDING_RESIZE_H = 0;
+
+static void GT_FramebufferSizeCallback(GLFWwindow *window, int width, int height) {
+    (void)window;
+    GT_PENDING_RESIZE_W = width;
+    GT_PENDING_RESIZE_H = height;
+}
+
 // ═══════════════════════════════════════════════════════════
 //  静态状态：追踪鼠标光标位置与逐帧累积增量
 // ═══════════════════════════════════════════════════════════
@@ -258,6 +269,7 @@ GN_MAIN_API void GT_InitAllAndRun(int *hwnd, short vw, short vh, short cb,
     glfwSetCursorPosCallback(GT_MainWindow, CursorPosCallback);
     glfwSetScrollCallback(GT_MainWindow, ScrollCallback);
     glfwSetCharCallback(GT_MainWindow, CharCallback);
+    glfwSetFramebufferSizeCallback(GT_MainWindow, GT_FramebufferSizeCallback);
 
     GNg::GN_VkInit(GT_MainWindow, vw, vh);
 
@@ -277,6 +289,17 @@ GN_MAIN_API void GT_InitAllAndRun(int *hwnd, short vw, short vh, short cb,
         GF_ReSetInputState(GT_GetImeChar);
 
         glfwPollEvents();
+
+        // task-24：窗口缩放统一在主循环、渲染 pass 之外处理（回调只写 pending）。
+        // 最小化（ICONIFIED）时 w/h 可能为 0 或不可用，保留 pending，恢复后再重建。
+        if(GT_PENDING_RESIZE_W > 0 && GT_PENDING_RESIZE_H > 0 &&
+           glfwGetWindowAttrib(GT_MainWindow, GLFW_ICONIFIED) == 0) {
+            const int resizeW = GT_PENDING_RESIZE_W;
+            const int resizeH = GT_PENDING_RESIZE_H;
+            GT_PENDING_RESIZE_W = 0;
+            GT_PENDING_RESIZE_H = 0;
+            GNg::GN_VkResize(resizeW, resizeH);
+        }
 
         // ★ 每帧一次性提交累积的鼠标增量 (避免多事件覆盖 mouseMSX)
         if(GT_AccumDX != 0.0 || GT_AccumDY != 0.0) {

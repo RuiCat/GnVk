@@ -1,5 +1,296 @@
 # Changelog
 
+## 2026-10-31（三） — resize 后全部固定视口管线重建（修调试 AABB 错位/反向随相机）+ 文档状态清理
+
+- **现象**：窗口 resize 后模型 AABB/坐标轴错位，并随相机反向移动；根因是这些管线用创建时的固定 viewport/scissor，
+  resize 后未重建（task-22 只覆盖前向/PBR/天空盒/G-Buffer/延迟/SSAO/SSGI/composite/调试视图）。
+- **修复**：为调试线框、材质实例、蒙皮、粒子 billboard、布料、贴花、降水、云新增可重入 `recreate…Pipeline()`
+  （按当前 extent、经 aPipelineCache，init 与 resize 共用），并在 `GN_VkResize` 中调用；另补 2D 叠层 4 条固定视口管线。
+- **已补（task-27）**：`vkSkinSsbo.cpp` 的 SSBO 蒙皮管线（>128 关节）也已加 `recreateSkinnedSsboPipeline()` 并纳入 `GN_VkResize`；至此 `_Vulkan` 内所有固定视口管线均随 resize 重建（阴影 2048²、环境烘焙 128² 固定尺寸除外）。
+- **文档状态清理**：GI_PLAN §9 改为状态表、§10 已解决风险标记；3D_FEATURE_PLAN 头部/§0（#10 完成 + 新增 #11 resize、#12 alpha/BLEND）/
+  §3.1（P12、T4 标完成）/§3.7/§5；CAMERA_PLAN 的旧 case 计数（330/297 → 371）与 C5 状态。
+- **验收**：`make` exit 0；`make unit` = **371 cases / 0 failed**；`make mmdViewer`、`make gpuCheck` 编译通过；lint 仅存量。
+  **GPU 未运行验证**：resize 拖拽、各管线显示位置。
+
+## 2026-10-31（二） — resize 回调接线 + BLEND 透明管线/排序（371 cases / 0 failed；无 GPU 运行验证）
+
+### resize 接线（g0-dev）
+- `src/platform/_Main/GN_Main.cpp`：注册 `glfwSetFramebufferSizeCallback`，回调只写 `static GT_PENDING_RESIZE_W/H`；
+  主循环 `glfwPollEvents()` 后、`GF_FrameCycleProc1/2` 前处理 pending（w/h>0 且非 `GLFW_ICONIFIED` → 取最后值、清 pending、
+  调 `GnVkResize`）。task-8 的 resize 重建从"无调用者"变成窗口拖拽即触发。
+- 已知代价：拖动期间逐帧同步 `GN_VkResize`（waitIdle + 全量 3D 重建）可能卡顿/闪烁；后续可做"停止拖动后合并一次"节流。
+
+### BLEND（alpha-dev）
+- `GN_Vk.h` 新增 `pipelinePBRBlend`；`GN_VkDraw3DPBR(..., bool alphaBlend=false)`；`vk3dForward.cpp` 运行期选管线，
+  混合管线缺失回退不透明；`vk3dInit.cpp` 的 `create3DPbrPipeline` 建混合变体（`eBLEND_ALPHA`、深度写关、`cullBack=false` 双面），
+  resize 经同一函数自动重建。
+- `cMODEL::DrawPBRSorted(cameraPos)`：OPAQUE/MASK 原顺序 → BLEND 按网格世界 AABB 中心到相机距离远到近（仅网格级排序）。
+- `sMESH::DrawPBRLevel(..., bool forceBlend=false)`；glTF `alpha_mode=BLEND → eALPHA_BLEND`（不再折 MASK）。
+- `gn3d_pbr.frag`：`outColor = vec4(mix(fog.rgb,color,...), texture(texSampler,fragUV).a * pc.diffuse.a)`（雾只混 rgb），`.spv` 重生成。
+- 查看器：对 `.png` 贴图用 `decodePngMemory` 统计半透明像素（0<a<1）占比 >5% ⇒ 该网格材质改 BLEND（仅 PNG，其它保持 MASK）；
+  绘制改 `gModel.DrawPBRSorted(camera)`。
+- 限制：BLEND 不做 alpha test、双面渲染可能过度绘制、排序仅网格级（同一网格内/跨网格相交仍有顺序误差）。
+
+- **验收**：`make` exit 0；`make unit` = **371 cases / 0 failed**；`make mmdViewer`、`make gpuCheck` 编译通过；lint 仅存量。
+  **GPU 未运行验证**：拖拽 resize、alpha 混合观感、PNG 5% 阈值。
+
+## 2026-10-31 — 材质 alpha 导入（PMX/PMD/glTF）+ 前向 PBR discard；task-8 前向/MSAA/depth/HDR resize 完整重建（371 cases / 0 failed；无 GPU 运行验证）
+
+### 材质 alpha（alpha-dev）
+- `sMATERIAL` 新增 `eALPHA_MODE`（OPAQUE/MASK/BLEND）、`aAlphaMode`、`aAlphaCutoff`（默认 0.5，`SetDefault` 初始化）；
+  `sASSET_MATERIAL` 同步；glTF 导入读 `alpha_mode`/`alpha_cutoff`（BLEND 暂折叠为 MASK，`TODO(alpha-blend)`）。
+- MMD 桥接在 `mmdMeshBuilder.cpp`：每材质建 `sMATERIAL`（MASK + 0.5）挂 `mesh.aMaterial`，材质池归 `cMODEL::aMaterials`
+  （ctor 置空、`Release()` 在网格后释放）；PMX/PMD loader 仅产出 `Pmx/PmdMaterial`，未改。
+- `GN_VkDraw3DPBR` 追加默认参数 `alphaCutoff` → `pc.pbrParams[3]`（GLSL `pc.specular.w`）；`DrawPBRLevel` 仅 MASK 传 cutoff；
+  `gn3d_pbr.frag` 加 `if (alpha < cutoff) discard`（cutoff=0 行为不变），`.spv` 重生成。
+- `testAsset` 加 glTF MASK/BLEND/缺省与 `sMATERIAL` 默认值用例（369→371）。
+- 限制：BLEND 未实现（透明混合/排序另做，当前硬边裁剪）；MMD 一律 MASK+0.5；deferred G-Buffer 路径仍无生产调用方按材质传 cutoff。
+
+### task-8：resize 完整重建（g0-dev）
+- `vk3dInit.cpp`：可重入 `create/destroy3DMsaaTargets`、`create/destroy3DForwardFramebuffers`、`recreate3DTargets`、
+  `create3DForwardPipeline`/`create3DPbrPipeline`/`create3DSkyboxPipeline`；init 与 resize 走同一路径，修掉
+  `s_framebuffers3D` 引用旧 swapchainView 的悬垂。
+- `vk3dInitScene.cpp`：`create3DHdrImages`/`create3DHdrFramebuffers`/`destroy/recreate3DHdrTargets`、`writeCompositeHdrBinding`、
+  `create3DCompositePipeline`/`recreate3DCompositeTargets`；`init3DHdr` 改走 helper。
+- `GN_VkResize`（GN_Vk.cpp）：waitIdle → 销毁引用旧 view/旧尺寸的 fb（overlay/forward/composite/deferred/HDR）+ HDR 目标 →
+  swapchain → 重建 → MSAA/depth → 3D fb → HDR → G-Buffer/延迟/SSAO/SSGI → composite → 固定视口管线（前向/PBR/天空盒重载 SPIR-V）。
+  `vk3dShutdown` 复用同一 destroy helper。
+- 限制：`GN_VkResize` 仍无调用者（无 GLFW 回调接线）；resize 时 SPIR-V 缺失只告警并沿用旧管线；
+  材质/蒙皮/粒子/布料等其它固定视口管线未纳入本次 resize。
+
+- **验收**：`make` exit 0；`make unit` = **371 cases / 0 failed**；`make gpuCheck`、`make mmdViewer` 编译通过；lint 仅存量。
+  **GPU 未运行验证**：alpha discard 观感、resize 运行时/验证层。
+
+## 2026-10-30（十五） — 修复 MMD 地面「暗带随相机滑动」（IBL 面接缝 + 掠射角 kD 归零）
+
+- 现象：MMD 查看器地面出现一块随相机位置滑动的暗带（像影子），关 GI 后仍隐约可见。
+- 根因 1（环境图面接缝）：`vk3dInitScene.cpp` 的静态天空盒 cubemap 每面都用「面内局部 y」做渐变，
+  相邻面颜色不连续；地面镜面 IBL 采样到接缝，接缝被投影成随视角滑动的暗带。
+  修复：每个 texel 先算**世界方向**（Vulkan cube 面映射）再做同一套渐变；地平线以下取地平线色（下半球不再发黑）。
+- 根因 2（掠射角能量项）：`gn3d_pbr.frag` 两个 IBL 分支都用 `kD = 1 - Fresnel(NdotV)`，相机越低/地面越远
+  NdotV→0、F→1，`kD→0` ⇒ 那片地面环境漫反射整块变暗，暗区随相机滑动。
+  修复：改为 `kD = (1 - F0) * (1 - metallic)`（常见 IBL 近似）；另加 `iblReflection`（朝上表面把反射抬到地平线以上）。
+- 影响：MMD 查看器地面恢复均匀；GI 开/关两个分支都改。`.spv` 已重生成。
+- 验证：`glslangValidator` exit 0、`make` exit 0、`make unit` = 369/0、`make mmdViewer` 编译通过；**用户桌面复测：已解决**。
+
+## 2026-10-30（十四） — P12 G0b：G-Buffer 四通道调试视图 + alpha cutoff 参数（369 cases / 0 failed；无 GPU 运行验证）
+
+- 新增 `assets/shaders/gn3d_gbuffer_debug.frag`（全屏三角形，复用 `gn3d_deferred_light.vert`；bindings 0=SceneUBO、
+  1=NormalRough、2=AlbedoMetal、3=AO/材质、4=Depth、9=GI UBO；push constant `channel`）：
+  0=法线、1=albedo、2=AO/材质 RGB、3=世界距离伪彩（深度→世界位置→相机距离，50 m 归一）；`.spv` 已生成。
+- 新增 `_Vulkan/vkGbufferDebug.cpp`（102 有效行）：调试管线（复用 deferredLight 的 renderPass/描述符布局/描述符集/vert，
+  经 aPipelineCache）、init/destroy、resize 按新 extent 重建；`GN_VkDebugGBuffer(int)` 在 3D pass 外 begin deferredLightRenderPass(clear)
+  → bind → push channel → draw 3 → end；通道越界钳制 0..3；3D pass 内调用兜底返回。
+- `GN_VkDraw3D_GBuffer` 追加默认参数 `float alphaCutoff = 0.0f`，写 `pc.pbrParams[3]`（原 0，现有调用行为不变）；
+  `gn3d_gbuffer.frag` 已有 `if (alpha < cutoff) discard`，本次只接参数。
+- **验收**：`make` exit 0；`make unit` = **369 cases / 0 failed**；debug shader `glslangValidator` exit 0；
+  `make gpuCheck` 编译通过（运行 SKIP，无设备）；lint 写域 0 违规。**GPU 未运行验证**：调试视图渲染/四通道正确性、alpha discard。
+- 限制：调试视图会覆盖当前 swapchain 画面（仅适合单帧调试/截图）；复用延迟描述符集，需当帧已跑过延迟路径；
+  深度伪彩 50 m 硬编码；alphaCutoff 未接材质 alpha 导入（PMX/glTF）。
+
+## 2026-10-30（十三） — MMD 查看器：模型改前向 PBR + 开启 GI IBL（369 cases / 0 failed；无 GPU 运行验证）
+
+- 新增 `GN_VkEnableGI(bool)`（`vkGi.cpp`、`GN_Vk.h`）：map GI UBO 原地读改写 `indirect[0]/[1]`（漫反射/镜面倍率），
+  保留 G1a/G3 写入的 SH9/envParams/invViewProj；GI UBO 不存在时静默返回。
+- `tests/mmdViewer/mmdViewer.cpp`：模型绘制 `cMODEL::Draw()` → `DrawPBR()`（GGX/Cook-Torrance，材质 diffuse/roughness/metallic/贴图）；
+  `AppInit()` 内 `loadModel()` 后调一次 `GN_VkEnableGI(true)`；绘制顺序/天气/相机/粒子/贴花未动，未加按键。
+- **范围**：按用户裁决 A——只开前向 PBR + GI IBL；SSAO/SSGI/探针只存在于延迟路径，MMD 查看器无 G-Buffer，本轮不接。
+- **验收**：`make` exit 0；`make unit` = **369 cases / 0 failed**；`make mmdViewer`、`make gpuCheck` 编译通过；lint 写域 0 违规。
+  **GPU 未运行验证**：PBR 观感、GI 亮度/高光、天气切换后 IBL 与天空同源、验证层均待桌面。
+- 风险：Blinn-Phong→PBR 观感变化（高光形状/强度、metallic 色调、整体亮度未标定）；GI 开启后环境项由 split-sum+SH9 提供，
+  若 G1a 初始化失败仍强开可能异常（建议桌面先确认启动无 G1a 警告）；旧 Skybox IBL 回退分支在 GI 关时仍可用。
+
+## 2026-10-30（十二） — P12 G5b-2：探针 9 张 3D 纹理 + 延迟 layout 23 + shader 采样（369 cases / 0 failed；无 GPU 运行验证）
+
+- `_Vulkan/vkProbe.cpp`（272 有效行）：9 张 `VK_IMAGE_TYPE_3D` RGBA16F 8×4×8（SAMPLED|TRANSFER_DST）+ LINEAR/CLAMP sampler；
+  探针 UBO 48 B host-visible；启动读 GI UBO 的 SH9（偏移 48、36 float）填满 256 探针 → `packProbeTextures` → half →
+  单 staging 18 KB → 9 次 buffer→3D image copy（一次 fence）；init/destroy。
+- 延迟 layout 14→23：14=probe UBO、15..23=9 张 3D 纹理；`gn3d_deferred_light.frag` 新增 probe UBO + 9×sampler3D、
+  `sampleProbeSh(wp,N)`（世界→格坐标→`(g+0.5)/counts` CLAMP 三线性 + SH9 基函数）；仅 `probe.weight.x>0` 时与 `evalSH9(N)` mix，
+  weight=0 不采样、逐像素等同现状；`.spv` 重生成。
+- `GN_VkSetProbeWeight(float)`（clamp [0,1]，默认 0）+ `GN_VkUpdateProbes()`（weight=0 返回；否则每帧最多 2 探针 Blend 0.15，
+  有变化才整网格重传）；`GN_VkInit3D` init、`vk3dShutdown` destroy；尺寸固定不随 resize 重建。
+- `tests/gpu/gpuCheck3D.cpp` 延迟用例补 `GN_VkUpdateProbes()` 调用点（weight=0 no-op；weight 需应用侧设置）。
+- **验收**：`make` exit 0；`make unit` = **369 cases / 0 failed**；`glslangValidator` deferred shader exit 0；
+  `make gpuCheck` 编译通过（运行 SKIP，无设备）；lint 写域 0 违规。**GPU 未运行验证**：3D 纹理上传/采样、描述符/布局、
+  验证层、视觉（weight>0）、性能均待桌面。**GI 规划 G0–G5 代码级实现至此全部落地。**
+
+## 2026-10-30（十一） — P12 G5b-1：probe UBO 契约 + 9 张探针纹理打包（369 cases / 0 failed）
+
+- `giParams`：`sPROBE_UBO` 48 B（origin@0、spacingCounts@16（spacing/countX/Y/Z）、weight@32（0=关），偏移全 static_assert）
+  + `makeDefaultProbeUbo`（8×4×8、间距 2 m、origin 0、weight 0）+ `packProbeUbo`；`testGi` +5 用例。
+- `GN_3Dprobe`：`GetProbeSh(index, out36)`（边界/空指针校验）+ `packProbeTextures(grid, out)`——按裁决 A 输出
+  **9 张** RGBA16F 8×4×8 的 float 层布局 `[k][z][y][x][c]`（默认 9216 floats ≈72 KB，36 float/探针无损；索引公式注释）；
+  `testProbe` +4 用例（常数网格、单探针 texel、打包→还原无损、非法输入）。
+- **设计修正**：§7.1 原「3 张纹理」与「36 float/探针」算术矛盾（3072 vs 9216 floats），已改为 **9 张纹理**、延迟描述符 13→23
+  （14=probe UBO、15..23=9 张纹理）；G5b-2 未开始（VkImage/描述符/shader 采样/每帧更新）。
+- **验收**：`make` exit 0；`make unit` = **369 cases / 0 failed**；lint 写域 6 文件 0 违规；纯 CPU，无 GPU 依赖。
+
+## 2026-10-30（十） — P12 G5a：SH9 探针网格 CPU 基座（GN_3Dprobe + testProbe；360 cases / 0 failed）
+
+- 新增 `src/graphics/GN_3Dprobe.h/.cpp`（140 有效行，纯 CPU）：`sPROBE_GRID_DESC`（默认 8×4×8、间距 2 m、总数 ≤1024）；
+  `cPROBE_GRID`：`Init`（counts/spacing 校验）、`Reset`、`Recenter(cameraPos)`、`SetProbeSh(index, sh9[9][4])`、
+  `BlendProbeSh(index, target, alpha)`（时间滞后）、`SampleSh(worldPos, outSh9)`（世界→格坐标→夹紧→8 邻域三线性）。
+  SH9 为 36 float（9×vec4），与 `giParams` 布局一致；未接 Vulkan（G5b）。
+- **Recenter 语义**：位移 ≥ 2×spacing（默认 4 m）才按整数格搬移，重叠探针 SH9 保留、越界夹到最近旧值（不丢数据）；
+  相机 3.9 m 不搬、4.1 m 搬（测试锁定）。若后续要「每格对齐」，改一处阈值常量。
+- 新增 `tests/unit/testProbe.cpp`：10 用例（默认/非法 desc、采样常数/中点/角点/越界夹紧、Recenter 3.9/4.1 与 SH9 保留、
+  Blend 单调、非法输入与确定性）。
+- **验收**：`make` exit 0；`make unit` = **360 cases / 0 failed**；lint 写域 3 文件 0 违规。纯 CPU，无 GPU 依赖。
+- 风险：网格对象约 147 KB（1024×36 float），栈上实例化需注意；探针默认全 0，未接遮挡 raycast 与 GPU 上传/采样；
+  G5b 才决定 3D 纹理布局（9 系数分 3 张 RGBA 或 SSBO）。
+
+## 2026-10-30（九） — P12 G4：半分辨率 SSGI + 5×5 单帧双边去噪 + 延迟合成（默认关；350 cases / 0 failed；无 GPU 运行验证）
+
+- **CPU 契约**：`giParams` 新增 `sSSGI_UBO` 160 B（viewProj@0 / invViewProj@64 / params@128（强度/步数/厚度/距离）/
+  screen@144（invW/invH/半分辨率宽高），static_assert 全锁）+ `makeDefaultSsgiUbo`（强度 0=关、8 步、厚度 0.5、距离 20）
+  + `packSsgiUbo`；`testGi` +5 用例。
+- **着色器**：新增 `gn3d_ssgi.frag`（半分辨率、depth+invViewProj 重建世界位置/法线、8 rays×8 steps 世界空间 march、
+  hit=G-Buffer albedo×`evalSH9`、miss=`evalSH9`）与 `gn3d_ssgi_denoise.frag`（5×5 单帧双边，深度/法线/空间权重）；
+  `gn3d_deferred_light.frag` layout 13→14（binding 13=denoised SSGI），`diffuseIBL = mix(envDiffuse, ssgi, gi.envParams.w)`，
+  `envParams.w=0` 时逐像素等同现状。三个 `.spv` 已重生成。
+- **资源/接线**：新增 `_Vulkan/vkSsgi.cpp`（414 有效行：两张半分辨率 RGBA16F raw/denoised、两条 render pass（final=SHADER_READ
+  + 显式依赖）、两条全屏管线、SSGI/denoise 两套描述符、160 B host-visible UBO、init/destroy/recreate）；
+  `GN_VkSSGIPass()`（`envParams.w<=0` 直接返回并先 end 3D pass 兜底），在 SSAOPass 之后、DeferredLighting 之前调用；
+  init/resize/shutdown 接线；延迟 layout 14。
+- **调用点补齐（Lead）**：`tests/gpu/gpuCheck3D.cpp` 的延迟用例在 `DeferredLighting` 前插入 `GN_VkSSAOPass()`/`GN_VkSSGIPass()`
+  （默认关为 no-op），否则仓库内无人调用这两个 pass。
+- **验收**：`make` exit 0；`make unit` = **350 cases / 0 failed**；三个 shader `glslangValidator` exit 0；
+  `make gpuCheck`/`make mmdViewer` 编译通过；lint 写域 0 违规。**GPU 未运行验证**：SSGI 视觉（渗色/漏光）、去噪质量、
+  验证层、性能（8×8 半分辨率）、resize 均待桌面；步数固定 8、镜面不做 SSGI、亮度尺度未标定。
+
+## 2026-10-30（八） — P12 G3：环境与解析天空同源 + 天气切换重烘（345 cases / 0 failed；无 GPU 运行验证）
+
+- **只读天空参数**：`GN_VkGetSky(VkSkyParams*)`（`vk3dPasses.cpp:177`、`GN_Vk.h:512`），供烘焙读取运行时天气/时间。
+- **可重入烘焙**：`vkEnvironment.cpp` 拆为「一次性资源 + `bakeAndUploadEnvironment(sky)`」——逐面重烘 6 面 → 回读 →
+  `prefilterCubemap`+`shProjectCubemap` → **新建**预滤波 cubemap 并上传（全部成功才换句柄、重写 PBR binding8 / deferred binding10）→
+  只更新 GI UBO 的 SH9（保留 indirect/aoParams/invViewProj）；失败销毁新图、旧图/旧 SH9 不动。
+- **公开入口**：`GN_VkRebakeEnvironment()`（`vkDeviceWaitIdle` + pass 内拒绝返回 false；资源缺失返回 false）。
+- **查看器**：`mmdViewerWeather.cpp` 在天气目标变化后置 pending，等 `isTransitioning()` 结束、在 AppRun（3D pass 外）重烘一次；
+  启动首帧一次；失败清 pending + 告警，绝不每帧重试。timeSeconds/风等连续变化不重烘（动态 IBL 后续项）。
+- **验收**：`make` exit 0；`make unit` = **345 cases / 0 failed**；`make mmdViewer` 编译通过；
+  `make gpuCheck` 编译通过、运行 SKIP（无设备）；lint 写域 6 文件 0 违规。
+  **GPU 未运行验证**：重烘时序、切 1..6 天气后天空/反射同源、验证层、启动与切换耗时（128² CPU 预滤波约 25M 采样/次，
+  切换时有一次 `vkDeviceWaitIdle` 卡顿风险）。
+
+## 2026-10-30（七） — P12 G2b：SSAO（R8 目标 + 世界空间 SSAO + 4×4 双边 + 合成）+ Mat44Inverse 修复（345 cases / 0 failed；无 GPU 运行验证）
+
+- **CPU 契约**：`giParams` 新增 `sSSAO_UBO`（400 B：viewProj@0 / invViewProj@64 / samples[16]@128 / params@384，全部 static_assert）、
+  `makeDefaultSsaoUbo`（单位阵、16 点核、半径 0.5/偏置 0.025/幂 1.0/启用位 0）、`packSsaoUbo`；`testGi` +6 用例。
+- **修复既有缺陷** `GNg::Mat44Inverse`：旧实现对纯平移矩阵返回错误（`testSkeleton.cpp:46`、`vkCloud.cpp:11` 早已注明）；
+  重写为正确列主序 4×4 逆，`testMath3D` +4 用例（平移逆、TRS roundtrip、透视 roundtrip、奇异→单位阵）。
+- **着色器**：`gn3d_ssao.frag` 重写为世界空间（invViewProj 重建位置、世界法线、16 点核、range check、power、固定哈希切向）；
+  新增 `gn3d_ssao_blur.frag`（4×4 双边，深度差 + 法线夹角降权）；`gn3d_deferred_light.frag` layout 12→13
+  （binding 12 = blurAO）、`ao = materialAO * mix(1, ssao, indirect.w)`、`wpFromDepth` 改用 `gi.invViewProj`；三个 `.spv` 重生成。
+- **`_Vulkan/vkSsao.cpp`（新，381 有效行）**：两张全分辨率 R8（raw/blur）目标与视图、两条 render pass（final=SHADER_READ + 显式依赖）、
+  两条全屏管线（复用 `gn3d_deferred_light.vert`）、SSAO/blur 两套描述符、400 B host-visible UBO、init/destroy/recreate。
+- **接线**：`GN_VkSSAOPass()`（`indirect.w<=0` 直接返回；先 end 3D pass）；`GN_VkBegin3DPassDeferred` 记录 viewProj；
+  `GN_VkDeferredLighting` 每帧用修复后的 `Mat44Inverse` 写 GI UBO offset 192；resize 重建、shutdown 释放。
+- **验收**：`make` exit 0；`make unit` = **345 cases / 0 failed**；三个 shader `glslangValidator` exit 0；
+  `make gpuCheck` 编译通过、运行 SKIP（无设备）；lint 写域 0 违规。**GPU 未运行验证**：SSAO 视觉/模糊质量/验证层/resize；
+  默认 `indirect.w=0`（不跑 pass、观感不变），桌面用 `GN_VkSetGI` 设 `indirect.w=1` 验证。
+- 风险：`invViewProj` 每帧覆盖写 GI UBO（帧内 `GN_VkSetGI` 会临时覆盖，下一帧恢复）；blur 深度权重为未标定经验值；
+  两张 R8 常驻约 4 MB。
+
+## 2026-10-30（六） — P12 G2a：G-Buffer 打包 24→16 B/px（albedo/Metal RGBA8_SRGB + AO/材质 RGBA8；335 cases / 0 failed；无 GPU 运行验证）
+
+- `src/graphics/_Vulkan/vkGbuffer.cpp` 颜色格式表改为 `{RGBA16F, RGBA8_SRGB, RGBA8_UNORM}`（深度 D32 不变），
+  颜色附件 24→16 B/px（1080p 约 50→33 MB）。
+- `assets/shaders/gn3d_gbuffer.frag`：附件 1 写线性 albedo（RGBA8_SRGB 由硬件编码）+ metallic；
+  附件 2 按 §5.4 写 `(AO, reflectance=0.04 占位, materialId=0 占位, alpha)`；alpha cutoff 预留 `pc.specular.w`
+  （C++ 侧 `pbrParams[3]=0`，默认不 discard，材质 alpha 通路留 G0b）。
+- `assets/shaders/gn3d_deferred_light.frag`：仅通道注释更新（RGBA8_SRGB 采样自动 linear；AO 仍取 .r）。
+- `tests/gpu/gpuCheck3D.cpp` 的 `3d.deferred.gbuffer` 改按 RGBA8 读附件 1（4 B/px）、`GN3d::srgbDecode` 还原线性、容差 ±0.01。
+- `.spv` 已重生成：`gn3d_gbuffer.frag.spv` 3240→3716 B（功能变化）；`gn3d_deferred_light.frag.spv` 仅注释/行号差异。
+- **验收**：`make` exit 0；`make unit` **335 cases / 0 failed**；两个 shader `glslangValidator -V` exit 0；
+  `make gpuCheck` 编译通过、运行 SKIP（无设备）；lint 写域 0 违规。**GPU 未运行验证**：RGBA8_SRGB 附件兼容/验证层、
+  8-bit 精度、带宽收益、gpuCheck 运行时断言均待桌面。
+
+## 2026-10-30（五） — P12 G1b：GI 槽位 4/7/9 + split-sum/SH9 着色器接线（默认 GI 关；335 cases / 0 failed；无 GPU 运行验证）
+
+- **描述符槽位**（与天气 3/6/8 不冲突，两份计划的槽位表已同步）：前向 `4 = GI UBO`（layout 4→5，shader 暂未用）；
+  PBR `7 = GI UBO`、`8 = 预滤波环境 cubemap`、`9 = BRDF LUT`（layout 7→10）；
+  延迟 `9 = GI UBO`、`10 = prefiltered cubemap`、`11 = BRDF LUT`（layout 9→12）。
+- 新增 `_Vulkan/vkGi.cpp`：`init3DGiBindings()` 写三套描述符；启动 `disableGiByDefault()` 把
+  `indirect[0]/[1]` 置 0（保留 G1a 的 SH9/envParams），`GN_VkInit3D` 末尾接线（`GN_Vk.cpp:973`）。
+- 着色器：`gn3d_pbr.frag` / `gn3d_deferred_light.frag` 增加 GI UBO + `evalSH9` + split-sum（预滤波 `textureLod` ×
+  BRDF LUT `F0*ab.x+ab.y`）；`.spv` 已重生成（27004 B / 27680 B）。GI 关时走**逐行保留的旧 Skybox IBL 分支**
+  （旧 0.7/0.5/×3.0 魔数保留在回退分支），默认观感不变；`GN_VkSetGI` 把 `indirect.x/y` 调到 >0 才启用新路径。
+- **验收**：`make` exit 0；`make unit` **335 cases / 0 failed**；两个改动 shader `glslangValidator -V` exit 0；
+  lint 写域 0 违规（全仓仅存量）。**GPU 未运行验证**：描述符兼容/验证层、GI 关回退画面、GI 开启亮度与方向、
+  新 .spv 运行时加载均待桌面；嵌入式 fallback 头（`*_spv.h`）未同步（仅 assets 下 .spv 缺失时才用到旧版）。
+- 风险：若 G1a 烘焙失败，bindings 8/9/10/11 写的是空视图（默认分支不采样）；GI 开启后亮度可能需调倍率。
+
+## 2026-10-30（四） — P12 G1a：GPU 6 面烘焙环境 + CPU 预滤波 + 预滤波 cubemap/BRDF LUT/GI UBO（335 cases / 0 failed；无 GPU 运行验证）
+
+- **环境来源拍板 B**（`docs/GI_PLAN.md` §11）：v1 IBL 源 = GPU 6 面烘焙解析天空 → 回读 → `giParams::prefilterCubemap`
+  CPU 预滤波 → 上传 mip 链；G3 只补「天气切换重烘 + GPU 端预滤波」。
+- 新增 `_Vulkan/vkEnvironment.cpp`（681 物理 / 630 有效行）：128²×6 RGBA16F cubemap 烘焙目标 + 6 face 视图/
+  专用 render pass/6 framebuffer；复用 `gn3d_skybox.vert/frag` 逐面烘焙（6 个 128 B UBO 描述符集，256 B 对齐步长）；
+  staging + fence 回读 → `prefilterCubemap`（5 mip）+ `shProjectCubemap` + `generateBrdfLut`；
+  上传 CUBE 预滤波图（LINEAR/CLAMP、mip 线性）+ RG16F BRDF LUT + 256 B GI UBO（真实 SH9 + mip 数）。
+- `GN_Vk.h` 新增环境/BRDF/GI 句柄与 `GN_VkSetGI(const GN3d::sGI_UBO&)`；`GN_VkInit3D`（`GN_Vk.cpp:958`）接线，
+  `vk3dShutdown.cpp:58` 释放；创建/销毁成对，失败只告警不阻断 3D 初始化。
+- **验收**：`make` exit 0；`make unit` = **335 cases / 0 failed**；`glslangValidator -V gn3d_skybox.vert/frag` exit 0；
+  lint 写域 0 违规（全仓仅存量 `GN_2Dmath.cpp` 违规 + spv 头 no-split 告警）。**GPU 未运行验证**：面朝向（首要风险）、
+  回读、上传内容、GI UBO 读取、同步/验证层均待桌面；bake 当前用默认天空参数（`s_skyParams` 未接入，G3 天气重烘解决）。
+- 未接着色器/描述符槽位（G1b 另做）。
+
+## 2026-10-30（三） — 3D 计划 §0 #2：降水柱硬边（柱高 64 m + 寿命单趟化；代码级，视觉未验证）
+
+- **降水柱 24 m → 64 m**（`tests/mmdViewer/mmdViewerWeather.cpp`）：`PRECIP_COLUMN_HEIGHT` 是唯一来源，
+  发射平面（地面+柱高）、柱心、柱半高、`setRecycleBox` 与叠层 `gPrecipBoxCenter/Half` 全链由它推导；
+  注释写明 64 m 的理由（柱顶/柱底落在常见相机距离与雾外）与密度代价（同粒子数摊在更长柱里，64/24≈2.67× 稀释）。
+- **雨/雪寿命收紧为「单趟落地 + 余量」，修复加高柱后粒子半空寿终的新瑕疵**：
+  粒子回收只 wrap 位置、不重置 age（`GN_3Dparticle.cpp:179-197`）。雨：落地 2.01–2.22 s ⇒ 寿命 2.3–2.6 s；
+  雪：落地 ≈17.07 s ⇒ 寿命 17.5–18.0 s。寿终点离地约 49–63 m（雨）/ 60–62 m（雪），落在柱顶附近（预期雾/视距外）。
+- **未改**：容量 16384/24576、发射率 60000/30000、雨雪尺寸与 streak；密度/观感真机再调。
+- **验收**：`make mmdViewer` exit 0；`make unit` **335 cases / 0 failed**；`lintCodeModularity tests/mmdViewer` 0 违规 0 告警。
+  **运行期未验证**（无 `/dev/dri`）：上下过渡是否连续、地面密度是否可接受均待桌面目视。
+
+## 2026-10-30（二） — P12 G0a + G1-CPU：G-Buffer 结构修复 / 附件改名 / cubemap 预滤波（335 cases / 0 failed；无 GPU 运行验证）
+
+- **G0a：G-Buffer 结构修复**（`docs/GI_PLAN.md` §5）。新增 `_Vulkan/vkGbuffer.cpp`（从 `vk3dInitScene.cpp`
+  迁出创建逻辑，372 行）：`eGBUFFER_ATTACHMENT` 枚举（0=NormalRough / 1=AlbedoMetal / 2=AO / 3=Depth），
+  附件句柄按枚举映射；`gAlbedo*/gNormal*/gPBR*` 错位字段改名为 `gNormalRough*/gAlbedoMetal*/gAo*/gDepth*`
+  （全仓旧名 0 处，`tests/gpu` 同步）；render pass 加两条显式 `VkSubpassDependency`
+  （EXTERNAL→0 读→写；0→EXTERNAL 写→FRAGMENT_SHADER 读）。`GN_VkResize` 现在销毁并重建
+  G-Buffer 图像/视图/内存/framebuffer、重写延迟光照 binding 1..4、按新尺寸重建 G-Buffer/延迟管线，
+  并在销毁 swapchainView 前先释放 overlay/composite/deferred 三类 framebuffer；`vk3dShutdown` 走统一 `destroy3DGbuffer()`。
+- **G1-CPU：cubemap 预滤波 + SH9**（`giParams.h/.cpp` 740 有效行，多功能 <1000 机检通过）。
+  新增 `prefilterCubemap`（6 面输入、GGX 64 样本、mip 主序、mip0 原图、粗级 A=1）、
+  `shProjectCubemap`（与 equirect 同系数约定）、`cubemapMaxMipCount` / `prefilterCubemapFloatCount` /
+  `prefilterCubemapMipOffset` / `cubemapFaceDirection`；`testGi` 16→21 用例（常数环境 mip 恒定、梯度方差逐级下降、
+  cubemap SH 与 equirect SH 一致、确定性、非法输入不写脏数据）。
+- **验收**：`make unit` = **335 cases / 0 failed**；`make` 与 `make gpuCheck` 编译通过
+  （gpuCheck 运行到 `gpu.init` 因无设备 `SKIP`，exit 2）；`lintCodeModularity src/graphics tests/unit tests/gpu`
+  仅存量 1 违规 1 告警。**G0a 的 resize/同步路径与 G1-CPU 的 GPU 表现均未运行验证**（本机无 `/dev/dri`）。
+- **越界发现（未修）**：① `s_framebuffers3D`（`vk3dInit.cpp` 前向路径）仍引用已销毁 swapchainView——
+  resize 后悬垂，需连同 `msaaColorView/depthView` 与 HDR 目标一起重建；② `hdrFramebuffers` 仍是旧尺寸；
+  ③ composite/deferred 之外的固定视口管线（前向/HDR）在 resize 后未重建。
+
+## 2026-10-30 — 接管：cCAMERA C0–C5 + GI CPU 基座 + mmdViewer 拆分（330 cases / 0 failed；无 GPU 运行验证）
+
+- **cCAMERA（`docs/CAMERA_PLAN.md` C0–C5）**：新增 `src/graphics/GN_3Dcamera.h`（144 有效行）+
+  `GN_3Dcamera.cpp`（150）/`Move`（194）/`Orbit`（87）/`Follow`（138）/`Fit`（139）/`Control`（35），
+  纯 CPU 的自由/轨道/跟随三模式、GN 移动原语、临界阻尼跟随、自动取景、FOV 换算；`testCamera` 22 用例全 PASS。
+  查看器相机段改为唯一 `GN3d::cCAMERA gCamera`（输入只填 `sCAMERA_INPUT`→`ApplyInput`，视图/投影走 `BuildViewProj`），
+  新增 F 自由↔轨道、轨道滚轮缩放、中键拖动平移；默认视角与旧实现数值等价（`SetOrbit(target, h*1.9, 0, 0.12)`）。
+  已知行为差异：Q/E 从世界竖直改为沿相机 up；俯仰上限 1.45→83°（差 0.08°）。
+- **GI CPU 基座（`docs/GI_PLAN.md` G1 前置）**：新增 `src/graphics/giParams.h/.cpp`（474 有效行）+
+  `tests/unit/testGi.cpp`（16 用例）：256 B `sGI_UBO`（偏移/大小 static_assert）、默认/校验/打包、
+  16 点半球 SSAO 核（Halton + 固定种子切向）、SH9 equirect 积分与 `evalSh9`、128²×64 样本 GGX BRDF LUT、
+  albedo sRGB / 材质位域 / octahedral（float + snorm16）/ alpha cutoff。**未接 Vulkan**（G0/G1-GPU 未开始）。
+- **`mmdViewer.cpp` 拆分（3D 计划 §0 #8）**：1385 物理 / 1164 有效行 → `mmdViewerCamera.cpp`（182）、
+  `mmdViewerWeather.cpp`（251）、`mmdViewerDecal.cpp`（174）、`mmdViewerOverlay.cpp`（262）、
+  `mmdViewer.cpp`（319）+ `mmdViewerShared.h`（71）；全部 <500 有效行，`lintCodeModularity tests/mmdViewer` = 0 违规 0 告警。
+- **验收**：`make unit` = **330 cases / 0 failed**；`make` 与 `make mmdViewer` 编译通过；
+  `lintCodeModularity src/graphics tests/unit` 新增文件 0 违规（仅存量 `GN_2Dmath.cpp` 超长与 spv 头 no-split）。
+  **运行期未验证**：本机无 `/dev/dri` 且未装 lavapipe，`make gpuCheck` 无法运行，画面/手感/轨道切换待桌面验收。
+- **越界发现（未修）**：`GN_3Dmath.cpp:381` `Mat44OrthoVK` 的 `m[10] = -fn` 与 VK [0,1] 深度符号不符
+  （n=0.1/f=1000 时 near→-2e-4、far→-1.0002），正交相机深度不可用；正交取景/C5 收尾前需先修。
+- **收尾备份未完成**：`/run/media/ruicat/*` 两个外部盘均为只读挂载，异盘备份无法落盘（详见 3D 计划 §0 #9）。
+
 ## 2026-10-30 — 正面绕序修正 + MMD 法线 + 降水/云/贴花拿到真矩阵（gpuCheck 99/99，291 cases）
 
 - **世界 pass 的 `frontFace` 修正为 CCW**（`GN_Space.cpp`、`vk3dInit.cpp`、`vk3dInitScene.cpp`、`vkMaterial.cpp`）：

@@ -211,7 +211,8 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
                     const sMAT44 *modelMatrix,
                     float diffuseR, float diffuseG, float diffuseB,
                     float roughness, float metallic, float ao,
-                    const sIMAGE *albedoTex, const sIMAGE *normalTex) {
+                    const sIMAGE *albedoTex, const sIMAGE *normalTex, float alphaCutoff,
+                    bool alphaBlend) {
     if(!GN_Vk.initialized || !s_in3DPass || !vertices || vertexCount == 0) return;
     s_last3DIndexCount = (indices && indexCount > 0) ? indexCount : 0;
 
@@ -274,7 +275,7 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
     pc.pbrParams[0] = roughness;
     pc.pbrParams[1] = metallic;
     pc.pbrParams[2] = ao;
-    pc.pbrParams[3] = 0.0f;
+    pc.pbrParams[3] = alphaCutoff; // gn3d_pbr.frag: pc.specular.w，0=不裁
     vkCmdPushConstants(GN_Vk.commandBuffers[GN_Vk.currentFrame],
                        GN_Vk.pipelineLayoutPBR,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -290,9 +291,11 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
     memcpy(d, vertices, vtxSize);
     vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory3D);
 
-    // 绑定 PBR 管线
+    // 绑定 PBR 管线：BLEND 材质走透明变体；混合管线缺失时回退不透明（观感退化，不崩）。
+    VkPipeline pbrPipeline = alphaBlend ? GN_Vk.pipelinePBRBlend : GN_Vk.pipelinePBR;
+    if(!pbrPipeline) pbrPipeline = GN_Vk.pipelinePBR;
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame],
-                      VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelinePBR);
+                      VK_PIPELINE_BIND_POINT_GRAPHICS, pbrPipeline);
 
     VkDeviceSize offs[] = {s_vtxOfs3D};
     vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1,

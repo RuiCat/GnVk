@@ -157,6 +157,8 @@ extern GN_API unsigned int GT_SystemInited; //标记引擎系统各部分是否�
 #include "GN_3Dasset.h" //glTF 2.0 导入（节点/网格/皮肤/动画，CPU）
 #include "GN_3DSkin.h" //蒙皮顶点/CPU 线性混合蒙皮/关节调色板
 #include "GN_3Dscene.h" //场景装配：节点世界矩阵/动画采样/蒙皮调色板（CPU）
+#include "GN_3Dcamera.h" //3D 摄像机：自由/轨道/跟随三模式、自动取景、视图/投影（CPU）
+#include "giParams.h" //GI CPU 基座：GI UBO/SH9/SSAO 核/BRDF LUT/G-Buffer 打包（P12-G1）
 #endif
 #include "GN_Linear.h" //线性插值与曲线插值等功能
 #include "GN_2DArea.h" //2D空间区域构造与2D碰撞检测等功能

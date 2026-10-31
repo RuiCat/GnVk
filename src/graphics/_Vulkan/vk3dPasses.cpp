@@ -12,6 +12,9 @@ bool s_inShadowPass = false;
 namespace {
 // 天空参数：GN_VkSetSky 写入，GN_VkDrawSkybox 每帧连同 viewProj 一起上传。
 VkSkyParams s_skyParams;
+// G2b：延迟 pass 最近一次 viewProj（SSAO 用它求 invViewProj 写 UBO）。
+static sMAT44 s_deferredViewProj;
+static bool s_hasDeferredViewProj = false;
 } // namespace
 
 // ═══════════════════════════════════════════════════════════
@@ -172,6 +175,10 @@ void GN_VkCompositeToSwapchain() {
 //  必须在一个活跃的 RenderPass 中调用 (在 Clear 之后, 3D 绘制之前)
 // ═══════════════════════════════════════════════════════════
 void GN_VkSetSky(const VkSkyParams &params) { s_skyParams = params; }
+// G3：环境重烘读取当前天空参数（天气/时间）。
+void GN_VkGetSky(VkSkyParams *out) {
+    if(out) *out = s_skyParams;
+}
 
 void GN_VkDrawSkybox(const sMAT44 *viewProj) {
     if(!GN_Vk.initialized || !GN_Vk.skyboxPipeline || !s_in3DPass) return;
@@ -371,6 +378,8 @@ void GN_VkBegin3DPassPBR_HDR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
 void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                               const void *lightUBO, uint32_t lightUBOSize) {
     if(!GN_Vk.initialized || s_in3DPass || !GN_Vk.gBufferPipeline) return;
+    s_deferredViewProj = *viewProj;
+    s_hasDeferredViewProj = true;
     s_vtxOfs3D = 0;
     s_idxOfs3D = 0;
     // 刷新 2D 批次
@@ -429,6 +438,36 @@ void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     s_inRenderPass = true;
 }
 
+// G2b：SSAO Pass（在 GN_VkDraw3D_GBuffer 之后、GN_VkDeferredLighting 之前调用）。
+// GI UBO 的 indirect.w<=0 时直接返回（默认关，不跑 pass，观感/开销不变）。
+void GN_VkSSAOPass() {
+    if(!GN_Vk.initialized || GN_Vk.ssaoPipeline == VK_NULL_HANDLE) return;
+    if(!isSsaoEnabled() || !s_hasDeferredViewProj) return;
+    if(s_in3DPass) {
+        vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
+        s_in3DPass = false;
+        s_inRenderPass = false;
+    }
+    updateSsaoUniforms(s_deferredViewProj);
+    recordSsaoPasses(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
+    s_inRenderPass = false;
+}
+
+// G4：SSGI Pass（在 GN_VkSSAOPass 之后、GN_VkDeferredLighting 之前调用）。
+// GI UBO 的 envParams.w<=0 时直接返回（默认关，不跑 pass，观感/开销不变）。
+void GN_VkSSGIPass() {
+    if(!GN_Vk.initialized || GN_Vk.ssgiPipeline == VK_NULL_HANDLE) return;
+    if(!isSsgiEnabled() || !s_hasDeferredViewProj) return;
+    if(s_in3DPass) {
+        vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
+        s_in3DPass = false;
+        s_inRenderPass = false;
+    }
+    updateSsgiUniforms(s_deferredViewProj);
+    recordSsgiPasses(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
+    s_inRenderPass = false;
+}
+
 // ═══════════════════════════════════════════════════════════
 //  延迟光照 Pass (读取 G-Buffer → 光照计算 → swapchain)
 // ═══════════════════════════════════════════════════════════
@@ -440,7 +479,8 @@ void GN_VkDraw3D_GBuffer(const void *vertices, uint32_t vertexCount,
                          const sMAT44 *modelMatrix,
                          float albedoR, float albedoG, float albedoB,
                          float roughness, float metallic, float ao,
-                         const sIMAGE *albedoTex, const sIMAGE *normalTex) {
+                         const sIMAGE *albedoTex, const sIMAGE *normalTex,
+                         float alphaCutoff) {
     if(!GN_Vk.initialized || !s_in3DPass || !vertices || vertexCount == 0) return;
     if(!GN_Vk.gBufferPipeline) return;
 
@@ -482,7 +522,7 @@ void GN_VkDraw3D_GBuffer(const void *vertices, uint32_t vertexCount,
     pc.pbrParams[0] = roughness;
     pc.pbrParams[1] = metallic;
     pc.pbrParams[2] = ao;
-    pc.pbrParams[3] = 0;
+    pc.pbrParams[3] = alphaCutoff; // gbuffer.frag 用 pc.specular.w 做 alpha discard（0=不裁）
     vkCmdPushConstants(GN_Vk.commandBuffers[GN_Vk.currentFrame], GN_Vk.gBufferPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VkModelPushConstPBR), &pc);
     // 顶点数据 (每 draw call 独立区域)
     uint32_t vtxSize = vertexCount * sizeof(VkVertex3D);
@@ -517,6 +557,18 @@ void GN_VkDeferredLighting(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
         s_in3DPass = false;
         s_inRenderPass = false;
+    }
+    // G2b：写 GI UBO 的 invViewProj（偏移 192）——延迟 shader 用它重建世界位置，
+    // 替代每像素 inverse(vp)。用修复后的 Mat44Inverse（纯平移矩阵也已正确）。
+    if(GN_Vk.giUBOMemory != VK_NULL_HANDLE) {
+        sMAT44 inverse;
+        Mat44Inverse(&inverse, viewProj);
+        void *giMapped = nullptr;
+        vkMapMemory(GN_Vk.device, GN_Vk.giUBOMemory, 0, sizeof(GN3d::sGI_UBO), 0, &giMapped);
+        if(giMapped) {
+            memcpy((char *)giMapped + 192, inverse.m, sizeof(float) * 16);
+            vkUnmapMemory(GN_Vk.device, GN_Vk.giUBOMemory);
+        }
     }
     // 上传 SceneUBO + LightUBO
     {

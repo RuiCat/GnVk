@@ -1,7 +1,9 @@
 # 3D 能力扩展规划：空间划分 / 物理 / 粒子 / 动画 / 骨骼 / 布料 / 通用管线 / 天空天气 / 全局光照
 
-> **2026-10-30 最新**：待办与已知缺口统一登记在 **§0 未解决项**；当前证据 `make unit` 292/0、
-> `make gpuCheck` 99/99（**llvmpipe CPU Vulkan**，真机 RADV 待复跑）。
+> **2026-10-31 最新**：待办与已知缺口统一登记在 **§0 未解决项**；当前证据 `make unit` = **371/0**。
+> 本机无 GPU（`/dev/dri` 不存在、无 lavapipe）：`make gpuCheck` 只能编译、运行 SKIP，所有 Vulkan 运行时视觉待桌面验收。
+> 2026-10-30/31 接管（代码级/CPU 级完成）：cCAMERA C0–C5、GI G0–G5 + G0b、mmdViewer 拆分与 PBR/GI、
+> 材质 alpha + BLEND、窗口 resize 接线与全部固定视口管线重建、task-8 resize 链。详见 §0 #10–#12 与 §3.1。
 
 > 状态：P0 契约冻结 + P1a（管线/着色器缓存库）+ P1b（**11 条既有管线全部接入缓存，GPU 31/31**）+ P4（空间划分）+
 > P5 v1（球/盒刚体物理）+ P5b 全部六项（胶囊、warm starting、CCD v1、DebugDraw、关节/约束、静态三角网）已落地；
@@ -17,7 +19,7 @@
 > **2026-10-29 追加：天空 / 云 / 天气与全局光照（GI）纳入本规划**（P11 / P12，路线图见 §3.6 / §3.7）；
 > 其中 S1 天气状态机、S2a 解析式天空 + FBM 云、**S3 雾（独立 Fog UBO，前向 3 / PBR 6 / 延迟 8）**
 > 已落地；**S2b 三层云盘、S4 粒子池扩展、S5 降水管线、S6 查看器全天气集成也已落地**
-> （`gpuCheck` 新增 cloud.* 4 条 + precipitation.* 6 条）；GI 仅完成规划，G0–G5 未开始。
+> （`gpuCheck` 新增 cloud.* 4 条 + precipitation.* 6 条）；GI 规划见 §3.7（2026-10-30/31 已全部代码级落地，见 §0 #10）。
 > 详细证据、代码锚点与复算命令见子计划 `docs/SKY_WEATHER_PLAN.md`、`docs/GI_PLAN.md`。
 > 基线：C++11、Vulkan 1.4、Makefile 单一构建入口；现有 3D 为静态网格 + Blinn-Phong/PBR + 阴影/延迟/天空盒。
 > 约束：不破坏现有 `GN_VkDraw3D`/`GN_VkDrawPBR`/`cMODEL` API；新文件 camelCase，单功能 <500 有效行、多功能 <1000 有效行。
@@ -42,21 +44,25 @@
 
 ## 0. 未解决项（2026-10-30 接管时登记）
 
-> 当前证据：`make unit` = **292 cases / 0 failed**；`make gpuCheck` = **99/99 PASS**，但只在 **llvmpipe（CPU Vulkan）**
-> 上跑过，**真实 GPU（RADV）尚未复跑**。下列条目按「影响 → 现状 → 下一步/验收」登记，完成一条划掉一条。
+> 当前证据：`make unit` = **371 cases / 0 failed**（292 基线 + cCAMERA 22 + GI/探针/alpha 等新增 57）；
+> `make gpuCheck` = **99/99 PASS** 是此前 llvmpipe（CPU Vulkan）结果；**本机（2026-10-30 接管会话）无 `/dev/dri`、
+> 未装 lavapipe，gpuCheck 无法运行**，GPU 视觉与 RADV 复验一律待桌面机。下列条目按「影响 → 现状 → 下一步/验收」登记，
+> 完成一条划掉一条。
 
 | # | 问题 | 现状与根因 | 下一步 / 验收 |
 |---|---|---|---|
 | 1 | **S2b 中景 billboard 云层不可用** | `drawClouds` 之前因拿到单位矩阵从未真正显示（等于未验证）；矩阵修对后暴露为大片 256 m 方形贴片、接缝明显、「糊一片」。查看器已**默认关闭**，C 键开关；天空盒 S2a 云仍正常 | 重做贴片尺度/接缝/透明度（或环形分布 + 距离淡出）后再默认开；验收：真机目视 + `cloud.*` 4 条仍 PASS |
-| 2 | **降水柱硬边（"一条雪带"）** | 降水固定 24 m 柱（`PRECIP_COLUMN_HEIGHT`），上下是硬边界；相机远看会像一条悬空雪带 | 提高柱高并同步放大回收盒 y 半范围（代价：粒子数与上传量）；验收：真机目视上下过渡连续 |
+| 2 | ✅ **降水柱硬边（"一条雪带"）**（2026-10-30 代码级） | 柱高 24→64 m（`PRECIP_COLUMN_HEIGHT`，发射面/柱心/柱半高/回收盒/叠层快照全链由它推导，`mmdViewerWeather.cpp:37`）；雨/雪寿命收紧为「单趟落地 + 余量」（雨 2.3–2.6 s、雪 17.5–18.0 s），粒子落地 wrap 回柱顶后才寿终（寿终离地约 49–63 m / 60–62 m，预期在雾/视距外）。容量 16384/24576 未动 ⇒ 64 m 柱密度约 2.67× 稀释 | 真机目视上下过渡连续、地面密度可接受；若仍见寿终边界或过稀，再调容量/发射率（入口 `mmdViewerWeather.cpp`） |
 | 3 | **粒子分层 / 空白间隔（待真机确认）** | 已修两处：满池时积压不再钳到 1（否则锯齿抽干）；新增 `aSpreadSpawnPhase` 把同帧批次沿速度打散。单测 `particleFullPoolStaysSteady`（min=max=容量）锁定 | 真机目视确认无横条；若仍有，按 #2 处理柱硬边 |
-| 4 | **降水外观调参（待真机确认）** | 雨线 `0.05–0.09 m` + `RAIN_STREAK=20`（长度 1–1.8 m）；密度池 `16384/24576`、rate `60000/30000`；V 键包围盒雨雪都画 | 真机目视；调参入口 = `mmdViewer.cpp` 的 `RAIN_SIZE_*` / `RAIN_STREAK` / `RAIN_CAPACITY` / `SNOW_CAPACITY` |
+| 4 | **降水外观调参（待真机确认）** | 雨线 `0.05–0.09 m` + `RAIN_STREAK=20`（长度 1–1.8 m）；密度池 `16384/24576`、rate `60000/30000`；V 键包围盒雨雪都画；柱高已改 64 m（§0 #2） | 真机目视；调参入口 = `mmdViewerWeather.cpp` 的 `RAIN_SIZE_*` / `RAIN_STREAK` / `RAIN_CAPACITY` / `SNOW_CAPACITY` / `aLife*` |
 | 5 | **贴花可见性（待真机确认）** | `drawDecals(&viewProjection)` 传指针被 `sMAT44(bool)` 吃成单位矩阵，已修；`decal.pixels` 在 gpuCheck 通过 | 真机目视雨天地面水渍/溅射环；若仍不可见，查 `gatherDecalRenderItems` 返回值与地面 y 偏移（+0.02） |
-| 6 | **真实 GPU 验收缺口** | `make gpuCheck` 96→99/99 只在 llvmpipe 通过；绕序/正面/降水朝向的修正**未经 RADV 复验** | 桌面执行 `VK_ICD_FILENAMES= make gpuCheck`（不设 ICD，走真机驱动）并贴回结果 |
+| 6 | **真实 GPU 验收缺口** | 本机无 `/dev/dri`、无 lavapipe ⇒ `make gpuCheck` 只能编译、运行 SKIP；99/99 是此前 llvmpipe 结果。窗口 resize 已接线并重建全部固定视口管线（task-22/26），仍待桌面拖拽验收 | 桌面执行 `VK_ICD_FILENAMES= make gpuCheck` 并贴回结果；拖拽窗口 + 验证层 |
 | 7 | **MMD 正反/左右未目视验收** | 绕序/法线一致性已用探针 + 单测锁定（`mode.pmd` agree=6189/disagree=40），但「正面是否朝 +Z、左右是否镜像」仍靠目视 | 真机看 `tests/うさうさ`；不通过则改 `mirrorZ` 或退方案 B（见 `AXIS_UNIFICATION_PLAN.md` §4.2） |
-| 8 | **`mmdViewer.cpp` 超行数上限** | 有效代码 1156 行 > 1000（多重功能文件，lint 违规），本次局部修改后未拆 | 拆成相机 / 降水 / 贴花 / 叠层 4 个文件（含共享头）；拆完跑 `lintCodeModularity --naming --comments` |
-| 9 | **异盘备份未完成** | 沙箱把 `/run/media/*` 全部挂成只读（底层 rw），收尾备份写不出去 | 收尾时用一次更宽权限重试 `tar --zstd` + `zstd -t` + 解包 `rsync --checksum` 校验 |
-| 10 | **T3 GI G0 / T4 cCAMERA 未开始** | `docs/GI_PLAN.md` G0–G5、`docs/CAMERA_PLAN.md` C0–C4 均未动 | 按各自阶段表推进；G0 建议先做附件改名+枚举、subpass 依赖、resize 重建 |
+| 8 | ✅ **`mmdViewer.cpp` 超行数上限**（2026-10-30 完成） | 原 1385 物理 / 1164 有效行；已拆成 `mmdViewerCamera.cpp`（182）/`mmdViewerWeather.cpp`（251）/`mmdViewerDecal.cpp`（174）/`mmdViewerOverlay.cpp`（262）/`mmdViewer.cpp`（319）+ `mmdViewerShared.h`（71），全部 <500 有效行 | 已验收：`lintCodeModularity tests/mmdViewer --naming --comments` = 0 违规 0 告警；`make mmdViewer` 编译通过；原 MULTI_TOO_LONG 消除。**运行期画面未验证**（无 GPU），桌面目视复核 |
+| 9 | **异盘备份未完成** | 2026-10-30 实测：`/run/media/ruicat/` 下两个外部盘均为 `ro` 挂载（`touch` 报「只读文件系统」），项目内也没有 `.dsh/backupProject.sh`；本会话未能产出异盘备份 | 在有写权限的桌面环境执行：`tar --zstd -cf <备份盘>/dsh-backups/<项目>-<UTC>.tar.zst`（排除 `.local/`、`build/`）→ `zstd -t` → 解包 `rsync --checksum` 与源比对 → 记 sha256 |
+| 10 | ✅ **T3 GI / T4 cCAMERA**（2026-10-31，代码级） | **cCAMERA C0–C5 ✅**（22 用例）。**GI G0a/G0b/G1a/G1b/G2a/G2b/G3/G4/G5a/G5b ✅**：G-Buffer 结构+四通道调试视图、CPU 基座、GPU 6 面烘焙→预滤波→cubemap/LUT/GI UBO、槽位 4/7/9（+8/9、10/11）、16 B/px、SSAO/双边/合成、天气切换重烘、半分辨率 SSGI、9 张 3D 探针纹理（layout 23）；**GI/SSAO/SSGI/探针默认关闭**。MMD 查看器已开前向 PBR + GI IBL。 | 运行时视觉待桌面（GI 亮度/SSAO/SSGI/探针/AO/resize） |
+| 11 | ✅ **窗口 resize 接线 + 完整重建**（2026-10-31，代码级） | `GN_Main.cpp` 的 `glfwSetFramebufferSizeCallback` → pending → 主循环 `GN_VkResize`；`GN_VkResize` 重建 swapchain/MSAA/depth/3D forward/HDR/G-Buffer/延迟/SSAO/SSGI/探针相关/composite/G-Buffer 调试 + **全部固定视口管线**（前向/PBR/天空盒/调试线框/材质/蒙皮/粒子/布料/贴花/降水/云/2D 叠层）。修复 resize 后调试 AABB 错位/反向随相机。 | 拖拽窗口 + 验证层验收 |
+| 12 | ✅ **材质 alpha + BLEND**（2026-10-31，代码级） | `sMATERIAL`/`sASSET_MATERIAL` alphaMode/cutoff；glTF `alpha_mode`；MMD 一律 MASK+0.5；前向 PBR discard；BLEND 独立管线（alpha 混合/深度写关/双面）+ `cMODEL::DrawPBRSorted`（网格级远→近）+ 查看器 PNG 半透明像素 >5% 自动 BLEND。限制：BLEND 仅前向、无逐三角形排序。 | 桌面目视（头发/裙边） |
 
 ## 1. 现状与差距
 
@@ -384,7 +390,8 @@ P11/P12（2026-10-29 新增，工期待排）依赖 P1b 的管线缓存与 P8 �
 | P9（剩余：GPU 布料/SSBO 蒙皮/批处理） | ✅ 完成（2026-10-29，真实 GPU 验收） | `GN_3DclothGPU.h/.cpp` + `_Vulkan/vkClothCompute.cpp`（A/B SSBO 乒乓 + Jacobi）+ `_Vulkan/vkClothDraw.cpp` + `gn3d_cloth.comp/vert/frag`（`cloth.*` 5 条）；`_Vulkan/vkSkinSsbo.cpp` + `gn3d_skinned_ssbo.vert/frag`（4096 关节 SSBO + 3 槽环形调色板，`skin.ssbo.*` 4 条）；`GN_3Dbatch.h/.cpp`（稳定排序 + 切换统计，`batch.*` 3 条）；`testClothGPU` 5 + `testBatch` 5 用例 |
 | P10（动态 LOD） | ✅ 完成（2026-10-29，CPU 单测 + GPU 验收） | `GN_3Dlod.h/.cpp`：误差公式 + 带滞后选级（纯 CPU）；`sMESH_LOD` + `sMESH::aLods/aLodCount`、`DrawPBRLevel`、`cMODEL::DrawPBRWithLod`；`testLod` 6 用例；`gpuCheck` 4 条（`lod.select/indexCount/singleLevel/pixels`） |
 | P11（天空 / 天气） | ✅ 完成（2026-10-29；视觉 1..6 由用户验收） | S1 天气状态机 `weather.h/.cpp`（8 用例）+ S2a 解析式天空/FBM 云 + S3 雾（`_Vulkan/vkAtmosphere.cpp`、`GN_VkSetFog`、前向 3 / PBR 6 / 延迟 8）+ **S2b 三层云盘**（`_Vulkan/vkCloud.cpp`、`gn3d_cloud.vert/frag`，`gpuCheck` 4 条）+ **S4 粒子池扩展**（BOX / 回收盒 / 尺寸范围 / 风，`testParticle` 12 用例）+ **S5 降水管线**（`_Vulkan/vkPrecipitation.cpp`、`precipitation.vert/frag`，`gpuCheck` 4 条）+ **S6 查看器集成**（雾/云/雨雪接线、远平面容云层）；HDR 变体留 P12，路线图 §3.6 |
-| P12（全局光照） | ⏳ 仅规划（2026-10-29） | `docs/GI_PLAN.md`：IBL split-sum、SSAO、SSGI、探针与 G-Buffer 12 项缺失；G0–G5 均未开始，路线图 §3.7 |
+| P12（全局光照） | ✅ 代码级完成（2026-10-31） | `docs/GI_PLAN.md`：G0a/G0b/G1a/G1b/G2a/G2b/G3/G4/G5a/G5b 全部落地；GI/SSAO/SSGI/探针**默认关闭**；MMD 查看器前向 PBR + GI IBL；运行时视觉待桌面 |
+| T4 cCAMERA（`docs/CAMERA_PLAN.md`） | ✅ C0–C5 代码级完成（2026-10-30） | `GN_3Dcamera.h` + 6 个 .cpp（Move/Orbit/Follow/Fit/Control）；`testCamera` 22 用例全 PASS；查看器已接线（唯一 `cCAMERA`、F 轨道/滚轮/中键）；运行期手感待桌面 |
 
 P4 的"剔除结果与暴力测试一致"验收已通过：BVH 512 盒 40 次 AABB 查询与暴力集合逐元素相等；射线 20 条与暴力最小 t 对照；
 视锥 300 点/300 盒分别与"投影后 NDC 判定"和"8 角点全在外侧"暴力判据对照；动态树 350 步随机 Insert/Update/Remove
@@ -687,6 +694,9 @@ G-Buffer 仅够延迟光照，GI 所需通道/同步/生命周期共 **12 项缺
 | G4 | SSGI：半分辨率 ray march + 单帧双边（velocity 可选） | `gn3d_ssgi.frag`、`gn3d_ssgi_denoise.frag` | 桌面颜色渗色；帧时间在预算内 |
 | G5 | 探针：SH9 网格（DDGI 可选，需先补 compute dispatch） | 按 G5 开始时冻结（`GN_3Dprobe.*` 或 `vkProbe.cpp`） | 桌面屏幕外遮挡有间接光 |
 
+> **2026-10-31 状态**：G0–G5 全部代码级完成（G0a/G0b/G1a/G1b/G2a/G2b/G3/G4/G5a/G5b，见 §0 #10 与 GI_PLAN §9）；
+> GI/SSAO/SSGI/探针默认关闭，运行时视觉待桌面。
+
 **G-Buffer 12 项缺失**（G0/G2 的验收清单）：附件命名错位、无显式 subpass 依赖、resize 不重建、无 alpha cutout、无调试视图、
 法线空间未约定、无 AO 目标、无 velocity、无 F0 通道、RGBA16F 浪费带宽、MSAA 不一致、每 draw 更新描述符；
 逐项证据与补齐动作见 `docs/GI_PLAN.md` §5.1。
@@ -696,11 +706,11 @@ SSAO 是否只做延迟路径、SSGI 起步档、探针 SH9 vs DDGI。
 
 **槽位表（P11/P12 共同冻结）**：
 
-| 管线 | 现有 | Weather（P11-S3） | GI（P12-G1） |
+| 管线 | 现有 | Weather（P11-S3） | GI（P12-G1，G1b 已接线） |
 |---|---|---|---|
-| 前向 `gn3d` | 0,1,2 | 3 | 4 |
-| PBR | 0..5 | 6 | 7 |
-| 延迟 | 0..7 | 8 | 9 |
+| 前向 `gn3d` | 0,1,2 | 3 | 4 = GI UBO（layout 4→5；shader 暂未用，预留） |
+| PBR | 0..5 | 6 | 7 = GI UBO、8 = 预滤波 cubemap、9 = BRDF LUT（layout 7→10） |
+| 延迟 | 0..7 | 8 | 9 = GI UBO、10 = 预滤波 cubemap、11 = BRDF LUT（layout 9→12） |
 | SSAO | — | — | 独立 set |
 
 ## 4. 关键决策（需拍板）
@@ -716,9 +726,10 @@ SSAO 是否只做延迟路径、SSGI 起步档、探针 SH9 vs DDGI。
    降档阈值 `0.8×` 做滞后；级别同拓扑烘焙（避免裂缝处理进 v1）。
 8. **天空 / 天气**（2026-10-28 已确认）：云混合（远景 FBM + 中景 billboard）、雾独立 Weather UBO、
    雨雪 v1 CPU billboard、HDR 首版、动态 IBL 放 v2。
-9. **全局光照**（2026-10-29 规划，待拍板）：v1 = split-sum IBL + SSAO（仅延迟路径）；v2 = SSGI 半分辨率 + 单帧双边；
-   v3 = 探针先 SH9（DDGI 需先补 compute dispatch）。**环境贴图来源**三选一（推荐 A：启动时 CPU 预滤波；
-   B：GPU 6 面烘焙放 G3）；**G-Buffer AA** 推荐 1× + 后处理 FXAA/SMAA；G-Buffer 必须先补齐（G0）再叠 GI。
+9. **全局光照**（2026-10-29 规划；**2026-10-30 拍板：环境贴图来源 = B（GPU 6 面烘焙解析天空）**）：
+   v1 = split-sum IBL + SSAO（仅延迟路径），IBL 源 = GPU 6 面烘焙 → 回读 → `giParams::prefilterCubemap` CPU 预滤波 → 上传 mip 链，
+   G3 只补「天气切换重烘 + GPU 端预滤波」；v2 = SSGI 半分辨率 + 单帧双边；
+   v3 = 探针先 SH9（DDGI 需先补 compute dispatch）。**G-Buffer AA** 推荐 1× + 后处理 FXAA/SMAA；G-Buffer 必须先补齐（G0）再叠 GI。
 
 ## 5. 风险
 
@@ -735,9 +746,9 @@ SSAO 是否只做延迟路径、SSGI 起步档、探针 SH9 vs DDGI。
 - 天气与 GI 抢描述符槽位：Weather 3/6/8、GI 4/7/9（§3.7 表）；两份子计划必须引用同一张表，改一处同步另一处。
 - 天空盒管线只绑 `renderPass3D`，HDR 路径要单独建管线；否则 HDR 下天空缺失。
 - 降水 v1 是 CPU 展开（≈1.9 MB/帧 @8000 雨滴）；2 万+ 需要 `sVERTEX_ATTR` 的 input rate 或 GPU 粒子。
-- G-Buffer 全仓无 `VkSubpassDependency`、`GN_VkResize` 只重建 swapchain/2D：不先修，SSAO/SSGI 的读可见性与改窗口后的画面都不可靠。
-- G-Buffer 附件命名与内容错位（`gAlbedoImage` 装 normalRough 等）：加 GI 附件前先改名 + 建立附件枚举。
-- SSAO 现有 shader 法线空间错误（世界法线 vs 视空间位置），照原样接线会得到「方向错误」的遮蔽。
+- ✅ 已解决（G0a/task-8/task-26）：G-Buffer 显式 subpass 依赖、resize 完整重建、固定视口管线重建。
+- ✅ 已解决（G0a）：G-Buffer 附件改名 + 枚举（`eGBUFFER_ATTACHMENT`）。
+- ✅ 已解决（G2b）：SSAO 重写为世界空间 + 4×4 双边。
 - HDR 双 Reinhard（`gn3d_pbr.frag` 与 `gn3d_composite.frag` 各一次）：GI 必须在线性空间注入，SSGI 前要统一到合成阶段。
 - GI/天气的 GPU 视觉在沙箱内无法验证（无 `/dev/dri`）：只能编译 + CPU 单测，以桌面截图与帧时间为准。
 

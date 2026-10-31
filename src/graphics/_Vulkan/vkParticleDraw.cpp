@@ -91,47 +91,8 @@ bool createDrawPipeline() {
         return false;
     }
 
-    std::vector<uint32_t> vertSpv = LoadSPIRVFile("assets/shaders/gn3d_particle.vert.spv");
-    std::vector<uint32_t> fragSpv = LoadSPIRVFile("assets/shaders/gn3d_particle.frag.spv");
-    if(vertSpv.empty() || fragSpv.empty()) {
-        fprintf(stderr, "[GN_Vk] 粒子着色器加载失败: gn3d_particle.vert/frag.spv\n");
-        return false;
-    }
-
-    // 顶点 pulling：没有顶点属性，也没有顶点缓冲绑定。
-    GN3d::sPIPELINE_DESC desc;
-    desc.aKind = GN3d::ePIPE_GRAPHICS;
-    desc.aVertSpv = vertSpv.data();
-    desc.aVertSize = vertSpv.size() * sizeof(uint32_t);
-    desc.aFragSpv = fragSpv.data();
-    desc.aFragSize = fragSpv.size() * sizeof(uint32_t);
-    desc.aVertexLayout.Clear();
-    desc.aVertexLayout.aStride = 0;
-    desc.aRenderPass = GN_Vk.renderPass3D;
-    desc.aSubpass = 0;
-    desc.aLayout = s_particleDrawPipelineLayout;
-    desc.aDepthTest = true; // 与场景几何做深度测试
-    desc.aDepthWrite = false; // 半透明粒子不写深度
-    desc.aDepthCompare = VK_COMPARE_OP_LESS;
-    desc.aDepthStencil = true;
-    desc.aCullBack = false; // billboard 双面；
-    desc.aFrontFace = VK_FRONT_FACE_CLOCKWISE; // 世界 CCW + Y 翻转
-    desc.aBlend = GN3d::eBLEND_ALPHA;
-    desc.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    desc.aSamples = GN_Vk.msaaSamples;
-    desc.aColorAttachmentCount = 1;
-    desc.aDynamicViewport = false;
-    desc.aDynamicScissor = false;
-    desc.aViewport = VkViewport{0.0f, 0.0f, (float)GN_Vk.swapchainExtent.width,
-                                (float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
-    desc.aScissor = VkRect2D{{0, 0}, GN_Vk.swapchainExtent};
-    desc.aCustomBlend = false;
-    s_particleDrawPipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
-    if(!s_particleDrawPipeline) {
-        fprintf(stderr, "[GN_Vk] 粒子绘制管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
-        return false;
-    }
-    return true;
+    // 固定视口管线走可重入 helper（init 与 resize 共用同一份描述）。
+    return recreateParticleDrawPipeline();
 }
 
 void destroyDrawPipeline() {
@@ -221,6 +182,51 @@ bool GN_VkParticleDraw(const GN3d::sPARTICLE_DRAW_PARAMS &params) {
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, s_particleDrawPipelineLayout, 0, 1,
                             &s_drawSet, 0, 0);
     vkCmdDraw(cb, 6, count, 0, 0);
+    return true;
+}
+
+// task-26：按当前 swapchainExtent 重建粒子 billboard 固定视口管线（init 与 resize 共用）。
+bool recreateParticleDrawPipeline() {
+    if(s_particleDrawPipelineLayout == VK_NULL_HANDLE ||
+       GN_Vk.renderPass3D == VK_NULL_HANDLE) {
+        return false;
+    }
+    auto vertSpv = LoadSPIRVFile("assets/shaders/gn3d_particle.vert.spv");
+    auto fragSpv = LoadSPIRVFile("assets/shaders/gn3d_particle.frag.spv");
+    if(vertSpv.empty() || fragSpv.empty()) return false;
+    GN3d::sPIPELINE_DESC desc;
+    desc.aKind = GN3d::ePIPE_GRAPHICS;
+    desc.aVertSpv = vertSpv.data();
+    desc.aVertSize = vertSpv.size() * sizeof(uint32_t);
+    desc.aFragSpv = fragSpv.data();
+    desc.aFragSize = fragSpv.size() * sizeof(uint32_t);
+    desc.aVertexLayout.Clear();
+    desc.aVertexLayout.aStride = 0;
+    desc.aRenderPass = GN_Vk.renderPass3D;
+    desc.aSubpass = 0;
+    desc.aLayout = s_particleDrawPipelineLayout;
+    desc.aDepthTest = true;
+    desc.aDepthWrite = false;
+    desc.aDepthCompare = VK_COMPARE_OP_LESS;
+    desc.aDepthStencil = true;
+    desc.aCullBack = false;
+    desc.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+    desc.aBlend = GN3d::eBLEND_ALPHA;
+    desc.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    desc.aSamples = GN_Vk.msaaSamples;
+    desc.aColorAttachmentCount = 1;
+    desc.aDynamicViewport = false;
+    desc.aDynamicScissor = false;
+    desc.aViewport = VkViewport{0.0f, 0.0f, (float)GN_Vk.swapchainExtent.width,
+                                (float)GN_Vk.swapchainExtent.height, 0.0f, 1.0f};
+    desc.aScissor = VkRect2D{{0, 0}, GN_Vk.swapchainExtent};
+    desc.aCustomBlend = false;
+    VkPipeline pipeline = GN_Vk.aPipelineCache.GetOrCreate(desc);
+    if(pipeline == VK_NULL_HANDLE) {
+        fprintf(stderr, "[GN_Vk] 粒子绘制管线重建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
+        return false;
+    }
+    s_particleDrawPipeline = pipeline;
     return true;
 }
 

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
+#include <algorithm>
 #include <vector>
 #include <string>
 
@@ -128,9 +129,11 @@ void sMESH::Draw(const sMAT44 *modelMatrix) const {
 
 void sMESH::DrawPBR(const sMAT44 *modelMatrix) const { DrawPBRLevel(modelMatrix, 0); }
 
-void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level) const {
+void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level, bool forceBlend) const {
 #ifdef GN_USING_3D
     float dr = 0.8f, dg = 0.8f, db = 0.8f, rough = 0.5f, metal = 0.0f, ao = 1.0f;
+    float alphaCutoff = 0.0f; // 0 = 不裁
+    bool blend = forceBlend; // 排序绘制的第二趟可强制走混合管线
     const GNg::sIMAGE *albTex = aAlbedoTex;
     const GNg::sIMAGE *nrmTex = aNormalTex;
     if(aMaterial) {
@@ -139,6 +142,9 @@ void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level) const {
         db = aMaterial->aDiffuse.z;
         rough = aMaterial->aRoughness;
         metal = aMaterial->aMetallic;
+        // 只有 MASK 做 alpha test；BLEND 交给混合管线（cutoff 传 0），OPAQUE 不裁。
+        if(aMaterial->aAlphaMode == eALPHA_MASK) alphaCutoff = aMaterial->aAlphaCutoff;
+        if(aMaterial->aAlphaMode == eALPHA_BLEND) blend = true;
         if(!albTex) albTex = aMaterial->aAlbedoTex;
         if(!nrmTex) nrmTex = aMaterial->aNormalTex;
     } else {
@@ -165,17 +171,49 @@ void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level) const {
                         modelMatrix,
                         dr, dg, db,
                         rough, metal, ao,
-                        albTex, nrmTex);
+                        albTex, nrmTex,
+                        alphaCutoff, blend);
 #else
     (void)modelMatrix;
     (void)level;
+    (void)forceBlend;
 #endif
 }
+
+namespace {
+
+// 网格是否走透明混合：只看材质 alpha 模式（无材质 = 不透明）。
+bool isBlendMesh(const sMESH &mesh) {
+    return mesh.aMaterial != 0 && mesh.aMaterial->aAlphaMode == eALPHA_BLEND;
+}
+
+// 网格世界 AABB 中心：顶点（11 floats/顶点，位置在前 3 个）求局部 AABB，中心经模型矩阵变换。
+// 仿射变换下盒体中心 = 局部中心变换结果，无需变换 8 个角。无顶点返回 false。
+bool meshWorldCenter(const sMESH &mesh, const sMAT44 &transform, sVEC3 &out) {
+    if(mesh.aVertices == 0 || mesh.aVertexCount == 0) return false;
+    float minX = mesh.aVertices[0], maxX = mesh.aVertices[0];
+    float minY = mesh.aVertices[1], maxY = mesh.aVertices[1];
+    float minZ = mesh.aVertices[2], maxZ = mesh.aVertices[2];
+    for(uint32_t i = 1; i < mesh.aVertexCount; ++i) {
+        const float *v = mesh.aVertices + (size_t)i * 11u;
+        if(v[0] < minX) minX = v[0];
+        if(v[0] > maxX) maxX = v[0];
+        if(v[1] < minY) minY = v[1];
+        if(v[1] > maxY) maxY = v[1];
+        if(v[2] < minZ) minZ = v[2];
+        if(v[2] > maxZ) maxZ = v[2];
+    }
+    const sVEC3 localCenter = {(minX + maxX) * 0.5f, (minY + maxY) * 0.5f, (minZ + maxZ) * 0.5f};
+    Mat44TransformCoord(&out, &localCenter, &transform);
+    return true;
+}
+
+} // namespace
 
 // ═══════════════════════════════════════════════════════════
 //  cMODEL 实现
 // ═══════════════════════════════════════════════════════════
-cMODEL::cMODEL() : aMeshes(0), aMeshCount(0), aVisible(true) {
+cMODEL::cMODEL() : aMeshes(0), aMeshCount(0), aMaterials(0), aMaterialCount(0), aVisible(true) {
     aName[0] = 0;
     Mat44Identity(&aTransform);
     aPosition.x = aPosition.y = aPosition.z = 0.0f;
@@ -195,6 +233,12 @@ void cMODEL::Release() {
         aMeshes = 0;
     }
     aMeshCount = 0;
+    // 材质池必须在网格之后释放：网格的 aMaterial 只是指向池内的裸指针。
+    if(aMaterials) {
+        delete[] aMaterials;
+        aMaterials = 0;
+    }
+    aMaterialCount = 0;
 }
 
 void cMODEL::ReleaseGPU() {
@@ -227,6 +271,43 @@ void cMODEL::DrawPBRWithLod(const uint32_t *levels, uint32_t levelCount) const {
     for(uint32_t i = 0; i < aMeshCount; ++i) {
         const uint32_t level = (levels && i < levelCount) ? levels[i] : 0u;
         aMeshes[i].DrawPBRLevel(&aTransform, level);
+    }
+}
+
+void cMODEL::DrawPBRSorted(const GNg::sVEC3 &cameraPos) const {
+    if(!aVisible || !aMeshes) return;
+    // 第一趟：OPAQUE / MASK 保持原顺序（不排序不影响遮挡正确性）。
+    for(uint32_t i = 0; i < aMeshCount; ++i) {
+        if(!isBlendMesh(aMeshes[i])) aMeshes[i].DrawPBRLevel(&aTransform, 0);
+    }
+    // 第二趟：BLEND 按网格世界 AABB 中心到相机的距离由远到近（仅网格级排序；
+    // 网格内部不做逐三角形排序，交织几何仍可能出现混合顺序误差）。
+    struct sBlendEntry {
+        uint32_t aIndex;
+        float aDistanceSqr;
+    };
+    std::vector<sBlendEntry> entries;
+    entries.reserve(aMeshCount);
+    for(uint32_t i = 0; i < aMeshCount; ++i) {
+        if(!isBlendMesh(aMeshes[i])) continue;
+        sBlendEntry entry;
+        entry.aIndex = i;
+        entry.aDistanceSqr = 0.0f;
+        sVEC3 center;
+        if(meshWorldCenter(aMeshes[i], aTransform, center)) {
+            const float dx = center.x - cameraPos.x;
+            const float dy = center.y - cameraPos.y;
+            const float dz = center.z - cameraPos.z;
+            entry.aDistanceSqr = dx * dx + dy * dy + dz * dz;
+        }
+        entries.push_back(entry);
+    }
+    std::stable_sort(entries.begin(), entries.end(),
+                     [](const sBlendEntry &a, const sBlendEntry &b) {
+                         return a.aDistanceSqr > b.aDistanceSqr; // 远 → 近
+                     });
+    for(size_t i = 0; i < entries.size(); ++i) {
+        aMeshes[entries[i].aIndex].DrawPBRLevel(&aTransform, 0, true);
     }
 }
 

@@ -150,6 +150,32 @@ GN_VkDeferredLighting(...) // 读 AO 纹理
 - 采样核：CPU 生成 16 点半球（Halton + 随机切向），半径按场景尺度（默认 0.5 m）。
 - 关闭时 `ao = materialAO`，画面与现在一致（可回退）。
 
+#### 4.2.1 G2b 实施细化（2026-10-30 重新规划；每步是独立验收门）
+
+**冻结契约**
+
+| 项 | 值 |
+|---|---|
+| `sSSAO_UBO`（giParams，CPU 单测） | 400 B：`viewProj` mat4 @0、`invViewProj` mat4 @64、`samples[16]` vec4 @128（256 B）、`params` vec4 @384（x=radius, y=bias, z=power, w=启用位） |
+| AO 目标 | 全分辨率 `R8_UNORM`，两张：`rawAO` / `blurAO`；usage COLOR_ATTACHMENT\|SAMPLED |
+| SSAO 描述符 set | 0 = SSAO UBO、1 = G-Buffer normal（RGBA16F）、2 = G-Buffer depth |
+| 模糊描述符 set | 0 = SSAO UBO、1 = rawAO、2 = depth、3 = normal（双边拒绝用） |
+| 延迟 layout | 12 → 13：binding 12 = blurAO（`sampler2D`）；GI UBO `indirect.w` = SSAO 开关（0=关） |
+| invViewProj | GI UBO 偏移 192；`GN_VkSSAOPass` 从 `GN_VkBegin3DPassDeferred` 记录的 viewProj 求逆后写入 |
+| Pass 顺序 | `Begin3DPassDeferred → Draw3D_GBuffer×N → GN_VkSSAOPass()（先 end pass → SSAO → blur → SHADER_READ）→ DeferredLighting` |
+| 默认 | `indirect.w=0`：延迟 shader 用 `materialAO`，不采样 AO 图；`GN_VkSSAOPass` 也直接返回（不跑 pass），现有观感与开销不变 |
+
+**分步（每步跑 make + make unit + glslangValidator/lint，失败只回退该步）**
+
+1. **G2b-1 CPU 契约**：`giParams` 新增 `sSSAO_UBO`（偏移 static_assert）、`makeDefaultSsaoUbo`、`packSsaoUbo`；**修复 `GNg::Mat44Inverse`**（旧实现对纯平移矩阵返回错误，`testSkeleton.cpp:46` 与 `vkCloud.cpp:11` 已登记）为正确列主序 4×4 逆，`testMath3D` 加平移逆/TRS/透视 roundtrip/奇异用例；`testGi` 加 UBO 用例（大小/偏移、默认值/打包/非法输入）。验收：`make unit` 335→≥341（实测 **345**）。
+2. **G2b-2 着色器**：重写 `gn3d_ssao.frag` 为世界空间（invViewProj 重建位置、世界法线、16 点核、range check、power）；新增 `gn3d_ssao_blur.frag`（4×4 双边，深度/法线拒绝）。验收：glslangValidator + `.spv`。
+3. **G2b-3 `vkSsao.cpp` 资源**：两张 R8 目标/视图/采样器、两张 render pass（final=SHADER_READ_ONLY，显式 EXTERNAL↔subpass 依赖）、两条全屏管线（复用 `gn3d_deferred_light.vert`）、两套描述符、400 B host-visible UBO；`init3DSsao/destroy3DSsao/recreate3DSsaoTargets`。验收：`make` + lint。
+4. **G2b-4 Pass 接线**：`GN_VkSSAOPass()`（先 end 3D pass，再 SSAO→blur；`indirect.w<=0` 直接返回）；`GN_VkBegin3DPassDeferred` 记录 viewProj；每帧写 GI UBO 偏移 192。验收：`make` + `gpuCheck` 编译。
+5. **G2b-5 延迟合成**：`gn3d_deferred_light.frag` layout 12→13、binding 12 = blurAO、`ao = materialAO * mix(1, aoTex, indirect.w)`、`wpFromDepth` 改用 `gi.invViewProj`；重生成 `.spv`。验收：shader 编译 + `make unit` 不回归。
+6. **G2b-6 resize/shutdown**：`GN_VkResize` 在 G-Buffer 重建后重建 SSAO 目标/framebuffer/管线并重写 normal/depth 描述符；shutdown 释放；`make gpuCheck` 编译。验收：`make`/lint。
+
+**桌面验收（非本机）**：开 `GN_VkSetGI`（indirect.w=1）后角落变暗、无带状噪点、关掉回到现状；同步验证层 resize 无告警。
+
 ### 4.3 GI 参数 UBO 与描述符槽位
 
 ```cpp
@@ -165,17 +191,19 @@ struct sGI_UBO {
 
 槽位分配（**与天气计划共同冻结**，两份文档写同一张表）：
 
-| 管线 | 现有占用 | Weather UBO（天气计划） | GI UBO（本计划） |
+| 管线 | 现有占用 | Weather UBO（天气计划） | GI（本计划，G1b 已按此接线） |
 |---|---|---|---|
-| 前向 `gn3d` | 0=Scene, 1=tex, 2=Light | 3 | 4 |
-| PBR | 0..5（5=skybox） | 6 | 7 |
-| 延迟 | 0..7（7=Light） | 8 | 9 |
+| 前向 `gn3d` | 0=Scene, 1=tex, 2=Light | 3 | 4 = GI UBO（layout 4→5；`gn3d.frag` 暂未使用，槽位预留） |
+| PBR | 0..5（5=skybox） | 6 | 7 = GI UBO、8 = 预滤波环境 cubemap、9 = BRDF LUT（layout 7→10） |
+| 延迟 | 0..7（7=Light） | 8 | 9 = GI UBO、10 = 预滤波 cubemap、11 = BRDF LUT（layout 9→12） |
 | SSAO | — | — | 独立 set |
 
 - 新增 `GN_VkSetGI(const sGI_UBO&)`、`GN_VkSSAOPass()`（声明进 `GN_Vk.h`）。
-- 三个描述符 layout（前向、PBR、延迟）各加一个 `UNIFORM_BUFFER`（fragment 阶段），写入同一块 256 B 缓冲；
-  延迟 layout 从 8 个 binding 扩到 10 个，需确认 `descriptorPool` 配额（池 `maxSets=1024`，只创建一次且无 `FREE`/`RESET`，见 §5.3）。
-- 默认值：SSAO 关、倍率 1、SH9 由当前环境生成 → 现有观感不变。
+- 三个描述符 layout（前向、PBR、延迟）各加 GI UBO（fragment 阶段），写入同一块 256 B 缓冲；
+  PBR/延迟另加预滤波 cubemap 与 BRDF LUT 两个采样器槽位（G1b 实际接线，见 `vkGi.cpp`）。
+  池 `maxSets=1024`、UBO/采样器各 1024，配额充足（`GN_Vk.cpp:361`）。
+- 默认值：SSAO 关、GI 倍率 **0**（`disableGiByDefault`）⇒ 着色器走旧 Skybox IBL 分支，现有观感不变；
+  调用方用 `GN_VkSetGI` 把 indirect.x/y 调到 >0 才启用 split-sum + SH9。
 
 ## 5. G-Buffer 实现缺失与补齐（GI 前置）
 
@@ -215,6 +243,12 @@ struct sGI_UBO {
 
 结果：24 → 16 B/px（1080p 约 50 → 33 MB），且 AO/材质有了正式通道。**激进方案**（normal 换 octahedral `RG16F`）可到 12 B/px，
 但法线在光滑金属上可能出现可见量化，作为 G2 之后的优化项，不在首轮。
+
+> **G2a 已落地（2026-10-30，编译级）**：`vkGbuffer.cpp` 颜色格式表 = `{RGBA16F, RGBA8_SRGB, RGBA8_UNORM}`（深度 D32 不变），
+> 颜色 24→16 B/px；`gn3d_gbuffer.frag` 附件 1 写线性 albedo（硬件 sRGB 编码）+ metallic，附件 2 写
+> `(AO, reflectance=0.04 占位, materialId=0 占位, alpha)`，alpha cutoff 预留 `pc.specular.w`（C++ 恒 0）；
+> `gn3d_deferred_light.frag` 仅注释更新（SRGB 采样自动 linear）；`gpuCheck 3d.deferred.gbuffer` 改 RGBA8 + `srgbDecode`。
+> 未验证：格式兼容/验证层、8-bit 精度、带宽、运行时断言。
 
 **MSAA 取舍**：
 
@@ -301,6 +335,10 @@ G-buffer → SSAO → SSGI(半分辨率) → 双边去噪 → 延迟光照
 - 绑定：延迟 set 再增加 SSGI 颜色 + 采样器（binding 10），与 GI UBO 一起扩容 layout / pool。
 - HDR：GI 缓冲必须是线性空间、色调映射之前；存量「双 Reinhard」要先清理，否则 SSGI 亮度无法校准。
 
+> **G4 落地状态（2026-10-30）**：上述 v1 版本已实现——半分辨率 1/2、8 rays×8 steps（`params.y` 仅契约占位，步数固定）、
+> 5×5 单帧双边、延迟 binding 13 合成、`envParams.w` 为强度（0=关）。未做：时域累积/velocity、全分辨率、镜面 SSGI、
+> 亮度标定；`tests/gpu` 延迟用例有调用点，但尚未有「开启 SSAO/SSGI 后断言」的用例。
+
 ## 7. v3：探针（屏幕外信息）
 
 - 前置：补 compute dispatch 封装。`ePIPE_COMPUTE` 与 `CreateComputePipeline` 已存在（`GN_Pipeline.h:25`、`vkPipeline.cpp:191`），
@@ -309,6 +347,26 @@ G-buffer → SSAO → SSGI(半分辨率) → 双边去噪 → 延迟光照
   （从天空 + 太阳可见性积分），采样用三线性 + 时间滞后；不需要 compute。
 - 方案 B（重）：DDGI（irradiance + depth moments，3D 纹理，compute 更新）。只有在需要动态遮挡时才值得。
 - 与 SSGI 混合：屏幕内有效用 SSGI，miss / 屏幕外用探针。
+
+### 7.1 G5b 设计冻结（2026-10-30；实现前先按此表，禁止自行改契约）
+
+| 项 | 冻结值 |
+|---|---|
+| 探针数据 | CPU `cPROBE_GRID`（G5a，8×4×8、间距 2 m、SH9=36 float/探针）→ 上传为 **9 张 3D 纹理** `RGBA16F` 8×4×8（每张 = 1 个 SH 系数 vec4，RGB+pad；9×4=36 float/探针，无损；256×36=9216 floats = 9×1024 texels×4） |
+| 描述符（延迟 set） | 13→**23**：13=SSGI（G4）、**14=probe UBO（48 B）**、**15..23=9 张探针 3D 纹理**（每张对应一个 SH 系数） |
+| probe UBO（新 `sPROBE_UBO`，放 giParams） | 48 B：`origin` xyz+pad @0、`spacing` + `counts` xyz @16、`weight`（0=关）@32、`reserved` @36；static_assert + 单测 |
+| 采样 | 片元：`probeSh9[k] = texture(Tk, wp)`（9 次三线性采样后组合）；`envDiffuse = mix(evalSH9(N), probeSH9(N), clamp(weight,0,1))`；`weight=0` 逐像素等同现状 |
+| 更新预算 | CPU 每帧最多更新 **2 个探针**（从当前环境 SH9 起，v1 不做遮挡 raycast；预留 occlusion 回调），`BlendProbeSh(alpha=0.15)` 时间滞后；任何探针变化才整网格上传（9 张 × 8 KB ≈ 72 KB staging） |
+| 开关 | 新增 `GN_VkSetProbeWeight(float)`（写 probe UBO.weight）；默认 0=关，不改变现有画面 |
+| 生命周期 | 网格固定尺寸，不随 resize 重建；shutdown 释放 3 纹理/UTexture/UBO；相机移动由 `Recenter` 决定是否整网格搬移 |
+| 不做 | DDGI/compute、时域累积、屏幕外遮挡 raycast（v1 只从天空 SH9 初始化） |
+| 验收 | 本机：`make unit` + `sPROBE_UBO` 用例 + 编译；桌面：屏幕外遮挡场景间接光变化、关掉 weight 回到现状 |
+
+**实现顺序（G5b 分两步）**：**G5b-1 已完成（2026-10-30）**——`sPROBE_UBO` 48 B 契约 + `GetProbeSh` + `packProbeTextures`（按裁决 A：9 张 RGBA16F 纹理 float 层，9216 floats 无损；testGi +5、testProbe +4，`make unit` = 369/0）。**G5b-2 已完成（2026-10-30，编译级）**：`_Vulkan/vkProbe.cpp`（272 有效行）——9 张 3D RGBA16F 8×4×8 + LINEAR/CLAMP sampler、探针 UBO 48 B、启动用环境 SH9 填满 256 探针并整网格上传（18 KB staging，9 次 copy）；延迟 layout 14→23；`GN_VkSetProbeWeight`（默认 0）与 `GN_VkUpdateProbes`（weight=0 返回；否则每帧最多 2 探针 Blend 0.15）；shader `sampleProbeSh` 三线性 + SH9，weight=0 不采样、逐像素等同现状。尺寸固定不随 resize 重建。**限制**：无应用侧调用者（gpuCheck 延迟用例已插 `GN_VkUpdateProbes`，weight 需应用设）；v1 未接 `Recenter`/天气重烘刷新探针。
+>
+> **MMD 查看器接线（2026-10-30，范围 A）**：模型绘制从 `cMODEL::Draw()`（Blinn-Phong）改为 `DrawPBR()`，并在 AppInit 调
+> `GN_VkEnableGI(true)` 开启 GI IBL 倍率（`indirect[0]/[1]`，SH9/envParams 保留）；天气切换仍走 G3 重烘。
+> **SSAO/SSGI/探针不适用于查看器**（前向无 G-Buffer，均只存在于延迟路径）；若要在 MMD 里看到它们，需先实现 cMODEL 的 G-Buffer 绘制（大改）。
 
 ## 8. 文件与接口规划（单功能 <500 有效行）
 
@@ -345,20 +403,41 @@ G-buffer → SSAO → SSGI(半分辨率) → 双边去噪 → 延迟光照
 | G4 | SSGI（半分辨率 + 单帧双边；velocity 可选） | 桌面：颜色渗色可见；帧时间在预算内；关闭可回退 |
 | G5 | 探针（SH9 网格；DDGI 可选） | 桌面：屏幕外遮挡有间接光变化 |
 
+> **状态（2026-10-31，代码级全部完成；运行时均未验证）**：
+
+| 阶段 | 状态 | 主要产物 / 证据 | 剩余（桌面） |
+|---|---|---|---|
+| G0a | ✅ 代码级 | `_Vulkan/vkGbuffer.cpp`：附件枚举 `eGBUFFER_ATTACHMENT`、字段改名、两条显式 subpass 依赖、resize 重建、统一 destroy | 验证层 resize 无告警 |
+| G0b | ✅ 代码级 | `_Vulkan/vkGbufferDebug.cpp` + `gn3d_gbuffer_debug.frag`（四通道）；`GN_VkDraw3D_GBuffer` 的 `alphaCutoff` 参数 | 调试视图四通道 |
+| G1-CPU | ✅ 单测 | `giParams.h/.cpp` + `testGi` 21 用例（UBO/SH9/SSAO 核/BRDF LUT/打包/cubemap 预滤波） | — |
+| G1a | ✅ 代码级 | `_Vulkan/vkEnvironment.cpp`：GPU 6 面烘焙解析天空 → 回读 → CPU 预滤波 → cubemap/LUT/GI UBO | 面朝向/启动耗时 |
+| G1b | ✅ 代码级 | `_Vulkan/vkGi.cpp` + 槽位 4/7/9（+8/9、10/11）+ split-sum/SH9 着色器；**默认 GI 关** | 亮度/槽位兼容 |
+| G2a | ✅ 代码级 | G-Buffer 颜色 24→16 B/px（`{RGBA16F, RGBA8_SRGB, RGBA8_UNORM}`） | 8-bit 精度/带宽 |
+| G2b | ✅ 代码级 | `_Vulkan/vkSsao.cpp`：R8 raw/blur、世界空间 SSAO、4×4 双边、binding 12 合成、`Mat44Inverse` 修复；**默认 SSAO 关** | AO 视觉/模糊 |
+| G3 | ✅ 代码级 | `GN_VkGetSky` + `GN_VkRebakeEnvironment`；天气目标变化+过渡结束后重烘一次（启动首帧一次） | 同源视觉/切换卡顿 |
+| G4 | ✅ 代码级 | `_Vulkan/vkSsgi.cpp` + `gn3d_ssgi*.frag`：半分辨率 8×8 march + 5×5 双边；`envParams.w` 开关，**默认 0** | 渗色/性能 |
+| G5a | ✅ 单测 | `GN_3Dprobe.h/.cpp` + `testProbe` 10 用例（8×4×8 网格/三线性/Recenter） | — |
+| G5b | ✅ 代码级 | `_Vulkan/vkProbe.cpp`：9 张 3D 纹理 + 延迟 layout 23 + shader 采样；`GN_VkSetProbeWeight` 默认 0 | weight>0 视觉 |
+| MMD 接线 | ✅ 编译级 | 模型 `DrawPBR` + `GN_VkEnableGI(true)`；SSAO/SSGI/探针仅延迟路径（查看器前向无 G-Buffer） | 目视 |
+
+> 当前 `make unit` = **371 cases / 0 failed**（含 camera 22、GI/SSAO/SSGI/探针 CPU 用例）。
+> 本机无 GPU（`/dev/dri` 不存在、无 lavapipe）：`make gpuCheck` 只能编译、运行 SKIP；上表「剩余」全部待桌面验收。
+> 已知限制：GI/SSAO/SSGI/探针默认关闭（需 `GN_VkSetGI`/`GN_VkSetProbeWeight` 开启）；BLEND 只做前向 PBR（网格级排序）；SSGI 步数固定 8。
+
 每阶段收尾：`make check`、`bash ~/.dsh/skills/code-modularity/scripts/lintCodeModularity.sh <写域> --naming --comments`、
 GLSL 用 `glslangValidator -V` 编译通过。沙箱内**无 `/dev/dri`**，Vulkan 运行时视觉一律以你桌面实测为准。
 
 ## 10. 风险与待决
 
-1. **天空与 IBL 同源**：v1(a) 只修滤波不修来源，光滑表面仍会反射「旧渐变天空」；彻底解决要 G3 的 GPU 烘焙。
-2. **G-buffer pass 结束点在 `GN_VkDeferredLighting` 内部**（`vk3dPasses.cpp:512-520`）：插 SSAO 必须调整这个顺序，属于对既有 API 行为的改动。
-3. **resize 重建与描述符池**：池只创建一次、无 `FREE`/`RESET`（`GN_Vk.cpp:329`）→ 不能每 resize 走一遍 3D Shutdown/Init；要拆池或只重建 image/framebuffer 并更新描述符。这是 G0 最容易踩的坑。
-4. **附件改名面广**：`GN_Vk.h` 字段、`vk3dShutdown.cpp:281`、init 与 pass 都要同步；机械但漏一个就是关闭/校验错误。
+1. ✅ 已解决（G1a/G3）：环境由 GPU 6 面烘焙解析天空，天气切换重烘。
+2. ✅ 已解决（G2b/G4）：`GN_VkSSAOPass`/`GN_VkSSGIPass` 在延迟前调用，keep 原有 end-pass 分支。
+3. ✅ 已解决（task-8/task-26）：resize 只重建 image/framebuffer/管线并重写描述符，池不拆；2D/3D 全部固定视口管线已纳入重建。
+4. ✅ 已解决（G0a）：`eGBUFFER_ATTACHMENT` 映射统一创建/销毁/绑定，旧名全仓 0 处。
 5. **打包精度**：albedo 存 `RGBA8` 若用线性编码，暗部会带状；用 sRGB 编码或先保留 16F（见 §5.2）。
 6. **4× MSAA G-buffer**：显存 ≈ 200 MB@1080p，且 SSAO/SSGI 必须在 resolve 后采样；推荐先走后处理 AA。
-7. **alpha cutout 只改 shader 不够**：需要材质 alpha 模式（MMD PMX / glTF 导入侧），否则所有材质仍传 cutoff=0。
-8. **描述符槽位与天气计划冲突**：GI 4/7/9 与 Weather 3/6/8 必须同时冻结；延迟 layout 扩到 10 个 binding，池容量要核对。
-9. **SSAO 现有 shader 法线空间错误**：不先修就会得到「遮蔽出现在错误方向」的结果，而不是「没效果」。
+7. ✅ 已解决（2026-10-31）：`sMATERIAL`/`sASSET_MATERIAL` alphaMode/cutoff，glTF `alpha_mode`，MMD MASK+0.5；BLEND 独立管线 + 网格级排序。
+8. ✅ 已解决（G1b）：槽位表已冻结并落地（前向 4、PBR 7/8/9、延迟 9/10/11；延迟 layout 12）。
+9. ✅ 已解决（G2b）：`gn3d_ssao.frag` 重写为世界空间 + 4×4 双边。
 10. **前向路径没有 G-buffer**：SSAO 不可用；给前向加 MRT 会牵动所有前向绘制，v1 不做。
 11. **HDR 双 Reinhard**：`gn3d_pbr.frag:275` 与 `gn3d_composite.frag:43` 各做一次。GI 必须在线性空间注入，建议 G1 前先统一到合成阶段，否则 SSGI 亮度无法校准。
 12. **无 compute dispatch**：DDGI 的前置工作；SH9 探针不需要。
@@ -367,10 +446,11 @@ GLSL 用 `glslangValidator -V` 编译通过。沙箱内**无 `/dev/dri`**，Vulk
 
 ## 11. 待你确认（≤5）
 
-1. **v1 环境贴图来源**：(A) 启动时 CPU 从现有静态 cubemap 预滤波（最省事，与 S2a 天空不同源）；
+1. **v1 环境贴图来源**（**已拍板 2026-10-30：选 B**）：(A) 启动时 CPU 从现有静态 cubemap 预滤波（最省事，与 S2a 天空不同源）；
    (B) 直接做 GPU 6 面烘焙（同源，但要新增 pass 与 mip 生成，工作量大）；
    (C) v1 先不做环境贴图，只接 SSAO + 修采样公式（最轻，但镜面仍然不正确）。
-   **推荐 A**，把 B 放到 G3。
+   用户选择 **B**：G1 先用「GPU 6 面烘焙解析天空 → 回读 → `giParams::prefilterCubemap` CPU 预滤波 → 上传 mip 链」，
+   G3 再把预滤波也搬到 GPU 并接天气切换重烘。B 使 G1 与 G3 的边界前移，G3 只剩「天气切换重烘 + GPU 端预滤波」。
 2. **G-Buffer 抗锯齿**：(A) 4× MSAA G-buffer（与前向一致，显存 ×4、需 resolve）；
    (B) 1× + 后处理 FXAA/SMAA（推荐，轻）；(C) 先不管锯齿。
 3. **SSAO 只做延迟路径**（推荐），前向保持现状？还是接受给前向加 MRT 的大改？

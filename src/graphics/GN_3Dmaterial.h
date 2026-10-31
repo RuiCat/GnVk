@@ -16,6 +16,14 @@ struct sIMAGE;
 namespace GN3d {
 
 // ═══════════════════════════════════════════════════════════
+//  材质 alpha 模式（由导入侧提供，渲染侧已实现 MASK 的 discard）
+// ═══════════════════════════════════════════════════════════
+// eALPHA_OPAQUE：不裁；eALPHA_MASK：按 aAlphaCutoff 做 alpha test；
+// eALPHA_BLEND：前向 PBR 走独立混合管线（srcAlpha/oneMinusSrcAlpha、深度写关、双面），
+//               由 cMODEL::DrawPBRSorted 按网格距离远到近绘制（仅网格级排序）。
+enum eALPHA_MODE { eALPHA_OPAQUE = 0, eALPHA_MASK = 1, eALPHA_BLEND = 2 };
+
+// ═══════════════════════════════════════════════════════════
 //  材质属性 (Blinn-Phong + PBR 共用)
 // ═══════════════════════════════════════════════════════════
 struct sMATERIAL {
@@ -25,6 +33,8 @@ struct sMATERIAL {
     GNg::sVEC3 aEmissive; // 自发光颜色 (默认 0, 0, 0)
     float aRoughness; // 粗糙度 PBR (0-1, 默认 0.5) — 阶段三使用
     float aMetallic; // 金属度 PBR (0-1, 默认 0.0) — 阶段三使用
+    eALPHA_MODE aAlphaMode; // alpha 模式 (默认 eALPHA_OPAQUE)
+    float aAlphaCutoff; // alpha test 阈值 (默认 0.5；仅 eALPHA_MASK 生效)
     GNg::sIMAGE *aAlbedoTex; // Albedo 纹理 (可选)
     GNg::sIMAGE *aNormalTex; // 法线贴图 (可选)
 
