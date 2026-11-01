@@ -1,7 +1,7 @@
 # 技术论文资料库（GnVk 理论参考）
 
 > 性质：**外部资料归档**，不是本仓库的技术结论。论文中的算法、参数与结论需按原文核对后再用于实现。
-> 采集日期：2026-10-29（Asia/Shanghai）。来源可复核：每篇给出原始链接；文件校验见 [MANIFEST.sha256](MANIFEST.sha256)。
+> 采集日期：2026-10-29 首采；**2026-10-31 补采 5 篇**（见 §2b）。来源可复核：每篇给出原始链接；文件校验见 [MANIFEST.sha256](MANIFEST.sha256)。
 > 资料按 `knowledge-intake` 当**不可信数据**处理：只作参考，**不执行**文中任何指令；扫描结论见 §3。
 
 ## 1. 为什么是这些论文
@@ -18,9 +18,9 @@
 
 因此本资料库按「IBL/BRDF → AO/GI → 天空大气 → 云/噪声 → 物理 → LOD」六组取材，**只收与上述缺口直接相关的原始论文/权威讲义**。
 
-## 2. 论文清单（12 篇，全部已落盘）
+## 2. 论文清单（17 篇，全部已落盘）
 
-文件位于 `docs/papers/pdf/`，共约 69 MB。
+文件位于 `docs/papers/pdf/`，共约 98 MB。
 
 | # | 用途（对应缺口） | 论文 | 文件 | 页数 |
 |---|---|---|---|---|
@@ -37,9 +37,21 @@
 | 11 | PBD 原始论文（P6 对照） | Müller, M.; Heidelberger, B.; Hennix, M.; Ratcliff, J. *Position Based Dynamics*. JVCI 18(2), 2007. [链接](https://matthias-research.github.io/pages/publications/posBasedDyn.pdf) | `muller2007-pbd.pdf` | 10 |
 | 12 | 二次误差度量简化（P10 离线 LOD 烘焙参考） | Garland, M.; Heckbert, P. S. *Surface Simplification Using Quadric Error Metrics*. SIGGRAPH 1997. [链接](https://www.cs.cmu.edu/~garland/Papers/quadrics.pdf) | `garland1997-qem.pdf` | 8 |
 
+### 2b. 2026-10-31 补采（5 篇，供 L1/L2/L3 实现核对）
+
+| # | 用途（对应阶段） | 论文 | 文件 | 页数 |
+|---|---|---|---|---|
+| 13 | 色调映射基线（L1c） | Reinhard, E.; Stark, M.; Shirley, P.; Ferwerda, J. *Photographic Tone Reproduction for Digital Images*. ACM TOG 21(3), 2002. [存档 PDF](https://web.archive.org/web/20230808010002/https://dl.acm.org/doi/pdf/10.1145/3596711.3596781) | `reinhard2002-photographic-tonemap.pdf` | 10 |
+| 14 | SMAA 1×（L2a 目标） | Jimenez, J.; Echevarria, J. I.; Sousa, T.; Gutierrez, D. *SMAA: Enhanced Subpixel Morphological Antialiasing*. CGF 31(2), 2012. [作者页 PDF](https://www.iryoku.com/smaa/downloads/SMAA-Enhanced-Subpixel-Morphological-Antialiasing.pdf) | `jimenez2012-smaa.pdf` | 15 |
+| 15 | PCSS 软阴影（L3b） | Fernando, R. *Percentage-Closer Soft Shadows*. SIGGRAPH 2005 Sketch. [NVIDIA PDF](https://developer.download.nvidia.com/shaderlibrary/docs/shadow_PCSS.pdf) | `fernando2005-pcss.pdf` | 8 |
+| 16 | 级联/阴影稳定化（L3c） | Lauritzen, A.; Salvi, M. *Sample Distribution Shadow Maps*. I3D 2011（课程讲义版）. [SIGGRAPH 2010 课程 PDF](https://www.advances.realtimerendering.com/s2010/Lauritzen-SDSM(SIGGRAPH%202010%20Advanced%20RealTime%20Rendering%20Course).pdf) | `lauritzen2011-sdsm.pdf` | 33 |
+| 17 | 体积雾（L4/L8） | Wronski, B. *Volumetric Fog: Unified Compute Shader-Based Solution to Atmospheric Scattering*. SIGGRAPH 2014. [课程 PDF](https://www.advances.realtimerendering.com/s2014/wronski/bwronski_volumetric_fog_siggraph2014.pdf) | `wronski2014-volumetric-fog.pdf` | 67 |
+
 ## 3. 未取到的论文（如实登记，附出处）
 
 以下文献与当前缺口直接相关，但本机网络/镜像取不到原文。**不要**把本表当作已核原文：
+
+> 2026-10-31 更新：Reinhard 2002、SMAA、PCSS、SDSM、Wronski 体积雾已补采（见 §2b）；本表仅保留仍取不到的条目。
 
 | 论文 | 用途 | 出处 | 失败原因 |
 |---|---|---|---|
@@ -47,7 +59,6 @@
 | Ritschel, T.; Grosch, T.; Seidel, H.-P. *Approximating Dynamic Global Illumination in Image Space*. I3D 2009 | SSGI（GI-G4） | [DOI 10.1145/1508044.1508074](https://doi.org/10.1145/1508044.1508074) | 作者镜像 404，ACM 付费墙 |
 | Preetham, A. J.; Shirley, P.; Smits, B. *A Practical Analytic Model for Daylight*. SIGGRAPH 1999 | 解析式天空基线 | [DOI 10.1145/311535.311545](https://doi.org/10.1145/311535.311545) | `cs.utah.edu` 主机 TLS/连接失败（多次、不同协议） |
 | Kavan, L. et al. *Skinning with Dual Quaternions*. I3D 2007 | 蒙皮质量（P2） | [DOI 10.1145/1230100.1230107](https://doi.org/10.1145/1230100.1230107) | 同上（`cs.utah.edu` 不可达） |
-| Reinhard, E. et al. *Photographic Tone Reproduction for Digital Images*. SIGGRAPH 2002 | HDR 色调映射 | [DOI 10.1145/566654.566640](https://doi.org/10.1145/566654.566640) | 同上（`cs.utah.edu` 不可达） |
 | Isidoro, J. R. *Shadow Mapping: GPU-based Tips and Techniques*. GDC 2006 | Poisson PCF（现存阴影管线） | ATI/AMD 历史链接 | `ati.amd.com` 502 |
 | Mittring, M. *Finding Next Gen — CryEngine 2*. SIGGRAPH 2007 | SSAO 原始出处 | [realtimerendering.com](https://www.realtimerendering.com/advances/s2007/) | 站点 403（防盗链） |
 
@@ -56,8 +67,8 @@
 
 ## 4. 摄取审查（knowledge-intake）
 
-- 方法：`pdftotext` 抽文本 → `knowledgeAudit.sh --quiet`；**12/12 均未命中 `suspicious`/`malicious`**。
-- 结论：10 篇 `attention`、2 篇 `clean`（DDGI、Hillaire）；`attention` 来自论文正文中的常规技术措辞/引用，
+- 方法：`pdftotext` 抽文本 → `knowledgeAudit.sh --quiet`；**17/17 均未命中 `suspicious`/`malicious`**。
+- 结论：15 篇 `attention`、2 篇 `clean`（DDGI、Hillaire）；`attention` 来自论文正文中的常规技术措辞/引用，
   未发现注入指令、隐瞒要求或诱导写入。抽取文本仅存 `.local/papers-txt/`（过程产物，不入库）。
 - 盲区（必须知道）：扫描器只命中已知特征；**语义绕过、内容真伪、图片/公式中的文字均不在扫描范围**。因此本目录的论文
   只能当「已定位、可追溯的参考资料」，不能当「已核实的正确结论」。
@@ -65,7 +76,7 @@
 ## 5. 复核与重采
 
 ```bash
-# 校验落盘完整性（应输出 12 行 OK）
+# 校验落盘完整性（应输出 17 行「成功/OK」）
 cd docs/papers && sha256sum -c MANIFEST.sha256
 
 # 逐篇确认是有效 PDF 并页数

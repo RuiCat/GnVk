@@ -17,8 +17,9 @@ cLIGHT::cLIGHT() : aCount(0), aDirty(true) {
     aData.ambientLight[1] = 0.15f;
     aData.ambientLight[2] = 0.2f;
     aData.ambientLight[3] = 1.0f;
-    // 默认阴影贴图大小
-    aData.shadowMapSize = 2048.0f;
+    // 默认阴影贴图大小 + CSM 默认 4 级（分割/texel 由查看器每帧写入）
+    aData.shadowParams[0] = 2048.0f;
+    aData.shadowParams[1] = 1.0f;
 }
 
 void cLIGHT::Clear() {
@@ -27,7 +28,8 @@ void cLIGHT::Clear() {
     aData.ambientLight[1] = 0.15f;
     aData.ambientLight[2] = 0.2f;
     aData.ambientLight[3] = 1.0f;
-    aData.shadowMapSize = 2048.0f; // 恢复默认阴影贴图尺寸
+    aData.shadowParams[0] = 2048.0f; // 恢复默认阴影贴图尺寸
+    aData.shadowParams[1] = 1.0f; // 单级阴影（回退路径）
     aCount = 0;
     aDirty = true;
 }
@@ -172,13 +174,25 @@ void cLIGHT::SetAmbient(const sVEC3 &color, float intensity) {
     aDirty = true;
 }
 
-void cLIGHT::SetShadowLightVP(const sMAT44 &lightVP) {
-    memcpy(aData.shadowLightVP, lightVP.m, sizeof(aData.shadowLightVP));
+void cLIGHT::SetShadowLightVP(const sMAT44 &lightVP, uint32_t cascade) {
+    if(cascade >= GN_MAX_SHADOW_CASCADES) cascade = GN_MAX_SHADOW_CASCADES - 1;
+    memcpy(aData.shadowLightVP[cascade], lightVP.m, sizeof(aData.shadowLightVP[cascade]));
     aDirty = true;
 }
 
 void cLIGHT::SetShadowMapSize(float size) {
-    aData.shadowMapSize = size;
+    aData.shadowParams[0] = size;
+    aDirty = true;
+}
+
+void cLIGHT::SetShadowCascades(uint32_t count, const float *splits, const float *texelWorld) {
+    if(count < 1) count = 1;
+    if(count > GN_MAX_SHADOW_CASCADES) count = GN_MAX_SHADOW_CASCADES;
+    aData.shadowParams[1] = (float)count;
+    for(uint32_t i = 0; i < GN_MAX_SHADOW_CASCADES; ++i) {
+        aData.cascadeSplits[i] = (splits && i < count) ? splits[i] : 0.0f;
+        aData.shadowTexelWorld[i] = (texelWorld && i < count) ? texelWorld[i] : 0.0f;
+    }
     aDirty = true;
 }
 

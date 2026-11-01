@@ -22,43 +22,6 @@ const uint32_t PROBE_FLOATS_PER_IMAGE = PROBE_TEXELS * 4u;                   // 
 
 GN3d::cPROBE_GRID sProbeGrid; // 256 探针 × 36 float（固定尺寸，不随 resize）
 
-// 一次性命令：录制 → 提交 → 等 fence。
-bool submitOnce(VkCommandBuffer cb) {
-    VkResult endResult = vkEndCommandBuffer(cb);
-    VkFence fence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    VkResult fenceResult = vkCreateFence(GN_Vk.device, &fci, 0, &fence);
-    VkResult submitResult = VK_ERROR_UNKNOWN;
-    if(fenceResult == VK_SUCCESS) {
-        VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        si.commandBufferCount = 1;
-        si.pCommandBuffers = &cb;
-        submitResult = vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, fence);
-        if(submitResult == VK_SUCCESS) vkWaitForFences(GN_Vk.device, 1, &fence, VK_TRUE, UINT64_MAX);
-        vkDestroyFence(GN_Vk.device, fence, 0);
-    }
-    vkFreeCommandBuffers(GN_Vk.device, GN_Vk.commandPool, 1, &cb);
-    if(endResult != VK_SUCCESS || fenceResult != VK_SUCCESS || submitResult != VK_SUCCESS) {
-        fprintf(stderr, "[GN_Vk] 探针上传命令失败（end=%d fence=%d submit=%d）\n",
-                (int)endResult, (int)fenceResult, (int)submitResult);
-        return false;
-    }
-    return true;
-}
-
-VkCommandBuffer beginOnce() {
-    VkCommandBuffer cb = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    ai.commandPool = GN_Vk.commandPool;
-    ai.commandBufferCount = 1;
-    vkAllocateCommandBuffers(GN_Vk.device, &ai, &cb);
-    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cb, &bi);
-    return cb;
-}
-
 // 读当前环境 SH9（GI UBO 偏移 offsetof(sGI_UBO, sh)=48，36 float）；无 GI UBO 时清零。
 void readEnvironmentSh(float sh9[9][4]) {
     std::memset(sh9, 0, sizeof(float) * 36);
@@ -127,7 +90,7 @@ bool uploadProbeTextures() {
     std::memcpy(mapped, halves.data(), (size_t)bytes);
     vkUnmapMemory(GN_Vk.device, stagingMem);
 
-    VkCommandBuffer cb = beginOnce();
+    VkCommandBuffer cb = beginOnceCommand();
     for(int k = 0; k < PROBE_TEXTURE_COUNT; ++k) {
         VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -156,7 +119,7 @@ bool uploadProbeTextures() {
         vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &b);
     }
-    const bool ok = submitOnce(cb);
+    const bool ok = submitOnceCommand(cb);
     vkDestroyBuffer(GN_Vk.device, staging, 0);
     vkFreeMemory(GN_Vk.device, stagingMem, 0);
     return ok;

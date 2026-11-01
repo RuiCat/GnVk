@@ -92,4 +92,30 @@ void GN_VkEnableGI(bool enable) {
     }
 }
 
+// L0a：单独开关 SSAO（GI UBO.indirect.w），保留倍率/SH9/envParams 不变。
+void GN_VkSetSsaoEnabled(bool enable) {
+    if(GN_Vk.giUBOMemory == VK_NULL_HANDLE) return;
+    void *mapped = nullptr;
+    vkMapMemory(GN_Vk.device, GN_Vk.giUBOMemory, 0, sizeof(GN3d::sGI_UBO), 0, &mapped);
+    if(mapped) {
+        GN3d::sGI_UBO *ubo = (GN3d::sGI_UBO *)mapped;
+        ubo->indirect[3] = enable ? 1.0f : 0.0f; // SSAO 开关
+        vkUnmapMemory(GN_Vk.device, GN_Vk.giUBOMemory);
+    }
+}
+
+// L0a：单独设 SSGI 强度（GI UBO.envParams.w，0=关），保留其他字段不变。
+void GN_VkSetSsgiStrength(float strength) {
+    if(GN_Vk.giUBOMemory == VK_NULL_HANDLE) return;
+    if(!(strength > 0.0f)) strength = 0.0f; // 同时处理 NaN
+    if(strength > 1.0f) strength = 1.0f;
+    void *mapped = nullptr;
+    vkMapMemory(GN_Vk.device, GN_Vk.giUBOMemory, 0, sizeof(GN3d::sGI_UBO), 0, &mapped);
+    if(mapped) {
+        GN3d::sGI_UBO *ubo = (GN3d::sGI_UBO *)mapped;
+        ubo->envParams[3] = strength; // SSGI 合成权重
+        vkUnmapMemory(GN_Vk.device, GN_Vk.giUBOMemory);
+    }
+}
+
 } // namespace GNg

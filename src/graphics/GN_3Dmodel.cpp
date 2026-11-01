@@ -180,6 +180,16 @@ void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level, bool forceBl
 #endif
 }
 
+// L3：阴影深度绘制。顶点与 PBR 同格式（VkVertex3D，11 floats），由 GN_VkShadowDraw 上传。
+void sMESH::DrawShadow(const sMAT44 *modelMatrix) const {
+#ifdef GN_USING_3D
+    if(!aVertices || aVertexCount == 0 || !modelMatrix) return;
+    GNg::GN_VkShadowDraw(aVertices, aVertexCount, aIndices, aIndexCount, modelMatrix);
+#else
+    (void)modelMatrix;
+#endif
+}
+
 namespace {
 
 // 网格是否走透明混合：只看材质 alpha 模式（无材质 = 不透明）。
@@ -271,6 +281,16 @@ void cMODEL::DrawPBRWithLod(const uint32_t *levels, uint32_t levelCount) const {
     for(uint32_t i = 0; i < aMeshCount; ++i) {
         const uint32_t level = (levels && i < levelCount) ? levels[i] : 0u;
         aMeshes[i].DrawPBRLevel(&aTransform, level);
+    }
+}
+
+// L3：阴影投影只画 OPAQUE 网格（阴影管线无片元 alpha test，MASK/BLEND 会投出整片硬影）。
+void cMODEL::DrawShadow() const {
+    if(!aVisible || !aMeshes) return;
+    for(uint32_t i = 0; i < aMeshCount; ++i) {
+        const sMESH &mesh = aMeshes[i];
+        if(mesh.aMaterial && mesh.aMaterial->aAlphaMode != eALPHA_OPAQUE) continue;
+        mesh.DrawShadow(&aTransform);
     }
 }
 

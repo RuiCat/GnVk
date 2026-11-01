@@ -21,7 +21,7 @@ static bool s_hasDeferredViewProj = false;
 //  阴影映射 Pass
 // ═══════════════════════════════════════════════════════════
 
-void GN_VkShadowPassBegin(const sMAT44 *lightViewProj) {
+void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
     if(!GN_Vk.initialized || !GN_Vk.shadowPipeline || s_inShadowPass) return;
     if(s_in3DPass) return;
     s_vtxOfs3D = 0;
@@ -65,7 +65,8 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj) {
     cv.depthStencil = {1.0f, 0};
     VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     rpi.renderPass = GN_Vk.shadowRenderPass;
-    rpi.framebuffer = GN_Vk.shadowFramebuffer;
+    // L3c：framebuffer 选择对应级联层（view 已绑定 layer，renderArea 仍是单层尺寸）。
+    rpi.framebuffer = shadowFramebufferForCascade(cascadeIndex);
     rpi.renderArea = {{0, 0}, {GN_Vk.shadowMapSize, GN_Vk.shadowMapSize}};
     rpi.clearValueCount = 1;
     rpi.pClearValues = &cv;
@@ -134,6 +135,8 @@ void GN_VkShadowDraw(const void *vertices, uint32_t vertexCount,
 void GN_VkCompositeToSwapchain() {
     if(!GN_Vk.initialized || !GN_Vk.compositePipeline) return;
     if(!GN_Vk.hdrView || !GN_Vk.hdrSampler) return;
+    if(!isPostReady()) return; // L1：POST UBO 未就绪时不录 draw（binding 2 未绑定）
+    if(!isBloomReady()) return; // L1d：Bloom 结果图未就绪（binding 3 未绑定）
 
     // 更新 composite descriptor: 绑定当前 HDR 纹理
     VkDescriptorImageInfo hii = {};
@@ -147,6 +150,9 @@ void GN_VkCompositeToSwapchain() {
     wc.descriptorCount = 1;
     wc.pImageInfo = &hii;
     vkUpdateDescriptorSets(GN_Vk.device, 1, &wc, 0, nullptr);
+
+    // L1d：先录制 Bloom mip 链（HDR → 半分辨率亮部 → 逐级下采样 → tent 上采样）。
+    recordBloomPasses(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
 
     // 开始合成 pass → swapchain
     VkClearValue cv;
@@ -183,8 +189,8 @@ void GN_VkGetSky(VkSkyParams *out) {
 void GN_VkDrawSkybox(const sMAT44 *viewProj) {
     if(!GN_Vk.initialized || !GN_Vk.skyboxPipeline || !s_in3DPass) return;
 
-    // UBO: viewProj(64) + VkSkyParams(64) = 128 B
-    float ubo[32];
+    // UBO: viewProj(64) + VkSkyParams(80) = 144 B
+    float ubo[36];
     memcpy(ubo, viewProj->m, 64);
     memcpy(ubo + 16, &s_skyParams, sizeof(VkSkyParams));
     void *d;
@@ -267,6 +273,8 @@ void GN_VkBegin3DPassPBR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         memcpy(ld, lightUBO, lightUBOSize);
         vkUnmapMemory(GN_Vk.device, GN_Vk.lightMemory3D);
     }
+    // L4：sky-view LUT 重建（参数/太阳变化时；render pass 之外录制）
+    recordAtmosphereLutUpdate(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     // 开始 3D render pass (PBR)
     {
         VkClearValue cvs[3];
@@ -291,85 +299,12 @@ void GN_VkBegin3DPassPBR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
 }
 
 // ═══════════════════════════════════════════════════════════
-//  3D PBR Pass — HDR 变体 (渲染到 HDR 目标, 供后续合成)
+//  3D PBR Pass — HDR 变体（L1 起与 GN_VkBegin3DPassPBR 同一实现：
+//  renderPass3D 统一 resolve 到 HDR 目标，由合成阶段曝光/tonemap）
 // ═══════════════════════════════════════════════════════════
 void GN_VkBegin3DPassPBR_HDR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                              const void *lightUBO, uint32_t lightUBOSize) {
-    if(!GN_Vk.initialized || s_in3DPass) return;
-    s_vtxOfs3D = 0;
-    s_idxOfs3D = 0;
-    if(gVCnt > 0) {
-        void *d;
-        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, gVCnt * sizeof(VkVertex), 0, &d);
-        memcpy(d, gVBuf, gVCnt * sizeof(VkVertex));
-        vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory);
-        uint32_t prevEnd = 0;
-        for(uint32_t i = 0; i < s_batchCount; i++) {
-            uint32_t count = s_batchEnd[i] - prevEnd;
-            if(count > 0) {
-                vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &s_batchDS[i], 0, 0);
-                VkDeviceSize offs[] = {prevEnd * sizeof(VkVertex)};
-                vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &GN_Vk.vertexBuffer, offs);
-                vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], count, 1, 0, 0);
-            }
-            prevEnd = s_batchEnd[i];
-        }
-        gVCnt = 0;
-        s_batchCount = 0;
-        s_lastDS = VK_NULL_HANDLE;
-    }
-    if(s_inRenderPass) {
-        vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_inRenderPass = false;
-    }
-    {
-        VkSceneUBO ubo;
-        memcpy(ubo.viewProj, viewProj->m, sizeof(ubo.viewProj));
-        ubo.cameraPos[0] = cameraPos->x;
-        ubo.cameraPos[1] = cameraPos->y;
-        ubo.cameraPos[2] = cameraPos->z;
-        ubo.cameraPos[3] = 0.0f;
-        if(lightUBO && lightUBOSize >= sizeof(GN3d::sLIGHT_UBO)) {
-            const GN3d::sLIGHT_UBO *lubo = (const GN3d::sLIGHT_UBO *)lightUBO;
-            ubo.ambientLight[0] = lubo->ambientLight[0];
-            ubo.ambientLight[1] = lubo->ambientLight[1];
-            ubo.ambientLight[2] = lubo->ambientLight[2];
-            ubo.ambientLight[3] = lubo->ambientLight[3];
-        } else {
-            ubo.ambientLight[0] = 0.15f;
-            ubo.ambientLight[1] = 0.15f;
-            ubo.ambientLight[2] = 0.2f;
-            ubo.ambientLight[3] = 1.0f;
-        }
-        void *data;
-        vkMapMemory(GN_Vk.device, GN_Vk.uniformMemory3D, 0, sizeof(ubo), 0, &data);
-        memcpy(data, &ubo, sizeof(ubo));
-        vkUnmapMemory(GN_Vk.device, GN_Vk.uniformMemory3D);
-    }
-    if(lightUBO && lightUBOSize > 0) {
-        void *ld;
-        vkMapMemory(GN_Vk.device, GN_Vk.lightMemory3D, 0, lightUBOSize, 0, &ld);
-        memcpy(ld, lightUBO, lightUBOSize);
-        vkUnmapMemory(GN_Vk.device, GN_Vk.lightMemory3D);
-    }
-    {
-        VkClearValue cvs[3];
-        cvs[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-        cvs[1].depthStencil = {1.0f, 0};
-        cvs[2].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-        VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-        rpi.renderPass = GN_Vk.hdrRenderPass;
-        rpi.framebuffer = GN_Vk.hdrFramebuffers[GN_Vk.currentFrame];
-        rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
-        rpi.clearValueCount = 3;
-        rpi.pClearValues = cvs;
-        vkCmdBeginRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame], &rpi, VK_SUBPASS_CONTENTS_INLINE);
-    }
-    vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelinePBR);
-    vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            GN_Vk.pipelineLayoutPBR, 0, 1, &GN_Vk.descriptorSetPBR, 0, 0);
-    s_in3DPass = true;
-    s_inRenderPass = true;
+    GN_VkBegin3DPassPBR(viewProj, cameraPos, lightUBO, lightUBOSize);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -424,6 +359,8 @@ void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         cvs[1].color = {{0, 0, 0, 1}};
         cvs[2].color = {{0, 0, 0, 1}};
         cvs[3].depthStencil = {1, 0};
+        // L4：sky-view LUT 重建（G-Buffer pass 之前，render pass 之外）
+        recordAtmosphereLutUpdate(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
         VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         rpi.renderPass = GN_Vk.gBufferRenderPass;
         rpi.framebuffer = GN_Vk.gBufferFramebuffers[0];
@@ -601,6 +538,8 @@ void GN_VkDeferredLighting(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         memcpy(ld, lightUBO, lightUBOSize);
         vkUnmapMemory(GN_Vk.device, GN_Vk.lightMemory3D);
     }
+    // L4：sky-view LUT 重建（延迟光照之前；若本帧无 3D pass 也保证 LUT 与太阳同步）
+    recordAtmosphereLutUpdate(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     // 开始延迟光照 Pass → swapchain
     {
         VkClearValue cv;
@@ -618,6 +557,8 @@ void GN_VkDeferredLighting(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], 3, 1, 0, 0);
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     s_inRenderPass = false;
+    // L1：延迟光照写入 HDR 目标后统一走合成（曝光/色调映射/Bloom）。
+    GN_VkCompositeToSwapchain();
 }
 
 } // namespace GNg

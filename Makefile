@@ -301,7 +301,7 @@ clean:
 #  8. 着色器 (GLSL → SPIR-V)
 # ═══════════════════════════════════════════════════════════
 SHADER_DIR  := assets/shaders
-SHADER_SRC  := $(wildcard $(SHADER_DIR)/*.vert) $(wildcard $(SHADER_DIR)/*.frag)
+SHADER_SRC  := $(wildcard $(SHADER_DIR)/*.vert) $(wildcard $(SHADER_DIR)/*.frag) $(wildcard $(SHADER_DIR)/*.comp)
 SHADER_OUT  := $(SHADER_SRC:=.spv)
 
 .PHONY: shaders

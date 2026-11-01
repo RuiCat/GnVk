@@ -201,7 +201,7 @@ void reportGroundPlacement(bool usePbr, const char *name) {
     light.ambientLight[1] = 1.0f;
     light.ambientLight[2] = 1.0f;
     light.ambientLight[3] = 1.0f;
-    light.shadowMapSize = 2048.0f;
+    light.shadowParams[0] = 2048.0f; // L3c：旧 shadowMapSize 已并入 shadowParams
     if(GNg::GN_VkBeginFrame()) {
         GNg::GN_VkBegin3DPass(&viewProj, &eye, &light, sizeof(light));
         GNg::sMAT44 identity;

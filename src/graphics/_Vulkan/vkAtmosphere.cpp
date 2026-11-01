@@ -12,6 +12,7 @@
 #include "vkInternal.h"
 
 #include <cstring>
+#include <cmath>
 
 namespace GNg {
 
@@ -63,6 +64,27 @@ void GN_VkSetFog(const sFOG_UBO &fog) {
     if(clamped.aParams[1] < 0.0f) clamped.aParams[1] = 0.0f; // heightFalloff
     if(clamped.aParams[3] < 0.0f) clamped.aParams[3] = 0.0f;
     if(clamped.aParams[3] > 1.0f) clamped.aParams[3] = 1.0f; // maxOpacity
+    // L4：空气透视参数（太阳强度非负；半径必须正，否则回退默认地球值；开关钳到 [0,1]）。
+    if(clamped.aAtmosphere[3] < 0.0f) clamped.aAtmosphere[3] = 0.0f;
+    {
+        float *sun = clamped.aAtmosphere;
+        const float len = std::sqrt(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
+        if(len > 1.0e-6f) {
+            sun[0] /= len;
+            sun[1] /= len;
+            sun[2] /= len;
+        } else {
+            sun[0] = 0.0f;
+            sun[1] = 1.0f;
+            sun[2] = 0.0f;
+        }
+    }
+    if(clamped.aAtmosphere2[0] <= 0.0f) clamped.aAtmosphere2[0] = 6360000.0f;
+    if(clamped.aAtmosphere2[1] <= clamped.aAtmosphere2[0]) {
+        clamped.aAtmosphere2[1] = clamped.aAtmosphere2[0] + 60000.0f;
+    }
+    if(clamped.aAtmosphere2[2] < 0.0f) clamped.aAtmosphere2[2] = 0.0f;
+    clamped.aAtmosphere2[3] = clamped.aAtmosphere2[3] > 0.5f ? 1.0f : 0.0f;
     memcpy(s_fogMapped, &clamped, sizeof(clamped));
 }
 

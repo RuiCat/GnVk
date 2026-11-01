@@ -1,0 +1,129 @@
+// gn3d_skyview.comp — L4：GPU compute 重建 sky-view 大气 LUT（Hillaire 2020 单次散射）。
+//
+// 逐 texel 移植 src/graphics/atmosphereParams.cpp 的 computeSkyViewLut / computeSkyRadiance：
+//   u = (x+0.5)/W 映射相对太阳方位角 [-π,π]，v = (y+0.5)/H 映射天顶角（0=天顶，1=地平线）；
+//   mu = 1-v；delta = (u*2-1)*π；azimuth = atan2(sun.x, sun.z) + delta；
+//   dir = (sinθ*sin(azimuth), mu, sinθ*cos(azimuth))。
+// 布局（docs/L4_L3_CONTRACT.md §1）：
+//   set 0 binding 0 = 透射率 LUT（sampler2D；u=mu*0.5+0.5、v=高度归一化，线性/CLAMP）；
+//   set 0 binding 1 = sky-view 输出（rgba16f storage image，writeonly）；
+//   set 0 binding 2 = std140 参数 UBO（vec4 行，与 vkAtmosphereLut.cpp 的 AtmosphereLutUbo 一致）。
+// 参数由 C++ 在脏标记触发时写入；常量必须与 makeDefaultAtmosphereParams 语义一致。
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+struct AtmosphereParams {
+    vec4 sunDirection; // xyz = 单位太阳方向（世界空间 y-up，指向太阳），w = 太阳强度
+    vec4 radii;        // x = 地面半径(m)，y = 大气顶半径(m)，z = Mie 各向异性 g
+    vec4 rayleigh;     // xyz = Rayleigh 散射系数(1/m)，w = Rayleigh 尺度高度(m)
+    vec4 mie;          // x = Mie 散射系数(1/m)，y = Mie 吸收系数(1/m)，z = Mie 尺度高度(m)
+    vec4 ozone;        // xyz = Ozone 吸收系数(1/m)，w = Ozone 帐篷半宽(m)
+    vec4 ozoneCenter;  // x = Ozone 帐篷中心高度(m)
+};
+
+layout(set = 0, binding = 0) uniform sampler2D transmittanceLut;
+layout(rgba16f, set = 0, binding = 1) uniform writeonly image2D skyViewOut;
+layout(set = 0, binding = 2) uniform AtmosphereUbo {
+    AtmosphereParams atmosphere;
+} ubo;
+
+const float PI = 3.14159265358979323846;
+const float EPSILON = 1e-6;
+const int SKY_VIEW_STEPS = 32;
+
+// Rayleigh 相位：与 atmosphereParams.cpp 的 rayleighPhase 一致。
+float rayleighPhase(float mu) {
+    return (3.0 / (16.0 * PI)) * (1.0 + mu * mu);
+}
+
+// Henyey-Greenstein 近似（Mie 相位）：与 atmosphereParams.cpp 的 miePhase 一致。
+float miePhase(float mu, float g) {
+    float g2 = g * g;
+    float denom = max(1.0 + g2 - 2.0 * g * mu, EPSILON);
+    return (1.0 - g2) / (4.0 * PI * denom * sqrt(denom));
+}
+
+// 与 CPU intersectAtmosphere 一致：返回大气顶交会距离 t（未命中返回 -1），并输出是否命中地面。
+float intersectAtmosphere(vec3 origin, vec3 dir, float groundRadius, float atmosphereRadius,
+                          out bool hitsGround) {
+    hitsGround = false;
+    float r = length(origin);
+    float mu = dot(origin, dir) / max(r, EPSILON);
+    float topDisc = r * r * (mu * mu - 1.0) + atmosphereRadius * atmosphereRadius;
+    if(topDisc < 0.0) return -1.0;
+    float tTop = -r * mu + sqrt(topDisc);
+    if(tTop <= 0.0) return -1.0;
+
+    if(mu < 0.0) {
+        float groundDisc = r * r * (mu * mu - 1.0) + groundRadius * groundRadius;
+        if(groundDisc >= 0.0) {
+            float tGround = -r * mu - sqrt(groundDisc);
+            if(tGround > 0.0 && tGround < tTop) hitsGround = true;
+        }
+    }
+    return tTop;
+}
+
+// 与 CPU computeSkyRadiance 一致：单次散射 + 太阳透射率 LUT 查表；命中地面/无大气交会返回 0。
+vec3 computeSkyRadiance(vec3 viewDir, vec3 sunDir) {
+    AtmosphereParams a = ubo.atmosphere;
+    vec3 v = normalize(viewDir);
+    vec3 s = normalize(sunDir);
+    vec3 origin = vec3(0.0, a.radii.x + 1.0, 0.0); // 地面上 1 m（与 CPU 参考一致）
+
+    bool hitsGround = false;
+    float tTop = intersectAtmosphere(origin, v, a.radii.x, a.radii.y, hitsGround);
+    if(tTop <= 0.0) return vec3(0.0);
+    if(hitsGround) return vec3(0.0);
+
+    float mieExtinction = a.mie.x + a.mie.y;
+    float muSun = dot(v, s);
+    float phaseR = rayleighPhase(muSun);
+    float phaseM = miePhase(muSun, a.radii.z);
+    float stepLen = tTop / float(SKY_VIEW_STEPS);
+    float atmosphereThickness = max(a.radii.y - a.radii.x, EPSILON);
+
+    vec3 viewTransmittance = vec3(1.0);
+    vec3 radiance = vec3(0.0);
+    for(int i = 0; i < SKY_VIEW_STEPS; ++i) {
+        float t = (float(i) + 0.5) * stepLen;
+        vec3 p = origin + v * t;
+        float r = length(p);
+        float height = max(r - a.radii.x, 0.0);
+        float dR = exp(-height / a.rayleigh.w);
+        float dM = exp(-height / a.mie.z);
+        float dO = a.ozone.w > EPSILON
+                       ? max(0.0, 1.0 - abs(height - a.ozoneCenter.x) / a.ozone.w)
+                       : 0.0;
+
+        // 太阳可见性：从该点向太阳做透射率查表（与 evalTransmittanceLut 的参数化一致）。
+        float sunMu = dot(p, s) / max(r, EPSILON);
+        float height01 = clamp(height / atmosphereThickness, 0.0, 1.0);
+        vec3 sunTransmittance = texture(transmittanceLut, vec2(sunMu * 0.5 + 0.5, height01)).rgb;
+
+        vec3 scatter = a.rayleigh.xyz * dR * phaseR + a.mie.x * dM * phaseM;
+        radiance += viewTransmittance * scatter * sunTransmittance * a.sunDirection.w * stepLen;
+        vec3 extinction = a.rayleigh.xyz * dR + mieExtinction * dM + a.ozone.xyz * dO;
+        viewTransmittance *= exp(-extinction * stepLen);
+    }
+    return radiance;
+}
+
+void main() {
+    ivec2 size = imageSize(skyViewOut);
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if(coord.x >= size.x || coord.y >= size.y) return;
+
+    vec3 sunDir = normalize(ubo.atmosphere.sunDirection.xyz);
+    float u = (float(coord.x) + 0.5) / float(size.x);
+    float v = (float(coord.y) + 0.5) / float(size.y);
+    float mu = 1.0 - v;
+    float sinTheta = sqrt(max(0.0, 1.0 - mu * mu));
+    float delta = (u * 2.0 - 1.0) * PI;
+    float azimuth = atan(sunDir.x, sunDir.z) + delta;
+    vec3 dir = vec3(sinTheta * sin(azimuth), mu, sinTheta * cos(azimuth));
+
+    vec3 radiance = computeSkyRadiance(dir, sunDir);
+    imageStore(skyViewOut, coord, vec4(radiance, 1.0));
+}

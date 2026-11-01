@@ -66,6 +66,8 @@ struct sMESH {
     // P10：按指定级绘制（level 越界/该级无数据时退回 LOD0，即 aVertices/aIndices）。
     // forceBlend：true 时即使材质不是 eALPHA_BLEND 也走混合管线（供排序绘制第二趟使用）。
     void DrawPBRLevel(const GNg::sMAT44 *modelMatrix, uint32_t level, bool forceBlend = false) const;
+    // L3：阴影 pass 绘制（深度-only；alpha 非 OPAQUE 的网格由 cMODEL::DrawShadow 跳过）。
+    void DrawShadow(const GNg::sMAT44 *modelMatrix) const;
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -100,6 +102,8 @@ class cMODEL {
     void UpdateTransform();
     void Draw() const;
     void DrawPBR() const; // PBR 模式绘制所有网格
+    // L3：阴影投影绘制（只画 OPAQUE 网格；透明/MASK 网格 v1 不投影，避免整片硬影）。
+    void DrawShadow() const;
     // 透明排序绘制：先 OPAQUE/MASK（原顺序），再 BLEND 按网格世界 AABB 中心到相机
     // 由远到近逐个绘制（仅网格级排序，非逐三角形）。
     void DrawPBRSorted(const GNg::sVEC3 &cameraPos) const;

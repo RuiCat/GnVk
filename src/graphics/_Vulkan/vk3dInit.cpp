@@ -32,11 +32,14 @@ void init3DTargets() {
     if(!create3DMsaaTargets()) {
         fprintf(stderr, "[GN_Vk] 警告: MSAA/depth 目标创建失败\n");
     }
+    if(GN_Vk.hdrView == VK_NULL_HANDLE) {
+        fprintf(stderr, "[GN_Vk] 警告: HDR 目标不可用，renderPass3D 的 resolve 附件将无效（L1）\n");
+    }
 
     // ── 创建 3D Render Pass (3 附件: MSAA Color + MSAA Depth + Resolve) ──
     VkAttachmentDescription ads[3] = {};
-    // [0] MSAA Color — 多重采样, 瞬态 (不需要保存)
-    ads[0].format = GN_Vk.swapchainFormat;
+    // [0] MSAA Color — 多重采样, 瞬态；L1：格式必须与 resolve 附件一致（HDR RGBA16F）
+    ads[0].format = VK_FORMAT_R16G16B16A16_SFLOAT;
     ads[0].samples = GN_Vk.msaaSamples;
     ads[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     ads[0].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -49,13 +52,13 @@ void init3DTargets() {
     ads[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     ads[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     ads[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    // [2] Resolve — 单采样, 输出到 swapchain
-    ads[2].format = GN_Vk.swapchainFormat;
+    // [2] Resolve — 单采样，L1：解析到 HDR 目标，供合成阶段曝光/色调映射/Bloom
+    ads[2].format = VK_FORMAT_R16G16B16A16_SFLOAT;
     ads[2].samples = VK_SAMPLE_COUNT_1_BIT;
     ads[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     ads[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     ads[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    ads[2].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    ads[2].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkAttachmentReference cr = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}; // MSAA color
     VkAttachmentReference dr = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL}; // MSAA depth
@@ -124,7 +127,7 @@ bool create3DMsaaTargets() {
         ii.extent = {sw, sh, 1};
         ii.mipLevels = 1;
         ii.arrayLayers = 1;
-        ii.format = GN_Vk.swapchainFormat;
+        ii.format = VK_FORMAT_R16G16B16A16_SFLOAT; // L1：与 renderPass3D resolve 附件一致
         ii.tiling = VK_IMAGE_TILING_OPTIMAL;
         ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         ii.usage = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -143,7 +146,7 @@ bool create3DMsaaTargets() {
         VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         vi.image = GN_Vk.msaaColorImage;
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vi.format = GN_Vk.swapchainFormat;
+        vi.format = VK_FORMAT_R16G16B16A16_SFLOAT; // L1：与 MSAA 颜色附件格式一致
         vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         vi.subresourceRange.levelCount = 1;
         vi.subresourceRange.layerCount = 1;
@@ -188,7 +191,7 @@ void create3DForwardFramebuffers() {
     s_framebuffers3D = new VkFramebuffer[GN_Vk.swapchainImageCount];
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
         s_framebuffers3D[i] = VK_NULL_HANDLE;
-        VkImageView atts[3] = {GN_Vk.msaaColorView, GN_Vk.depthView, GN_Vk.swapchainViews[i]};
+        VkImageView atts[3] = {GN_Vk.msaaColorView, GN_Vk.depthView, GN_Vk.hdrView};
         VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
         fci.renderPass = GN_Vk.renderPass3D;
         fci.attachmentCount = 3;
@@ -412,8 +415,8 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
               GN_Vk.uniformBuffer3D, GN_Vk.uniformMemory3D);
 
     // ── 3D 光照 UBO ──────────────────────────────────
-    // 最大: GN_MAX_LIGHTS(8) * sizeof(sLIGHT_GPU)(80) + 20 = 660 bytes
-    CreateBuf(1024, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+    // L3c：含 4 级 CSM 矩阵与分割数据，长度 = sizeof(GN3d::sLIGHT_UBO)（1744 B）。
+    CreateBuf(sizeof(GN3d::sLIGHT_UBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
               GN_Vk.lightBuffer3D, GN_Vk.lightMemory3D);
 
@@ -425,7 +428,7 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
         dai.pSetLayouts = &GN_Vk.descriptorLayout3D;
         vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.descriptorSet3D);
         VkDescriptorBufferInfo dbi = {GN_Vk.uniformBuffer3D, 0, sizeof(VkSceneUBO)};
-        VkDescriptorBufferInfo lbi = {GN_Vk.lightBuffer3D, 0, 1024};
+        VkDescriptorBufferInfo lbi = {GN_Vk.lightBuffer3D, 0, sizeof(GN3d::sLIGHT_UBO)};
         VkDescriptorBufferInfo fbi = {atmosphereFogBuffer(), 0, atmosphereFogRange()};
         VkDescriptorImageInfo dii = {GN_Vk.defaultSampler, GN_Vk.defaultImageView,
                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -465,7 +468,7 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
     //  G1b：7 = GI UBO（§3.7 冻结槽位），8 = 预滤波环境 cubemap，9 = BRDF LUT
     // ═══════════════════════════════════════════════════════
     {
-        VkDescriptorSetLayoutBinding dslb[10] = {};
+        VkDescriptorSetLayoutBinding dslb[12] = {};
         dslb[0].binding = 0;
         dslb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         dslb[0].descriptorCount = 1;
@@ -507,8 +510,15 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
         dslb[9].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         dslb[9].descriptorCount = 1;
         dslb[9].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        // L4：10/11 = 透射率 / sky-view LUT（与天空管线同一组 LUT）。
+        for(int b = 10; b <= 11; ++b) {
+            dslb[b].binding = (uint32_t)b;
+            dslb[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            dslb[b].descriptorCount = 1;
+            dslb[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        }
         VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        dslci.bindingCount = 10;
+        dslci.bindingCount = 12;
         dslci.pBindings = dslb;
         vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.descriptorLayoutPBR);
     }
@@ -531,16 +541,44 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
     create3DPbrPipeline(pbrVert, pbrFrag);
 }
 
+namespace {
+// L3c：4 级 CSM 的按层 framebuffer 与层视图（阴影图 = 2048²×4 层 D32）。
+const uint32_t kShadowCascadeCount = 4;
+VkFramebuffer s_shadowCascadeFramebuffers[kShadowCascadeCount] = {};
+VkImageView s_shadowCascadeViews[kShadowCascadeCount] = {};
+} // namespace
+
+VkFramebuffer shadowFramebufferForCascade(uint32_t cascadeIndex) {
+    if(cascadeIndex >= kShadowCascadeCount) cascadeIndex = 0;
+    return s_shadowCascadeFramebuffers[cascadeIndex];
+}
+
+uint32_t GN_VkShadowCascadeCount() { return kShadowCascadeCount; }
+
+void destroy3DShadowCascades() {
+    for(uint32_t i = 0; i < kShadowCascadeCount; ++i) {
+        if(s_shadowCascadeFramebuffers[i] && GN_Vk.device) {
+            vkDestroyFramebuffer(GN_Vk.device, s_shadowCascadeFramebuffers[i], 0);
+        }
+        if(s_shadowCascadeViews[i] && GN_Vk.device) {
+            vkDestroyImageView(GN_Vk.device, s_shadowCascadeViews[i], 0);
+        }
+        s_shadowCascadeFramebuffers[i] = VK_NULL_HANDLE;
+        s_shadowCascadeViews[i] = VK_NULL_HANDLE;
+    }
+    GN_Vk.shadowFramebuffer = VK_NULL_HANDLE;
+}
+
 // 阴影映射：深度图像/视图/采样器、render pass、framebuffer、描述符集与管线。
 void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
     uint32_t smSize = GN_Vk.shadowMapSize;
-    // 创建 Shadow Map 图像
+    // 创建 Shadow Map 图像（L3c：4 层数组，每级一层）
     {
         VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         ii.imageType = VK_IMAGE_TYPE_2D;
         ii.extent = {smSize, smSize, 1};
         ii.mipLevels = 1;
-        ii.arrayLayers = 1;
+        ii.arrayLayers = kShadowCascadeCount;
         ii.format = VK_FORMAT_D32_SFLOAT;
         ii.tiling = VK_IMAGE_TILING_OPTIMAL;
         ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -561,25 +599,26 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
     {
         VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         vi.image = GN_Vk.shadowImage;
-        vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
         vi.format = VK_FORMAT_D32_SFLOAT;
         vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         vi.subresourceRange.levelCount = 1;
-        vi.subresourceRange.layerCount = 1;
+        vi.subresourceRange.layerCount = kShadowCascadeCount;
         vkCreateImageView(GN_Vk.device, &vi, 0, &GN_Vk.shadowView);
     }
 
-    // Shadow sampler (compare mode + border color)
+    // Shadow sampler — L3b：PCSS 需要原始深度（阻塞物搜索），因此关闭 compare、用 NEAREST；
+    // 比较在着色器里手动做（textureLod(...).r）。border=白 保证图外按“无遮挡”。
     {
         VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-        sci.magFilter = VK_FILTER_LINEAR;
-        sci.minFilter = VK_FILTER_LINEAR;
+        sci.magFilter = VK_FILTER_NEAREST;
+        sci.minFilter = VK_FILTER_NEAREST;
+        sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
         sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         sci.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-        sci.compareEnable = VK_TRUE;
-        sci.compareOp = VK_COMPARE_OP_LESS;
+        sci.compareEnable = VK_FALSE;
         vkCreateSampler(GN_Vk.device, &sci, 0, &GN_Vk.shadowSampler);
     }
 
@@ -604,16 +643,32 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         vkCreateRenderPass(GN_Vk.device, &rpi, 0, &GN_Vk.shadowRenderPass);
     }
 
-    {
+    // L3c：每级一个 2D 层视图 + framebuffer（render pass 的层通过视图选择，不用 multiview）。
+    destroy3DShadowCascades();
+    for(uint32_t c = 0; c < kShadowCascadeCount; ++c) {
+        VkImageViewCreateInfo lvi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        lvi.image = GN_Vk.shadowImage;
+        lvi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        lvi.format = VK_FORMAT_D32_SFLOAT;
+        lvi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        lvi.subresourceRange.levelCount = 1;
+        lvi.subresourceRange.baseArrayLayer = c;
+        lvi.subresourceRange.layerCount = 1;
+        if(vkCreateImageView(GN_Vk.device, &lvi, 0, &s_shadowCascadeViews[c]) != VK_SUCCESS) continue;
+
         VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
         fci.renderPass = GN_Vk.shadowRenderPass;
         fci.attachmentCount = 1;
-        fci.pAttachments = &GN_Vk.shadowView;
+        fci.pAttachments = &s_shadowCascadeViews[c];
         fci.width = smSize;
         fci.height = smSize;
         fci.layers = 1;
-        vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.shadowFramebuffer);
+        if(vkCreateFramebuffer(GN_Vk.device, &fci, 0, &s_shadowCascadeFramebuffers[c]) != VK_SUCCESS) {
+            continue;
+        }
     }
+    // 兼容旧调用点（gpuCheck 读 GN_Vk.shadowFramebuffer / 层 0）
+    GN_Vk.shadowFramebuffer = s_shadowCascadeFramebuffers[0];
 
     // Shadow 描述符布局 (Binding 0 = UBO for light VP)
     {

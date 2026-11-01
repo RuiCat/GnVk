@@ -105,8 +105,9 @@
 
 ### 3.3 本次补查的文献（库外，题录已核对）
 
-> 取原文状态：本机 `web_fetch` 对 `doi.org` / `iryoku.com` 超时或 404（代理限制），以下按出版题录引用，
-> **实现前必须取到原文或权威实现再落参数**；PDF 入库走 L0e，取不到时按 `papers/README.md` §3 的「题录 + 链接」登记。
+> 取原文状态（2026-10-31 更新）：Reinhard / SMAA / PCSS / SDSM / Wronski 已用 `curl` 补采落盘（见 §3.4 与
+> `papers/README.md` §2b）；ACES 规范、Jimenez 2014（426 MB PPTX）、Karis TAA（PPTX）、Sikachev SSR（PPTX）仍未取，
+> 按出版题录引用，**实现前必须取到原文或权威实现再落参数**。
 
 | 能力 | 论文 | 阶段 | 采用要点与边界 |
 |---|---|---|---|
@@ -119,20 +120,22 @@
 | 级联/稳定化阴影 | Lauritzen & Salvi, *Sample Distribution Shadow Maps*, I3D 2011（课程版[PDF](https://www.advances.realtimerendering.com/s2010/Lauritzen-SDSM(SIGGRAPH%202010%20Advanced%20RealTime%20Rendering%20Course).pdf)） | L3 | 先做固定分割 2–4 级 CSM，SDSM 作为可选升级 |
 | 体积雾 | Wronski, *Volumetric Fog: Unified Compute Shader-Based Solution to Atmospheric Scattering*, SIGGRAPH 2014（同[课程页](https://www.advances.realtimerendering.com/s2014/index.html)，已核实） | L4/L8 | froxel 体积雾与大气散射叠加；L4 先做空气透视，体积雾放 L8 |
 | SSR + IBL 混合 | Sikachev & Longchamps, *Reflection System in Thief*, SIGGRAPH 2014（同[课程页](https://www.advances.realtimerendering.com/s2014/index.html)，已核实） | L7 | 屏幕空间反射 + IBL/局部 cubemap 混合、粗糙度感知 |
+| FXAA（L2a v1） | Lottes, *FXAA*（NVIDIA 白皮书, 2009；题录：[FXAA WhitePaper](https://developer.download.nvidia.com/assets/gamedev/files/sdk/11/FXAA_WhitePaper.pdf)） | L2 | tonemap 后单 pass 边缘混合；本机未取原文，公式按 FXAA 3.11 公开版本实现并标注来源 |
+| SMAA（L2a 目标） | 同 §3.3 SMAA 行（CGF 2012） | L2 | 需 Area/Search LUT 纹理；资产未入库前以 FXAA v1 代替 |
 
 ### 3.4 文献入库计划（L0e）
 
 | # | 文件命名（`docs/papers/pdf/`） | 来源 | 状态 |
 |---|---|---|---|
-| 1 | `reinhard2002-photographic-tonemap.pdf` | DOI 10.1145/566654.566640 | 待取（DOI 代理不可达；可换作者镜像） |
-| 2 | `aces2-output-transform.pdf` 或官方规范 | ACES / aces-core 文档 | 待取（仓库已核实） |
-| 3 | `jimenez2014-cod-postprocessing.pdf` | advances 课程页链接 | 待取（课程页可访问） |
-| 4 | `karis2014-taa.pdf` | advances 课程页链接 | 待取（课程页可访问） |
-| 5 | `jimenez2012-smaa.pdf` | CGF DOI / 作者页 | 待取（代理超时/404） |
-| 6 | `fernando2005-pcss.pdf` | DOI 10.1145/1187112.1187153 | 待取 |
-| 7 | `lauritzen2011-sdsm.pdf` | advances 课程 PDF | 待取 |
-| 8 | `wronski2014-volumetric-fog.pdf` | advances 课程页链接 | 待取 |
-| 9 | `sikachev2014-ssr.pdf` | advances 课程页链接 | 待取 |
+| 1 | `reinhard2002-photographic-tonemap.pdf` | web.archive 的 ACM PDF | ✅ 已入库（2026-10-31，10 页） |
+| 2 | `aces2-output-transform.pdf` 或官方规范 | ACES / aces-core 文档 | ⬜ 待取（仓库可访问，AB） |
+| 3 | `jimenez2014-cod-postprocessing.pdf` | advances 课程页只有 426 MB PPTX | ⬜ 未取（体积过大，暂缓） |
+| 4 | `karis2014-taa.pdf` | advances 课程页只有 27 MB PPTX | ⬜ 未取（非 PDF，暂缓） |
+| 5 | `jimenez2012-smaa.pdf` | 作者页 PDF | ✅ 已入库（15 页） |
+| 6 | `fernando2005-pcss.pdf` | NVIDIA shadowlibrary PDF | ✅ 已入库（8 页） |
+| 7 | `lauritzen2011-sdsm.pdf` | advances SIGGRAPH 2010 课程 PDF | ✅ 已入库（33 页） |
+| 8 | `wronski2014-volumetric-fog.pdf` | advances 课程 PDF | ✅ 已入库（67 页） |
+| 9 | `sikachev2014-ssr.pdf` | advances 课程页只有 46 MB PPTX | ⬜ 未取（暂缓） |
 
 补采流程沿用 `docs/papers/README.md` §5–§6：落盘 → `knowledgeAudit.sh` 扫描 → 更新 §2 表与 `MANIFEST.sha256`；
 取不到 PDF 的条目写进 §3「未取到」，**不要**用二手博客替代原始出处。
@@ -207,7 +210,11 @@ Bloom 使亮区邻域像素提升且不改变远处暗区）；桌面固定场�
 
 ### 4.4 L2：抗锯齿（SMAA 先行，TAA 后置）
 
-- **L2a SMAA 1×**：边缘检测 + 混合权重 + 邻域混合三 pass，输入为 tonemap 后的 LDR + 深度边缘；无时域历史，风险最低。
+- **L2a AA v1 = FXAA（Lottes 2009，编译级已落地）**：在 `gn3d_composite.frag` 的 tonemap 之后做单 pass
+  FXAA 3.11 风格边缘混合（对角 luma 定方向 + 3/4 采样混合），邻域样本只含 HDR×曝光、不含 Bloom；
+  `sPOST_UBO.fxaa` 开关（默认 0，查看器 `T` 键切换）。
+  **SMAA 1× 未落地**：它需要 SMAA 的 Area/Search LUT 纹理（`docs/papers/` 尚未收录、本机也取不到该资产），
+  待 LUT 入库后替换 FXAA（接口仍走 composite 单 pass，便于对照）。
 - **L2b TAA（Karis 2014）**：投影 jitter（Halton 2,3）+ `RG16F` velocity 附件（G-Buffer 扩到 5 附件）+ 双缓冲历史 +
   邻域钳制；HDR 域做混合，tonemap 之前。**这是结构性改动**：需要第二份历史资源与 resize 重建，且必须与
   SSGI/云的时域重投影共用同一套重投影矩阵。
@@ -252,14 +259,23 @@ Bloom 使亮区邻域像素提升且不改变远处暗区）；桌面固定场�
 - **L5b 渲染**：半分辨率 raymarch（64 步起点）+ 6 步光照 march + 透射率/散射；蓝噪声抖动 + 时域重投影（复用 L2b 机制）。
 - **L5c 集成**：与 L4 大气散射耦合（太阳/天空光照）；云影可选；远处云与天空盒的接缝处理。
 
-**冲突必须显式解决**：`SKY_WEATHER_PLAN.md` 的决策 8 拍板「云 = 混合模式（远景 FBM + 中景 billboard），不做 raymarch」
-（`3D_FEATURE_PLAN.md:721-722`）。本阶段建议**渐进**：远景体积云（raymarch）+ 保留中景 billboard 与天空盒 FBM 作为低成本档，
-不一次性推翻旧决策；**开工前需你拍板**（§5 决策 3）。
+**决策 8 已被推翻（2026-10-31 用户拍板）**：`SKY_WEATHER_PLAN.md` 决策 8「云 = 混合模式，不做 raymarch」不再生效；
+体积云为**唯一云路径**：旧天空 FBM 云已从 `gn3d_skybox.frag` 删除，查看器不再提交 billboard 中景云（`X` 键整体开关，默认开）。
+本轮实际实现（`docs/L5_CLOUD_CONTRACT.md` 冻结契约）：
+- **L5a 数据（已落地）**：CPU 生成 64³ RGBA8 3D Perlin-Worley 噪声（R=基础、G/B=低频/高频 Worley，周期可平铺）
+  + 128² RG8 weather map；`src/graphics/cloudNoise.h/.cpp` 纯 CPU、带单测。
+- **L5b 渲染（已落地，与上文规划有偏差）**：**全分辨率**逐像素 raymarch（默认 32 步）+ 4 步光照 march +
+  静态像素抖动 + Beer/Lambert/HG 相位；**默认单层薄平面**（1600–2200 m，覆盖率/锐度/太阳/风逐帧来自天气），
+  多层参数保留但默认关闭；**未做**半分辨率 pass 与**未做**时域重投影（L2b TAA 尚未实现），两者登记为后续项。
+- **L5c 集成（已落地）**：在 3D pass 内、天空盒之后绘制（预乘 alpha 混合，前景几何随后自然覆盖）；
+  太阳方向/强度与 L4 的天空/大气同源；查看器 `X` 键（默认开）、叠层显示层数/覆盖率；旧云已停用。
+- **位置口径**：云层为**水平无限层**（v1），不接球形大气壳层；云影未做。
 
 **验收**：覆盖率与 weather map 一致；云层透光/暗部有体积感；性能目标（780M/1080p 待实测标定，先记录基线）；
 桌面固定相机截图对比；关闭开关回到现有 FBM/billboard 表现。
 
-**风险**：半分辨率 raymarch 的锯齿/拖影；噪声纹理显存；与雾/降水的透明排序；780M 性能可能不达标，需保留低档。
+**风险**：全分辨率 raymarch 在 780M/1080p 可能不达标（需实测后决定降半分辨率）；无时域重投影会有噪点/拖影；
+噪声纹理显存（1 MiB + weather 32 KiB）；与雾/降水的透明排序；多层边界接缝需桌面观察。
 
 ### 4.8 L6：DDGI 探针（Majercik 2019）
 
@@ -411,3 +427,38 @@ grep -n '空间划分' docs/3D_FEATURE_PLAN.md
 sed -n '14,24p' src/graphics/_Vulkan/vkGi.cpp
 grep -n 'GN_VkEnableGI\|GN_VkSetProbeWeight' src/graphics/_Vulkan/GN_Vk.h
 ```
+
+## 12. 实施进度（2026-10-31）
+
+| 阶段项 | 状态 | 证据 |
+|---|---|---|
+| L1a 线性 HDR 统一 | ✅ 编译级 | `vk3dInit.cpp`（MSAA/resolve RGBA16F、resolve→`hdrView`）；`vk3dInitScene.cpp`（deferred pass→HDR）；`GN_VkEnd3DPass`/`GN_VkDeferredLighting` 自动合成 |
+| L1b 曝光 | ✅ 编译级 | `postParams.*`（EV 换算/CPU 参考/单测）；`GN_VkSetExposure` |
+| L1c 色调映射 | ✅ 编译级 | `gn3d_composite.frag`（NONE/Reinhard/ACES 单次）；PBR/延迟 shader 内 Reinhard 已删 |
+| L0b 双重 Reinhard | ✅ 编译级 | 同上；`GN_VkBegin3DPassPBR_HDR` 归并为 PBR 别名 |
+| L0d 验收扩展（部分） | ✅ 编译级 | `gpuCheck3D.cpp` 新增 `3d.post.aces/reinhard/exposure`；旧色值站点由 `makeLegacyPostUbo()` 保持 |
+| L2a AA v1（FXAA） | ✅ 编译级 | `gn3d_composite.frag`（tonemap 后 FXAA 3.11 风格单 pass）；`sPOST_UBO.fxaa` + `GN_VkSetFxaa`；查看器 `T` 键；SMAA 待 LUT 资产 |
+| L3 阴影接线（查看器） | ✅ 编译级 | `sMESH/cMODEL::DrawShadow`（仅 OPAQUE）+ 查看器方向光 `enableShadow=true` + AABB 拟合正交光矩阵 + 每帧 shadow pass；`K` 键开关 |
+| L3a 稳定化（texel snapping） | ✅ 编译级 | `_Vulkan/vkShadowCascade.cpp` 光空间平移按 texel 世界尺寸取整；正交矩阵 `Mat44OrthoVK` 的 VK [0,1] 深度符号缺陷本轮修（`GN_3Dmath.cpp:336`，桌面需复验） |
+| L3b PCSS | ✅ 编译级 | 原始深度手动比较（NEAREST/非 compare）+ 16-tap blocker search + 半影 PCF（12/400/1..24 texel 经验值）；常量仍待桌面标定 |
+| L3c CSM | ✅ 编译级 | 4 级固定分割（对数/均匀混合 lambda=0.5）+ 相机视锥角点/AABB 拟合 + `sampler2DArray` 4 层阴影图（2048²×4）+ 着色器包含测试选级；`cascadeCount=1` 回退单级 |
+| L4a 大气 CPU 基座 | ✅ 编译级 | `atmosphereParams.h/.cpp`（Hillaire 参数/光学深度/透射率 LUT）+ `testAtmosphere` 7 用例 |
+| L4b 天空 CPU 参考 | ✅ 编译级 | `computeSkyRadiance`（单次散射+透射率查表）、`computeSkyViewLut` 192×108、`evalSkyViewLut`；+2 用例 |
+| L4c LUT 上传 + GPU 重建 | ✅ 编译级 | `vkAtmosphereLut.cpp`：透射率静态上传 + sky-view 改为逐帧 compute（`gn3d_skyview.comp`，dirty 时 `recordAtmosphereLutUpdate`）；`GN_VkGetAtmosphereLutViews`；`gpuCheck atmo.lut/atmo.skyview` |
+| L4d 天空/空气透视接线 | ✅ 编译级 | 天空 shader 采样 sky-view LUT（`atmosphereMix` 开关，旧解析路径保留）；PBR/延迟按 8-step 单次散射替换指数雾（`aAtmosphere2.w` 开关，指数雾 fallback 保留）；环境烘焙同源（同一天空管线 + LUT 绑定）；天气→大气映射由查看器每帧调用 |
+| L5a 云数据 | ✅ 编译级 | `src/graphics/cloudNoise.cpp`（64³ RGBA8 Perlin-Worley 周期噪声 + 128² RG8 weather map）+ `testCloudNoise` 单测 |
+| L5b 体积云 raymarch | ✅ 编译级（偏离规划） | `gn3d_cloud_vol.vert/frag`：**全分辨率** raymarch（默认 32 步 + 4 光照步 + 静态像素抖动 + Beer/粉末/HG + 环境项）；**球壳求交（曲面）** + 默认单层 1600–2200 m（多层参数保留、默认关闭）；25 km 距离钳制 + 12 km 远景/地平线淡出（修放射线）；光照 march 1.5×厚度（修黑云）；覆盖率/锐度/太阳/风逐帧来自天气；**未做**半分辨率与时域重投影（L2b 未实现） |
+| L5c 集成 | ✅ 编译级 | `_Vulkan/vkVolumetricCloud.cpp`（3D 噪声/weather 纹理 + 192 B UBO + 预乘 alpha 全屏管线）；3D pass 内天空盒之后绘制；**旧云已停用**（skybox FBM 云删除、billboard 不再提交）；查看器 `X` 开关（默认开）、叠层显示；`gpuCheck 3d.volcloud` |
+| L1d Bloom mip 链 | ✅ 编译级 | `_Vulkan/vkBloom.cpp`（5 级 13-tap↓ + 9-tap tent↑，首级曝光+软阈值）、`gn3d_bloom_down/up.frag`、composite binding3；默认 0.15/1.0/0.5 |
+| L0a GI 子开关 | ✅ 编译级 | `GN_VkEnableGI` / `GN_VkSetSsaoEnabled` / `GN_VkSetSsgiStrength` / `GN_VkSetProbeWeight`（各自只改对应 UBO 字段） |
+| L0e 论文补采 | ✅ 部分 | 5 篇入库（Reinhard/SMAA/PCSS/SDSM/Wronski），库 17 篇 `sha256sum -c` 全过、knowledgeAudit 无 suspicious/malicious；ACES/两篇 PPTX/SSR 未取 |
+| L0c 亮度基线 | 🟨 部分 | 查看器 `9/0` 调 EV、`7/8` 调 Bloom，叠层显示 POST 参数；固定场景基线数值仍待桌面 |
+
+验证记录（2026-10-31 夜，L5 体积云后）：`make` exit 0；`make unit` = **406 cases / 0 failed**（+10 cloudNoise）；
+`make shaders` = **45 个**（43 + `gn3d_cloud_vol.vert/frag`）+ 严格编译 45/45；
+`make gpuCheck` 编译通过（本机无 Vulkan 设备 ⇒ 运行 SKIP / exit 2，属环境预期）；`make mmdViewer` 编译通过；
+`lintCodeModularity src/graphics/_Vulkan src/graphics tests/unit tests/gpu tests/mmdViewer --naming --comments`
+本轮改动文件 0 新增违规（仅存量 `GN_2Dmath.cpp` 超长与 spv 头 `no-split` 告警）。
+**桌面 `gpuCheck` 与视觉验收未执行**——CSM 接缝/texel snapping 抖动、天空 LUT 与 Hillaire 参考趋势、
+空气透视近远差异、IBL 与天空同源、PCSS 常量标定、体积云多层观感/噪点/性能（全分辨率 raymarch 在 780M 1080p 的基线）全部待桌面。
+

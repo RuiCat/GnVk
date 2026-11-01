@@ -6,63 +6,31 @@
 namespace GNg {
 
 void init3DHdr() {
-    // HDR 目标图像/视图/采样器（resize 复用同一 helper）。
-    create3DHdrImages();
-
-    // ── 3D HDR RenderPass (3 附件: MSAA Color + MSAA Depth + HDR Resolve) ──
-    // 与 renderPass3D 结构完全相同, 仅 resolve 附件格式不同
-    {
-        VkAttachmentDescription hds[3] = {};
-        hds[0].format = GN_Vk.swapchainFormat;
-        hds[0].samples = GN_Vk.msaaSamples;
-        hds[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        hds[0].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        hds[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        hds[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        hds[1].format = GN_Vk.depthFormat;
-        hds[1].samples = GN_Vk.msaaSamples;
-        hds[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        hds[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        hds[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        hds[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        hds[2].format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        hds[2].samples = VK_SAMPLE_COUNT_1_BIT;
-        hds[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        hds[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        hds[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        hds[2].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkAttachmentReference hcr = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-        VkAttachmentReference hdr = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-        VkAttachmentReference hrr = {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-        VkSubpassDescription hsp = {};
-        hsp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        hsp.colorAttachmentCount = 1;
-        hsp.pColorAttachments = &hcr;
-        hsp.pResolveAttachments = &hrr;
-        hsp.pDepthStencilAttachment = &hdr;
-        VkRenderPassCreateInfo hrpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-        hrpi.attachmentCount = 3;
-        hrpi.pAttachments = hds;
-        hrpi.subpassCount = 1;
-        hrpi.pSubpasses = &hsp;
-        vkCreateRenderPass(GN_Vk.device, &hrpi, 0, &GN_Vk.hdrRenderPass);
-    }
-    // HDR framebuffers（引用 MSAA/depth/HDR view；resize 走同一 helper）
-    create3DHdrFramebuffers();
+    // L1：HDR 目标已由 GN_VkInit3D 在 renderPass3D 之前创建（作为 resolve 附件）；
+    // 这里只兜底（独立调用 init3DHdr 时）与创建合成资源。
+    if(GN_Vk.hdrImage == VK_NULL_HANDLE) create3DHdrImages();
 
     // ── 编译合成着色器 ──
     auto compVertSpv = LoadSPIRVFile("assets/shaders/gn3d_composite.vert.spv");
     auto compFragSpv = LoadSPIRVFile("assets/shaders/gn3d_composite.frag.spv");
     if(!compVertSpv.empty() && !compFragSpv.empty()) {
-        // 描述符布局: Binding 1 = HDR sampler (Fragment)
+        // 描述符布局: Binding 1 = HDR sampler, Binding 2 = POST UBO, Binding 3 = Bloom (Fragment)
         {
-            VkDescriptorSetLayoutBinding dslb[1] = {};
+            VkDescriptorSetLayoutBinding dslb[3] = {};
             dslb[0].binding = 1;
             dslb[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             dslb[0].descriptorCount = 1;
             dslb[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            dslb[1].binding = 2;
+            dslb[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            dslb[1].descriptorCount = 1;
+            dslb[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            dslb[2].binding = 3;
+            dslb[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            dslb[2].descriptorCount = 1;
+            dslb[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
             VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-            dslci.bindingCount = 1;
+            dslci.bindingCount = 3;
             dslci.pBindings = dslb;
             vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.compositeDescriptorLayout);
         }
@@ -159,23 +127,6 @@ void create3DHdrImages() {
     }
 }
 
-void create3DHdrFramebuffers() {
-    if(GN_Vk.hdrRenderPass == VK_NULL_HANDLE || GN_Vk.hdrView == VK_NULL_HANDLE) return;
-    GN_Vk.hdrFramebuffers = new VkFramebuffer[GN_Vk.swapchainImageCount];
-    for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
-        GN_Vk.hdrFramebuffers[i] = VK_NULL_HANDLE;
-        VkImageView hatts[3] = {GN_Vk.msaaColorView, GN_Vk.depthView, GN_Vk.hdrView};
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        fci.renderPass = GN_Vk.hdrRenderPass;
-        fci.attachmentCount = 3;
-        fci.pAttachments = hatts;
-        fci.width = GN_Vk.swapchainExtent.width;
-        fci.height = GN_Vk.swapchainExtent.height;
-        fci.layers = 1;
-        vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.hdrFramebuffers[i]);
-    }
-}
-
 void destroy3DHdrTargets() {
     if(GN_Vk.hdrFramebuffers) {
         for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
@@ -205,7 +156,8 @@ void destroy3DHdrTargets() {
 void recreate3DHdrTargets() {
     destroy3DHdrTargets();
     create3DHdrImages();
-    create3DHdrFramebuffers();
+    // L1：HDR view 是 renderPass3D 的 resolve 附件；framebuffer 由 recreate3DTargets 重建。
+    // 合成描述符 binding 1 由 recreate3DCompositeTargets 重写（resize 顺序在它之前）。
 }
 
 // 合成描述符：binding 1 = HDR 纹理（resize 换新 hdrView 后重写）。
@@ -459,8 +411,9 @@ void init3DSkybox() {
         auto svSpv = LoadSPIRVFile("assets/shaders/gn3d_skybox.vert.spv");
         auto sfSpv = LoadSPIRVFile("assets/shaders/gn3d_skybox.frag.spv");
         if(!svSpv.empty() && !sfSpv.empty()) {
-            // 描述符布局: Binding 0 = UBO (invProj+invView), Binding 1 = Cubemap
-            VkDescriptorSetLayoutBinding dslb[2] = {};
+            // 描述符布局: 0=UBO（144 B：viewProj + VkSkyParams 80 B）、1=Cubemap（保留）、
+            // 2/3=L4 透射率 / sky-view LUT（sampler2D）。
+            VkDescriptorSetLayoutBinding dslb[4] = {};
             dslb[0].binding = 0;
             dslb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             dslb[0].descriptorCount = 1;
@@ -469,8 +422,14 @@ void init3DSkybox() {
             dslb[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             dslb[1].descriptorCount = 1;
             dslb[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            for(int b = 2; b <= 3; ++b) {
+                dslb[b].binding = (uint32_t)b;
+                dslb[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                dslb[b].descriptorCount = 1;
+                dslb[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            }
             VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-            dslci.bindingCount = 2;
+            dslci.bindingCount = 4;
             dslci.pBindings = dslb;
             vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.skyboxDescriptorLayout);
 
@@ -479,8 +438,8 @@ void init3DSkybox() {
             plci.pSetLayouts = &GN_Vk.skyboxDescriptorLayout;
             vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &GN_Vk.skyboxPipelineLayout);
 
-            // UBO (128 bytes: viewProj 64 + VkSkyParams 64)
-            CreateBuf(128, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            // UBO (144 bytes: viewProj 64 + VkSkyParams 80)
+            CreateBuf(144, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                       GN_Vk.skyboxUBOBuffer, GN_Vk.skyboxUBOMemory);
 
@@ -491,7 +450,7 @@ void init3DSkybox() {
                 dai.descriptorSetCount = 1;
                 dai.pSetLayouts = &GN_Vk.skyboxDescriptorLayout;
                 vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.skyboxDescriptorSet);
-                VkDescriptorBufferInfo dbi = {GN_Vk.skyboxUBOBuffer, 0, 128};
+                VkDescriptorBufferInfo dbi = {GN_Vk.skyboxUBOBuffer, 0, 144};
                 VkDescriptorImageInfo dii = {GN_Vk.skyboxSampler, GN_Vk.skyboxView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
                 VkWriteDescriptorSet w[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
                 w[0].dstSet = GN_Vk.skyboxDescriptorSet;
@@ -557,7 +516,7 @@ static void createDeferredLightFramebuffers() {
         VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
         fci.renderPass = GN_Vk.deferredLightRenderPass;
         fci.attachmentCount = 1;
-        fci.pAttachments = &GN_Vk.swapchainViews[i];
+        fci.pAttachments = &GN_Vk.hdrView; // L1：延迟光照写入 HDR 目标，由合成阶段统一 tonemap
         fci.width = GN_Vk.swapchainExtent.width;
         fci.height = GN_Vk.swapchainExtent.height;
         fci.layers = 1;
@@ -645,7 +604,7 @@ void init3DDeferredLight() {
     // 描述符: 0=SceneUBO,1=gNormalRough,2=gAlbedoMetal,3=gAo,4=gDepth,5=shadow,6=skybox,7=LightUBO,
     //         8=雾 UBO（P11-S3）,9=GI UBO,10=预滤波环境 cubemap,11=BRDF LUT（G1b）,
     //         12=SSAO blurAO（G2b）,13=SSGI denoised（G4）,14=probe UBO,15..23=探针 3D 纹理（G5b-2）
-    VkDescriptorSetLayoutBinding dlb[24] = {};
+    VkDescriptorSetLayoutBinding dlb[26] = {};
     dlb[0].binding = 0;
     dlb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     dlb[0].descriptorCount = 1;
@@ -703,8 +662,15 @@ void init3DDeferredLight() {
         dlb[b].descriptorCount = 1;
         dlb[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    // L4：24/25 = 透射率 / sky-view LUT（延迟 GI 槽位 0..23 不动）。
+    for(int b = 24; b <= 25; b++) {
+        dlb[b].binding = (uint32_t)b;
+        dlb[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        dlb[b].descriptorCount = 1;
+        dlb[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo dci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    dci.bindingCount = 24;
+    dci.bindingCount = 26;
     dci.pBindings = dlb;
     vkCreateDescriptorSetLayout(GN_Vk.device, &dci, 0, &GN_Vk.deferredLightDescriptorLayout);
     {
@@ -755,16 +721,16 @@ void init3DDeferredLight() {
         vkUpdateDescriptorSets(GN_Vk.device, 5, w, 0, 0);
         writeDeferredLightGBufferBindings();
     }
-    // 延迟光照 RenderPass → swapchain (复用 composite render pass 格式)
-    // 只与 swapchainFormat 有关、与尺寸无关，resize 不重建。
+    // 延迟光照 RenderPass → HDR 目标（L1：与 renderPass3D resolve 共用 hdrView，由合成阶段统一 tonemap）
+    // 只与 HDR 格式有关、与尺寸无关，resize 不重建。
     {
         VkAttachmentDescription ad = {};
-        ad.format = GN_Vk.swapchainFormat;
+        ad.format = VK_FORMAT_R16G16B16A16_SFLOAT;
         ad.samples = VK_SAMPLE_COUNT_1_BIT;
         ad.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         ad.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         ad.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        ad.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        ad.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         VkAttachmentReference ar = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
         VkSubpassDescription sp = {};
         sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;

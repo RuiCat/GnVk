@@ -85,6 +85,8 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         vkUnmapMemory(GN_Vk.device, GN_Vk.lightMemory3D);
     }
 
+    // L4：sky-view LUT 重建（前向 pass 路径，render pass 之外录制；此前只有 PBR/延迟路径接了）
+    recordAtmosphereLutUpdate(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     // 开始 3D render pass
     {
         VkClearValue cvs[3];
@@ -115,6 +117,9 @@ void GN_VkEnd3DPass() {
 
     s_in3DPass = false;
     s_inRenderPass = false; // 3D pass 结束，不重启 2D pass（避免 CLEAR 清掉 3D 内容）
+    // L1：3D 输出统一线性 HDR → 合成（曝光/色调映射/Bloom）到 swapchain；
+    // 2D 叠层随后以 LOAD 方式画在其上。
+    GN_VkCompositeToSwapchain();
 }
 
 void GN_VkDraw3D(const void *vertices, uint32_t vertexCount,

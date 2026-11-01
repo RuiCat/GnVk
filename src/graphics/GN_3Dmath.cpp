@@ -333,7 +333,9 @@ void Mat44OrthoVK(sMAT44 *out, float left, float right,
     memset(out->m, 0, sizeof(out->m));
     out->m[0] = 2.0f * rl;
     out->m[5] = 2.0f * tb;
-    out->m[10] = -fn; // [0,1] 深度映射
+    // VK [0,1]：z_view=-near → 0、-far → 1。fn=1/(near-far) 本身为负，故 m[10]=fn。
+    // 旧值 -fn 会把 near/far 都映射到负 NDC（被光栅钳到 0），正交深度不可用；L3c CSM 依赖本矩阵，本轮修正。
+    out->m[10] = fn;
     out->m[12] = -(right + left) * rl;
     out->m[13] = -(top + bottom) * tb;
     out->m[14] = nearZ * fn;

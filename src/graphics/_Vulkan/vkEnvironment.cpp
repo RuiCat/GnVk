@@ -161,15 +161,22 @@ bool createEnvBakeTargets() {
     return true;
 }
 
-// ── 烘焙描述符/管线：每面一个 128 B UBO（6×128 B 连续缓冲）+ 1 个描述符集，逐面绑定 ──
+// ── 烘焙描述符/管线：每面一个 144 B UBO（6×256 B 连续缓冲）+ 0/1/2/3 四槽，逐面绑定 ──
 bool createEnvBakePipeline() {
-    VkDescriptorSetLayoutBinding dslb[1] = {};
+    VkDescriptorSetLayoutBinding dslb[4] = {};
     dslb[0].binding = 0;
     dslb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     dslb[0].descriptorCount = 1;
     dslb[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    // L4：1 保留（cubemap），2/3 = 透射率 / sky-view LUT（与天空管线同孔径）。
+    for(int b = 1; b <= 3; ++b) {
+        dslb[b].binding = (uint32_t)b;
+        dslb[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        dslb[b].descriptorCount = 1;
+        dslb[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    dslci.bindingCount = 1;
+    dslci.bindingCount = 4;
     dslci.pBindings = dslb;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.envBakeDescriptorLayout) !=
        VK_SUCCESS) {
@@ -189,24 +196,49 @@ bool createEnvBakePipeline() {
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &GN_Vk.envBakeDescriptorLayout;
+    // L4：烘焙用同一套天空 shader ⇒ 必须绑定透射率 / sky-view LUT（2/3），否则采样未绑定描述符。
+    VkImageView lutTransView = VK_NULL_HANDLE;
+    VkImageView lutSkyView = VK_NULL_HANDLE;
+    VkSampler lutTransSampler = VK_NULL_HANDLE;
+    VkSampler lutSkySampler = VK_NULL_HANDLE;
+    const bool lutReady = GN_VkGetAtmosphereLutViews(&lutTransView, &lutSkyView, &lutTransSampler,
+                                                     &lutSkySampler);
+    if(!lutReady) {
+        fprintf(stderr, "[GN_Vk] 警告: 环境烘焙时大气 LUT 未就绪，天空烘焙回退解析路径（L4）\n");
+    }
+    VkDescriptorImageInfo lutPair[2] = {
+        {lutTransSampler, lutTransView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {lutSkySampler, lutSkyView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
     void *mapped = nullptr;
     vkMapMemory(GN_Vk.device, GN_Vk.envBakeUBOMemory, 0, ENV_FACE_COUNT * ENV_BAKE_UBO_STRIDE, 0, &mapped);
     for(int face = 0; face < ENV_FACE_COUNT; face++) {
-        // 每面 128 B：viewProj(64 B) + VkSkyParams(64 B)；天空参数用默认值（G3 负责天气重烘）。
+        // 每面 144 B：viewProj(64 B) + VkSkyParams(80 B)；天空参数用默认值（G3 负责天气重烘）。
         VkSkyParams skyParams;
         uint8_t *slot = (uint8_t *)mapped + face * ENV_BAKE_UBO_STRIDE;
         buildFaceViewProj(face, (float *)slot);
         memcpy(slot + 64, &skyParams, sizeof(VkSkyParams));
         vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.envBakeDescriptorSets[face]);
         VkDescriptorBufferInfo dbi = {GN_Vk.envBakeUBOBuffer,
-                                      (VkDeviceSize)(face * ENV_BAKE_UBO_STRIDE), 128};
-        VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        w.dstSet = GN_Vk.envBakeDescriptorSets[face];
-        w.dstBinding = 0;
-        w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        w.descriptorCount = 1;
-        w.pBufferInfo = &dbi;
-        vkUpdateDescriptorSets(GN_Vk.device, 1, &w, 0, 0);
+                                      (VkDeviceSize)(face * ENV_BAKE_UBO_STRIDE), 144};
+        VkWriteDescriptorSet w[3] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        w[0].dstSet = GN_Vk.envBakeDescriptorSets[face];
+        w[0].dstBinding = 0;
+        w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        w[0].descriptorCount = 1;
+        w[0].pBufferInfo = &dbi;
+        vkUpdateDescriptorSets(GN_Vk.device, 1, w, 0, 0);
+        if(lutReady) {
+            for(int b = 0; b < 2; ++b) {
+                w[b].dstSet = GN_Vk.envBakeDescriptorSets[face];
+                w[b].dstBinding = 2u + (uint32_t)b;
+                w[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                w[b].descriptorCount = 1;
+                w[b].pImageInfo = &lutPair[b];
+            }
+            vkUpdateDescriptorSets(GN_Vk.device, 2, w, 0, 0);
+        }
     }
     if(mapped) vkUnmapMemory(GN_Vk.device, GN_Vk.envBakeUBOMemory);
     auto svSpv = LoadSPIRVFile("assets/shaders/gn3d_skybox.vert.spv");

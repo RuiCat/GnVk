@@ -8,6 +8,10 @@
 >
 > **已确认决策（2026-10-28）**
 > 1. 云 = **混合模式**：远景在天空着色器里做 FBM 云，中景再加一层 billboard 云片（视差）；不做体素/raymarch。
+>
+> ⚠️ **决策 1（云）已于 2026-10-31 被用户推翻**：L5 体积云（多层 raymarch）作为新路径落地，
+> 见 `docs/L5_CLOUD_CONTRACT.md` 与 `docs/LIGHTING_PLAN.md` §4.7；旧 FBM 天空云 + billboard 中景云
+> 保留为回退（查看器 `X` 键开关，默认关）。本文件其余决策（2–5）不变。
 > 2. 雾 = **独立 Weather UBO**（不扩 SceneUBO，见 §5.2）。
 > 3. 雨雪 v1 = **CPU 展开 billboard**（接受每帧上传带宽）。
 > 4. **HDR 路径纳入首版**（天空/降水各建 HDR 变体管线）。
