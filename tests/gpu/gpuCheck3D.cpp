@@ -5,6 +5,8 @@
 #include "GN_Vk.h"
 #include "GN_3Dlight.h"
 #include "giParams.h" // G2a：srgbDecode（G-Buffer 附件 1 为 RGBA8_SRGB）
+#include "postParams.h" // L1：POST UBO（曝光/色调映射）
+#include "atmosphereParams.h" // L4c：大气 LUT CPU 期望值
 
 #include "gpuCheckReport.h"
 #include "gpuPixelRead.h"
@@ -51,7 +53,8 @@ GN3d::sLIGHT_UBO MakeLight(bool withSun) {
     light.ambientLight[1] = 1.0f;
     light.ambientLight[2] = 1.0f;
     light.ambientLight[3] = 1.0f;
-    light.shadowMapSize = 2048.0f;
+    light.shadowParams[0] = 2048.0f; // L3c：阴影图分辨率（旧 shadowMapSize 已并入 shadowParams）
+    light.shadowParams[1] = 1.0f;    // 本站点用单级阴影
     if(withSun) {
         light.lightCount = 1.0f;
         light.lights[0].color[0] = 1.0f;
@@ -408,6 +411,152 @@ void RunSkyboxCheck(const GNg::sMAT44 &identity, const GNg::sVEC3 &eye,
     else ReportFail("3d.skybox", detail);
 }
 
+// L1：后处理数值断言——线性 1.0 的绿色四边形经不同 tonemap 后的中心像素。
+// 期望值来自 postParams.cpp 的 CPU 参考公式（ACES(1)=2.54/3.16、Reinhard(1)=0.5、ACES(2)=10.1/11.04）。
+void RunPostChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
+                   const GNg::sVEC3 &eye, const GN3d::sLIGHT_UBO &light) {
+    if(!GNg::GN_Vk.compositePipeline) {
+        ReportSkip("3d.post.aces", "compositePipeline missing (see pipe.3d.composite)");
+        return;
+    }
+    sQUAD quad;
+    MakeQuad(quad, 0.5f);
+    std::vector<uint8_t> pixels;
+    sFLOAT_PIXEL pixel;
+
+    const auto expectGreen = [&](const char *name, const GN3d::sPOST_UBO &post, float expected) {
+        GNg::GN_VkSetPost(post);
+        if(!BeginFrame()) {
+            ReportFail(name, "GN_VkBeginFrame failed");
+            return;
+        }
+        GNg::GN_VkBegin3DPass(&identity, &eye, &light, sizeof(light));
+        GNg::GN_VkDraw3D(quad.verts, 4, kQuadIndexBA, 6, &model, 0.0f, 1.0f, 0.0f);
+        GNg::GN_VkEnd3DPass();
+        EndFrameAndWait();
+        if(!ReadCenter(pixels, pixel)) {
+            ReportFail(name, "swapchain readback failed");
+            return;
+        }
+        char detail[160];
+        std::snprintf(detail, sizeof(detail), "g=%.4f expected=%.4f", pixel.g, expected);
+        if(std::fabs(pixel.g - expected) <= 0.012f) ReportPass(name, detail);
+        else ReportFail(name, detail);
+    };
+
+    GN3d::sPOST_UBO aces = GN3d::makeDefaultPostUbo();
+    aces.bloomIntensity = 0.0f; // 关 Bloom，只验 tonemap
+    aces.exposure = 1.0f;
+    aces.tonemapMode = GN3d::eTONEMAP_ACES;
+    expectGreen("3d.post.aces", aces, 2.54f / 3.16f);
+
+    GN3d::sPOST_UBO reinhard = aces;
+    reinhard.tonemapMode = GN3d::eTONEMAP_REINHARD;
+    expectGreen("3d.post.reinhard", reinhard, 0.5f);
+
+    GN3d::sPOST_UBO exposure = aces;
+    exposure.exposure = 2.0f; // ACES(2)
+    expectGreen("3d.post.exposure", exposure, 10.1f / 11.04f);
+
+    // 恢复回归档，避免影响后续站点。
+    GNg::GN_VkSetPost(GN3d::makeLegacyPostUbo());
+}
+
+// L4c：大气 LUT 上传校验——回读透射率纹理，与 CPU 期望值逐点比较；sky-view 中心项需有限。
+void RunAtmosphereLutCheck() {
+    VkImage trans = VK_NULL_HANDLE;
+    VkImage sky = VK_NULL_HANDLE;
+    if(!GNg::GN_VkGetAtmosphereLut(&trans, &sky)) {
+        ReportSkip("atmo.lut", "atmosphere LUT not ready");
+        return;
+    }
+    const uint32_t tw = (uint32_t)GN3d::ATMOSPHERE_TRANSMITTANCE_WIDTH;
+    const uint32_t th = (uint32_t)GN3d::ATMOSPHERE_TRANSMITTANCE_HEIGHT;
+    std::vector<uint8_t> bytes;
+    if(!ReadColorImage(trans, VK_FORMAT_R16G16B16A16_SFLOAT,
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, tw, th, bytes)) {
+        ReportFail("atmo.lut", "transmittance readback failed");
+        return;
+    }
+    GN3d::sATMOSPHERE_PARAMS params = GN3d::makeDefaultAtmosphereParams();
+    std::vector<float> expected((size_t)tw * (size_t)th * 4u, 0.0f);
+    if(!GN3d::computeTransmittanceLut(params, (int)tw, (int)th, expected.data())) {
+        ReportFail("atmo.lut", "CPU transmittance LUT failed");
+        return;
+    }
+    const uint32_t points[3][2] = {{1u, 1u}, {tw / 2u, th / 2u}, {tw - 2u, th - 2u}};
+    float maxError = 0.0f;
+    for(int i = 0; i < 3; ++i) {
+        const uint32_t x = points[i][0];
+        const uint32_t y = points[i][1];
+        const size_t offset = ((size_t)y * (size_t)tw + (size_t)x) * 8u;
+        if(offset + 2u > bytes.size()) continue;
+        uint16_t half = 0;
+        std::memcpy(&half, bytes.data() + offset, sizeof(half));
+        const float gpuValue = GpuCheck::HalfToFloat(half);
+        const float cpuValue = expected[((size_t)y * (size_t)tw + (size_t)x) * 4u];
+        const float error = std::fabs(gpuValue - cpuValue);
+        if(error > maxError) maxError = error;
+    }
+
+    // L4：sky-view LUT 的 GPU 数值 vs CPU 参考（与 init 相同的 45° 太阳；容差 2%）。
+    std::vector<uint8_t> skyBytes;
+    bool skyFinite = false;
+    float skyMaxErr = 0.0f;
+    const uint32_t sw = (uint32_t)GN3d::ATMOSPHERE_SKYVIEW_LUT_WIDTH;
+    const uint32_t sh = (uint32_t)GN3d::ATMOSPHERE_SKYVIEW_LUT_HEIGHT;
+    if(ReadColorImage(sky, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      sw, sh, skyBytes) &&
+       skyBytes.size() >= (size_t)sw * sh * 8u) {
+        std::vector<float> skyCpu((size_t)sw * (size_t)sh * 4u, 0.0f);
+        const float sun[3] = {0.5f, 0.70710678f, 0.5f};
+        if(GN3d::computeSkyViewLut(params, expected.data(), (int)tw, (int)th, sun, (int)sw, (int)sh,
+                                   skyCpu.data())) {
+            skyFinite = true;
+            const uint32_t points[3][2] = {{sw / 8u, sh / 8u},
+                                           {sw / 2u, sh / 2u},
+                                           {sw - 9u, sh - 9u}};
+            for(int i = 0; i < 3; ++i) {
+                const size_t texel = ((size_t)points[i][1] * sw + points[i][0]);
+                for(int c = 0; c < 3; ++c) {
+                    uint16_t half = 0;
+                    std::memcpy(&half, skyBytes.data() + texel * 8u + (size_t)c * 2u, sizeof(half));
+                    const float gpuValue = GpuCheck::HalfToFloat(half);
+                    const float cpuValue = skyCpu[texel * 4u + (size_t)c];
+                    if(!std::isfinite(gpuValue) || !std::isfinite(cpuValue)) {
+                        skyFinite = false;
+                        continue;
+                    }
+                    if(cpuValue <= 1.0e-4f) continue;
+                    const float rel = std::fabs(gpuValue - cpuValue) / cpuValue;
+                    if(rel > skyMaxErr) skyMaxErr = rel;
+                }
+            }
+        }
+    }
+    char skyDetail[160];
+    std::snprintf(skyDetail, sizeof(skyDetail), "skyMaxRelErr=%.4f", skyMaxErr);
+    if(!skyFinite) ReportSkip("atmo.skyview", "sky-view readback/CPU reference failed");
+    else if(skyMaxErr <= 0.02f) ReportPass("atmo.skyview", skyDetail);
+    else ReportFail("atmo.skyview", skyDetail);
+
+    char detail[160];
+    std::snprintf(detail, sizeof(detail), "transMaxErr=%.5f sky=%s", maxError,
+                  skyFinite ? "finite" : "bad");
+    if(maxError <= 0.02f && skyFinite) ReportPass("atmo.lut", detail);
+    else ReportFail("atmo.lut", detail);
+}
+
+// L3c：4 级 CSM 接线就绪性（按层内容读回需桌面 GPU；此处断言级数与阴影图存在）。
+void RunShadowCascadeCheck() {
+    const uint32_t count = GNg::GN_VkShadowCascadeCount();
+    char detail[128];
+    std::snprintf(detail, sizeof(detail), "cascadeCount=%u shadowImage=%s", count,
+                  GNg::GN_Vk.shadowImage != VK_NULL_HANDLE ? "ready" : "missing");
+    if(count == 4u && GNg::GN_Vk.shadowImage != VK_NULL_HANDLE) ReportPass("3d.shadow.cascades", detail);
+    else ReportFail("3d.shadow.cascades", detail);
+}
+
 } // namespace
 
 void Run3DChecks() {
@@ -420,11 +569,15 @@ void Run3DChecks() {
     const GN3d::sLIGHT_UBO sun = MakeLight(true);
 
     RunShadowCheck(identity, model); // 先跑阴影，确保 PBR 采样时深度图布局有效
+    RunShadowCascadeCheck();
     RunForwardChecks(identity, model, eye, ambient);
     RunPbrChecks(identity, model, eye, sun);
     RunDeferredChecks(identity, model, eye, sun);
     RunCompositeCheck(identity, model, eye, sun);
+    RunAtmosphereLutCheck();
+
     RunSkyboxCheck(identity, eye, ambient);
+    RunPostChecks(identity, model, eye, ambient);
 }
 
 } // namespace GpuCheck

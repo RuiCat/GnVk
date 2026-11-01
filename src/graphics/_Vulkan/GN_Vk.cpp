@@ -882,10 +882,10 @@ void GN_VkResize(int w, int h) {
     recreate2DPipelines(); // task-26：2D 叠层固定视口也随新尺寸重建（失败只告警）
 #ifdef GN_USING_3D
     // ── 3D 资源按新尺寸完整重建（顺序敏感：fb 引用 view，管线固定视口）──
-    // MSAA/depth → 3D forward framebuffer（修复 s_framebuffers3D 引用旧 swapchainView 的悬垂）。
-    recreate3DTargets();
-    // HDR 目标（image/view/sampler + hdrFramebuffers）随尺寸重建；HDR render pass 与格式无关，保留。
+    // L1：先重建 HDR 目标（renderPass3D 的 resolve 附件 + 延迟光照颜色附件都引用它），
+    // 再重建 MSAA/depth 与引用新 hdrView 的 3D forward framebuffer。
     recreate3DHdrTargets();
+    recreate3DTargets();
     // G-Buffer 不引用 swapchainView，但图像/视图/内存/framebuffer 与固定视口管线都依赖尺寸。
     recreate3DGbufferTargets();
     // G2b：SSAO 目标/管线随尺寸重建，并重写引用 G-Buffer normal/depth 的描述符。
@@ -896,6 +896,10 @@ void GN_VkResize(int w, int h) {
     create3DDeferredLightTargets();
     // G0b：调试视图管线固定视口，按新 extent 重建（旧管线留在缓存）。
     recreate3DGbufferDebugPipeline();
+    // L1d：Bloom mip 图/fb/管线按新尺寸重建，并重写 composite binding3（新 level0 视图）。
+    if(!recreate3DBloomTargets()) {
+        fprintf(stderr, "[GN_Vk] 警告: resize 后 Bloom 目标重建失败（L1d）\n");
+    }
     // 合成：framebuffer（新 swapchainView）+ 描述符 binding1（新 hdrView）+ 固定视口管线。
     recreate3DCompositeTargets();
     // 固定视口管线：前向/PBR/天空盒（从 assets 重新加载 SPIR-V；缺失只告警，旧管线仍可用）。
@@ -936,9 +940,6 @@ void GN_VkResize(int w, int h) {
     if(!recreatePrecipitationPipeline()) {
         fprintf(stderr, "[GN_Vk] 警告: resize 后降水管线未重建（沿用旧管线）\n");
     }
-    if(!recreateCloudPipeline()) {
-        fprintf(stderr, "[GN_Vk] 警告: resize 后云层管线未重建（沿用旧管线）\n");
-    }
     if(!recreateSkinnedSsboPipeline()) {
         fprintf(stderr, "[GN_Vk] 警告: resize 后 SSBO 蒙皮管线未重建（沿用旧管线）\n");
     }
@@ -976,6 +977,8 @@ VkFramebuffer *s_framebuffers3D = nullptr;
 
 // ── 3D 初始化编排：各阶段实现见 vk3dInit.cpp ──
 void GN_VkInit3D() {
+    // L1：renderPass3D 的 resolve 附件是 HDR 目标，必须先于 init3DTargets 创建 hdrView。
+    create3DHdrImages();
     init3DTargets();
     // P11-S3：雾 UBO 最先创建（前向/PBR/延迟三条管线的描述符集都要绑定它）。
     if(!init3DAtmosphere()) fprintf(stderr, "[GN_Vk] 警告: 雾 UBO 不可用（P11-S3）\n");
@@ -1020,7 +1023,7 @@ void GN_VkInit3D() {
         vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.descriptorSetPBR);
 
         VkDescriptorBufferInfo dbiScene = {GN_Vk.uniformBuffer3D, 0, sizeof(VkSceneUBO)};
-        VkDescriptorBufferInfo dbiLight = {GN_Vk.lightBuffer3D, 0, 1024};
+        VkDescriptorBufferInfo dbiLight = {GN_Vk.lightBuffer3D, 0, sizeof(GN3d::sLIGHT_UBO)};
         VkDescriptorImageInfo diiTex = {GN_Vk.defaultSampler, GN_Vk.defaultImageView,
                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo diiNormal = {GN_Vk.defaultSampler, GN_Vk.defaultImageView,
@@ -1071,12 +1074,20 @@ void GN_VkInit3D() {
     }
 
     init3DHdr();
+    // L1d：Bloom mip 链（依赖 hdrView 与 composite 描述符集）。
+    if(!init3DBloom()) fprintf(stderr, "[GN_Vk] 警告: Bloom 资源不可用（L1d）\n");
+    // L1：POST UBO（曝光/色调映射/Bloom）+ composite 描述符 binding 2。
+    init3DPost();
+    // L4c：CPU 生成透射率/sky-view LUT 并上传 GPU（天空 shader 接线前先就绪）。
+    if(!init3DAtmosphereLut()) fprintf(stderr, "[GN_Vk] 警告: 大气 LUT 不可用（L4c）\n");
 
     init3DSkybox();
     // G1a：环境来源方案 B——GPU 6 面烘焙解析天空，回读后 CPU 预滤波并上传 GI 资源。
     init3DEnvironment();
     init3DGbuffer();
     init3DDeferredLight();
+    // L4：LUT 就绪后补写天空/PBR/延迟描述符的 2/3、10/11、24/25 槽位。
+    wireAtmosphereDescriptors();
     // G0b：G-Buffer 四通道调试视图（复用延迟 render pass/描述符集；管线归 aPipelineCache）。
     init3DGbufferDebug();
     // G2b：SSAO 资源（默认关；依赖 G-Buffer 视图与延迟描述符集）。

@@ -1,5 +1,275 @@
 # Changelog
 
+## 2026-11-01（日·晚） — 云改为独立立方体云块；删除两条旧云路径；雾/降水缺陷修复
+
+用户拍板：云不再是"一整层盖住天空"，而是世界固定的一组独立立方体云块，雨雪从各自云块底面落下。
+
+**新增（L5b 云块）**
+- `src/graphics/_Vulkan/vkCloudCube.cpp` + `assets/shaders/gn3d_cloud_cube.vert|frag`：
+  36 顶点 × N 实例（`gl_InstanceIndex`）、无顶点缓冲。**方块只是云的包围盒（范围）**：
+  顶点着色器反转绕序 + CULL_BACK 只画盒子背面当占位，片元用射线-盒求交在盒内 raymarch
+  三维噪声密度，并在盒内边界把密度收到 0 ⇒ 画面上看不到盒子，轮廓由噪声团块决定。
+  预乘 alpha、深度测试开/写关、动态 viewport（resize 不重建）、上限 16 块；UBO 656 B 与着色器逐字段一致。
+- 查看器：16 块世界固定云块（环带 300–1100 m、中心高 200–300 m、半边长 28–50 m、固定种子 20261101），
+  按天气覆盖率的**秩**决定显示数量（CLEAR 2–3 块、STORM 16 块），随风漂移并 wrap。
+- 降水：每块云一个雨/雪发射器（16×2 套 `cPARTICLE_SYSTEM`），发射面 = 云块底面，
+  回收盒 = 该云正下方整根柱；绘制时按类型合并成一次提交（降水模块只有 4 个顶点缓冲槽位）。
+- 远平面下限改为 `CLOUD_FAR_PLANE=1400 m`（原 300+2×256 只够旧 300 m 云层）。
+- **形状迭代（同日）**：密度改为「盒内接椭球径向衰减 × 方向噪声半径 R」，R<1 保证不碰盒面
+  ⇒ 彻底消除"方块感"；随后加入**平底**（全场景云底 `aBaseAltitude=230 m`，30 m 内起坡，
+  降水也从可见云底而不是盒底开始）与**成簇**（10 朵云 = 每朵 2–3 个重叠盒子，密度只依赖世界坐标、
+  不带每盒随机相位 ⇒ 同簇成员叠成一朵）；云块数上限 16→32（UBO 1168 B），显示按簇的秩。
+- **天气联动（同日）**：新增 `aOvercast`（rain/snow 0.85 + fog 0.35 + coverage 0.35，钳到 0..1）
+  传给云着色器压暗压灰云体，并按覆盖率放大云块（0.85×..1.30×）与密度
+  ⇒ CLEAR 1–2 朵白亮小云、RAIN/STORM 9–10 朵满天乌云。
+- **数量与云盖（同日收尾）**：实例上限 32→**128**、云朵 10→**40**（每朵 2–3 盒，簇半径 50–95 m、
+  环带 200–900 m）⇒ 雨天 36 朵/100+ 盒；新增**云盖 deck**（覆盖全天空的大盒子，负半边长标记，
+  只步进云底→云顶 420 m 薄板）；远平面 1400→**6000**（否则云盖背面 4.8 km 被裁）；
+  降水改为只有"每簇发射器"建粒子系统 + 最近 6 个发射（容量 256），不再随盒数膨胀。
+- **天空阴天化**：`gn3d_skybox.frag` 用 `sunIntensity` 作阴天代理（×1.4）把天空压向灰色渐变，
+  太阳圆盘改**平方衰减** ⇒ 阴雨时看不到太阳；否则云铺满了仍读作晴天。
+
+**删除（旧云路径与随之失效的代码）**
+- 体积云：`vkVolumetricCloud.cpp`、`gn3d_cloud_vol.*`、`cloudNoise.h/.cpp`、`sCLOUD_UBO`（208 B）、
+  `GN_VkSetVolumetricClouds/GetVolumetricClouds/DrawVolumetricClouds/VolumetricCloudReady`、
+  `init3DVolumetricCloud/destroy3DVolumetricCloud`、`tests/unit/testCloudNoise.cpp`（10 用例）、
+  gpuCheck `3d.volcloud` 用例。
+- billboard 中景云：`vkCloud.cpp`、`gn3d_cloud.*`、`sCLOUD_DRAW_PARAMS`、`GN_VkDrawCloud/CloudDestroy`、
+  `recreateCloudPipeline`、gpuCheck `3d.cloud` 用例、`gpuCheckCloud.h/.cpp`。
+- 查看器死代码：`drawClouds`、`gCloudLayerEnabled`、`CLOUD_LAYER_HEIGHT/CLOUD_TILE_SIZE/
+  CLOUD_TILES_PER_AXIS/CLOUD_NEAR_FADE`、`PRECIP_SPAWN_HALF_XZ/PRECIP_COLUMN_HEIGHT`（降水柱已改为云块底面）。
+
+**缺陷修复**
+- 空气透视（AP）完全绕过 `fogParams.x`：默认 `aAtmosphere2.w=1` 时 FOG/STORM 的雾密度不生效
+  （AP 的物理散射在 1 km 视距只有 ~1e-2）。现改为「AP 只做远处大气辉光，指数天气雾始终叠加」
+  （`gn3d_pbr.frag` / `gn3d_deferred_light.frag`）。
+- 体积云（已删）此前另修的 3 处一并记录：方向空间噪声导致云退化成 2D 剪影、太阳自阴影单点采样恒暗、
+  march 分支内隐式 LOD 未定义 ⇒ 改用 `textureLod`。
+
+**验证**：`make shaders` 43 个全绿；`make mmdViewer` 构建通过；`make unit` 396 用例 / 0 失败；
+`make gpuCheck` 编译通过（本机无 Vulkan 设备 ⇒ `[SKIP] gpu.init`，未跑断言）；画面由用户桌面验收。
+
+## 2026-11-01（日·凌晨） — L5 云六轮：按用户参考着色器重写密度/光照（方向空间噪声 + 覆盖阈值 + 朝阳透射率）
+
+用户给出参考着色器（球壳云层 demo）后重写 `gn3d_cloud_vol.frag` 的云模型：
+
+- **噪声改为方向空间采样**：`n = normalize(p - planetCenter)`，`uv = n*2 + windOffset`；
+  不再用世界坐标 × 尺度（世界空间平铺会在远处重复出接缝/规则纹理）。
+- **覆盖率阈值**（参考 `cloud()`）：`low = mix(0.62,0.28,coverage)`、`high = low+0.20`，
+  `c = smoothstep(low,high,c0)`；高频侵蚀 `d = smoothstep(0.85-0.5c, 0.95, m)` ⇒ 云边界清晰、有团块/窟窿，
+  不再退化成整片雾/白板。
+- **光照**：朝太阳方向再采一次密度 `tl = exp(-3.5 * sunDensity)`，配色
+  `(1.45,1.20,1.05)*tl + (0.36,0.44,0.58)*(0.35+0.65*tl)`，乘 `day = smoothstep(-0.1,0.25,dot(n,sun))`
+  ⇒ 白云受光面 + 蓝灰背光面，体积明暗稳定（取代之前“多步 light march + ambient”那套，后者会把云压黑/拍平）。
+- 取消逐像素抖动（薄云麻点的来源）；步数 64；区间改为内球（云底）到外球（云顶）。
+- 契约 §3.2 全节同步为新模型。
+- 验收：`make` 0；`make unit` 406/0；`make shaders` 45 + 严格 45/45；`make mmdViewer` 通过；lint 0 违规。
+
+## 2026-11-01（日·凌晨） — L5 云五轮：去逐像素抖动（晴天麻点）+ 阴天不再“塌成白板”（406 cases / 0 failed）
+
+- **晴天麻点**：薄云上逐像素抖动（IGN/Bayer）会显形为网格/麻点。去掉逐像素抖动（`jitter=0.5`），
+  步数 48→**64** 补偿分层；抖动函数保留但不再参与采样。
+- **阴天“塌下来”**：`CLOUD_SIGMA` 0.02 让覆盖率 0.7+ 时几乎全不透明，整层变成白板。
+  降到 **0.012**，细节项权重 0.30→**0.55**（团块/侵蚀结构回来）；保留 Schneider 2015 的 Worley fBm 基形与 mip 链。
+- 验收：`make` 0；`make unit` 406/0；`make shaders` 45 + 严格 45/45；`make mmdViewer` 通过。
+
+## 2026-11-01（日·凌晨） — L5 云噪声按参考实现重做 + mip 链（修“接缝”/走样条纹；406 cases / 0 failed；无 GPU 运行验证）
+
+用户截图指出“噪声算法有问题、有接缝”，按 `docs/papers/pdf/schneider2015-volumetric-cloudscapes.pdf`（Schneider 2015,
+*Real-Time Volumetric Cloudscapes*, GPU Pro 7）的噪声构造重做：
+
+- **R 通道（云基形）**：原实现用**单频 Worley（8 胞）**去膨胀 Perlin；参考实现是先把 Worley 按标准 fBm 分层
+  （权重 0.625/0.25/0.125，频率 4/8/16 胞逐层 ×2），再用该 Worley fBm 去“膨胀” Perlin：
+  `R = worleyFbm + perlin*(1-worleyFbm)`。单频 Voronoi 的规则胞格正是规则纹理/接缝感的来源之一。
+- **G/B 通道**：保持参考的“Worley 单频、频率递增”（4 胞 / 8 胞），作为细节层。
+- **mip 链（真正修“接缝”的关键）**：3D 噪声 64³→1、weather map 128²→1 生成盒式平均 mip 链，
+  `mipmapMode=LINEAR`、`maxLod=mip 数−1`。此前 3D 噪声只有 1 级 mip，远处/掠射角采样频率远高于纹理分辨率，
+  产生规则走样条纹（看起来像噪声接缝）。上传改为逐 mip 的 `vkCmdCopyBufferToImage`。
+- 契约 §1/§2 同步（噪声构造依据 + 必须带 mip 链）。
+- **验收**：`make` 0；`make unit` = 406/0；`make shaders` = 45 + 严格 45/45；`make mmdViewer` 通过；
+  lint（`cloudNoise.cpp`、`vkVolumetricCloud.cpp`）0 违规。**桌面观感仍未验**（本机无 `/dev/dri`）。
+
+## 2026-11-01（日·凌晨） — L5 云四轮：地平线铺满（阴天观感）+ 去麻点 + 体积厚度（406 cases / 0 failed；无 GPU 运行验证）
+
+用户截图「完全不像是阴天」+「渲染面是平面、很多麻点」后的修正：
+
+- **不像阴天的根因**：云壳只在 12 km 内 march，近地平线的视线要 ~130 km 才升到云底 1400 m，
+  于是 12 km 截断后地平线附近没有云，出现一条水平的"云底边线"、下半屏是干净天空。
+  改为 **最远 120 km + 立方步长映射**（`t = t0 + span·u³`：近处密、远处疏），阴天云层铺到地平线；
+  远景淡出推迟到 25 km 起。
+- **阴天灰白**：环境/多次散射色不再用固定蓝 `CLOUD_AMBIENT`，改为 `mix(CLOUD_AMBIENT, 天空天顶色, 0.65)`
+  （查看器把 `out.sky.zenithColor` 填进 `aPlanet.yzw`），强度 0.35 → **0.60**，避免浓云只剩深蓝发黑。
+- **体积厚度**：云层 600 m → **1800 m（1400–3200 m）**、步数 32 → **48**；云底/云顶按 3D 噪声起伏 **±220 m**
+  （`CLOUD_BASE_WARP`），打散"贴图平面"感。
+- **麻点**：逐像素白噪声抖动 → 4×4 Bayer → **交错梯度噪声 IGN**（Bayer 在天空上会留下可辨的 4×4 网格纹；
+  IGN 低差异、无网格感）；细节权重 0.45 → **0.30**。
+- **更实的阴天**：`CLOUD_SIGMA` 0.01 → **0.02**；环境色再按整体覆盖率向灰白 `vec3(0.80,0.83,0.88)` 混 55%
+  （只看天顶色时阴天云仍偏蓝）；远景淡出起点 25 km → 30 km。
+- 叠层 `steps` 显示同步为 48/4。
+- **验收**：`make` 0；`make unit` = 406/0；`make shaders` = 45 + 严格 45/45；`make gpuCheck` 编译通过（无设备 SKIP）；
+  `make mmdViewer` 通过。**桌面观感仍未验**（本机无 `/dev/dri`）。
+
+## 2026-11-01（日·凌晨） — L5 云三轮修正：修复"天空全黑"根因（alpha 语义写反）+ 掠射角噪点（406 cases / 0 failed）
+
+用户第三/四张截图「天空全黑」的最终定位与修正：
+
+- **根因（alpha 语义写反）**：管线是 `src=ONE, dst=ONE_MINUS_SRC_ALPHA`，dst 因子用的是**源 alpha**，
+  所以 `dst' = C + dst×(1-a)` ⇒ **a 必须是不透明度 (1-透射率)**，无云处 a=0。
+  此前 shader 输出 `a = transmittance`（无云处 a=1）⇒ `dst'=0`，天空被涂黑。
+  修复：最终输出 `vec4(scatter, 1.0 - transmittance)`；7 处提前返回改回 `vec4(0)`（透明）。
+  期间曾错误地把提前返回改成 `vec4(0,0,0,1)`（更糟），由用户「按 X 关云天空就出现」的实验证实：
+  **天空盒本身正常，问题在云 pass 的 alpha**。
+- **"还是线"**：主 march 距离上限 25 km → **12 km**、远景淡出 12 km → **6 km**；
+  3D 噪声世界尺度 1/1800 → **1/4000**；配合球壳求交与 `horizonFade`。
+- **契约更正**：§2/§3.2 明确「alpha=不透明度」，提前返回写 `vec4(0)`（透明），并记录这次反向修正。
+- **天空兜底**：`gn3d_skybox.frag` LUT 采样为 0 时回落解析渐变；前向 `GN_VkBegin3DPass` 也接入 LUT 更新。
+- **验收**：`make` 0；`make unit` = 406/0；`make shaders` = 45 + 严格 45/45；`make gpuCheck` 编译通过（无设备 SKIP）；
+  `make mmdViewer` 通过。**桌面观感仍未验**（本机无 `/dev/dri`）。
+
+## 2026-11-01（日·凌晨） — L5 云二轮修正：球壳（曲面）+ 修黑云/黑天 + 去放射线噪点（406 cases / 0 failed；无 GPU 运行验证）
+
+用户第二张截图反馈「都是线了/随机数有问题、天空发黑、云像平面不像曲面」后的修正：
+
+- **黑云根因**：光照 march 步长是云层厚的 4×（`lightStepLen=4×thickness/steps`），浓云内部太阳透射率恒为 0 ⇒
+  云全黑；改为 **1.5×厚度**，并新增环境/多次散射近似项 `CLOUD_AMBIENT*0.35`、太阳散射亮度标定 `CLOUD_SUN_SCALE=3`。
+- **黑天**：sky-view LUT 辐亮度在 ACES+曝光 1 下偏暗；查看器 `sky.atmosphereIntensity` 标定 **2.5×**
+  （与云同一线性域，单点可调）。
+- **放射线/噪点**：平面 `y=const` 求交在掠射角会把 `t` 拉到数万米、32 步采样跳变；改为**球壳求交**
+  （`aPlanet.x` 地面半径，与 L4 同源）、主 march 距离钳到 **25 km**、12 km 起远景淡出、并乘
+  `horizonFade=smoothstep(0.01,0.08,dir.y)`；密度按「相对地面高度」判层。
+- **曲面**：云层由水平平板改为随行星弯曲的**球壳**（`raySphere`），观感不再是平板。
+- **UBO**：`sCLOUD_UBO` 192→**208 B**（新增 `aPlanet`），C++/GLSL/查看器/gpuCheck 同步。
+- **验收**：`make` 0；`make unit` = 406/0；`make shaders` = 45 + 严格 45/45；`make gpuCheck` 编译通过（无设备 SKIP）；
+  `make mmdViewer` 通过。**桌面观感/性能仍未验**（本机无 `/dev/dri`）。
+
+## 2026-10-31（日·凌晨） — L5 云观感修正：单层薄平面 + 慢漂移 + 接入天气 + 替换旧云（406 cases / 0 failed；无 GPU 运行验证）
+
+用户截图反馈「云速度太快、想是一个平面而且很密、没有接入天气系统、没有替换旧云」后的修正：
+
+- **速度**：抖动由「逐帧换抖动图」改为**只与像素有关的静态 hash**（原来每帧换 pattern 让整片云"沸腾"，
+  看着像高速移动）；云漂移时间再 ×0.25（`CLOUD_DRIFT_TIME_SCALE`），风仍取天气值。
+- **平面且更密**：默认改为**单层薄平面**（`aLayer0` 1600–2200 m；`aLayer1/2` 覆盖率 0，多层参数保留），
+  覆盖率 remap 改 `smoothstep(1-cov-0.05, 1-cov+edge)`，`edge` 由天气**云锐度**控制（0.34→0.16），
+  消光 `CLOUD_SIGMA` 0.02→0.01，密度倍率随覆盖率 `0.55+0.55×coverage`。
+- **接入天气**：覆盖率(`cloudCoverage`)、锐度(`cloudSharpness`)、太阳方向/强度、风全部逐帧来自 `WeatherOutput`；
+  1–6 号天气预设切换会直接改变云的稀疏/满云与云形边缘。
+- **替换旧云**：`gn3d_skybox.frag` 删除 FBM 云块（连带 hash/valueNoise/fbm 函数），天空只剩大气/LUT 基色 + 太阳；
+  查看器不再提交 billboard 中景云（`drawClouds` 保留但无调用点、`C` 键停用）；体积云默认开启（`X` 键可整体关闭）。
+- **验收**：`make` 0；`make unit` = 406/0；`make shaders` = 45 + 严格 45/45；`make gpuCheck` 编译通过（无设备 SKIP）；
+  `make mmdViewer` 通过；lint 改动文件 0 新增违规。**桌面观感/性能仍未验**（本机无 `/dev/dri`）。
+
+## 2026-10-31（六·深夜） — L5 体积云：多层 raymarch（406 cases / 0 failed；无 GPU 运行验证）
+
+- **决策变更**：用户拍板推翻 `SKY_WEATHER_PLAN.md` 决策 8（云=FBM+billboard、不做 raymarch）；体积云为新路径，
+  旧天空 FBM 云与 billboard 云保留为回退（`X` 键，默认关）。文档已同步 `SKY_WEATHER_PLAN.md` 与 `LIGHTING_PLAN.md` §4.7。
+- **数据层**：新增 `src/graphics/cloudNoise.h/.cpp`（纯 CPU）——64³ RGBA8 周期 Perlin-Worley 噪声
+  （R=Perlin+Worley 混合、G/B=低/高频 Worley、A=255，实测 102 ms）+ 128² RG8 weather map；`tests/unit/testCloudNoise.cpp` 10 用例。
+- **渲染**：新增 `assets/shaders/gn3d_cloud_vol.vert/frag`——全屏三角形逐像素 raymarch（48 步）、三层
+  （层云 700–1400 m / 积云 1500–3200 m / 卷云 6200–7000 m，各自 base/top/coverage/density）、
+  逐像素 hash 抖动、4 步光照 march、Beer-Lambert + 粉末 + 归一化 HG(0.6)、预乘 alpha 输出；
+  `dir.y<=0` 不画。**v1 偏差**：全分辨率（未做半分辨率 upsample）、无时域重投影（L2b 未实现）、无云影——已登记为后续项。
+- **管线**：新增 `src/graphics/_Vulkan/vkVolumetricCloud.cpp`——3D 噪声/weather 纹理上传（staging + 屏障）、
+  192 B UBO、描述符（0=UBO/1=sampler3D/2=sampler2D）、预乘混合全屏管线（`renderPass3D`、MSAA 对齐）；
+  3D pass 内天空盒之后绘制（前景几何随后自然覆盖）；`GN_VkSetVolumetricClouds/Get/Draw/Ready` 已入 `GN_Vk.h`。
+- **集成**：查看器每帧由天气派生三层参数、`invViewProj` 反投影；体积云开启时天空 FBM 云自动关闭；
+  `X` 键开关、叠层显示 `clouds vol/layers/coverage`；`gpuCheck 3d.volcloud`（开/关同一视角中心像素差异 > 1e-3）。
+- **修正**：coverage 二次计入（weather map 已含 coverage 且 `aLayer.z` 也含）→ shader 改为 weather R 只做 ±25% 空间调制；
+  `vkCmdPipelineBarrier` 参数个数笔误（12→10）。
+- **验收**：`make` exit 0；`make unit` = **406/0**；`make shaders` = 45 + 严格 45/45；`make gpuCheck` 编译通过
+  （无设备 SKIP）；`make mmdViewer` 编译通过；lint 改动文件 0 新增违规。**桌面视觉/性能未验**。
+
+## 2026-10-31（六·夜） — L4 大气散射接线 + L3 CSM/稳定化（396 cases / 0 failed；无 GPU 运行验证）
+
+- **L4 sky-view LUT 改 GPU compute**：新增 `assets/shaders/gn3d_skyview.comp`（192×108、local 8×8、
+  `rgba16f` storage image）+ `vkAtmosphereLut.cpp` 的 compute 管线/96 B 参数 UBO；
+  `GN_VkSetAtmosphere(params, sunDir)` 做归一化/校验/脏判定，`recordAtmosphereLutUpdate(cb)` 仅在脏时
+  barrier→dispatch→barrier 回 `SHADER_READ_ONLY`（三处 3D pass begin 均已接线，render pass 外）。透射率 LUT 仍静态上传。
+- **天空接线**：`gn3d_skybox.frag` 的 Skybox UBO 144 B（末尾 `atmosphereParams`），binding 2/3 = 透射率 / sky-view LUT；
+  `atmosphereMix∈[0,1]` 切 LUT 与旧解析渐变（旧路径逐行保留并保留曝光乘法；LUT 路径交给 composite 统一曝光）。
+- **空气透视（L4c v1）**：PBR/延迟 shader 在光照后按 8 步单次散射积分（透射率 LUT 查表 + Rayleigh/Mie 相位 + Ozone）
+  替换指数雾；开关 `sFOG_UBO.aAtmosphere2.w`（旧公式原样保留为 fallback）。`sFOG_UBO` 64 B、绑定 10/11（PBR）与
+  24/25（延迟）。**取舍**：v1 是逐像素解析积分，不是 Hillaire 2020 的 froxel aerial-perspective LUT（记为后续项）。
+- **环境烘焙同源**：烘焙用同一 `gn3d_skybox` 管线，描述符补 2/3 与 144 B UBO（LUT 在 `init3DAtmosphereLut` 已先于
+  `init3DEnvironment` 就绪）；天气→大气映射由查看器每帧 `mapWeatherToAtmosphere` 后调 `GN_VkSetAtmosphere`。
+- **L3c CSM + L3a 稳定化**：`sLIGHT_UBO` 扩为 976 B（`shadowLightVP[4][16]` + `shadowParams/shadowCascadeSplits/ shadowTexelWorld`）；
+  阴影图改 2048²×**4 层** D32 数组 + 每层 framebuffer；`GN_VkShadowPassBegin(vp, cascadeIndex)` 逐级提交；
+  着色器 `sampler2DArray` + 包含测试选级；新增 `vkShadowCascade.cpp`（混合分割/视锥 AABB 拟合/texel snapping）。
+  查看器每帧 4 级 shadow pass，K 键保留，B 键切空气透视。
+- **两处潜伏缺陷修正**：① `Mat44OrthoVK` 的 `m[10]` 符号（VK [0,1] 深度，旧值把 near/far 映射到负 NDC）；
+  ② PCSS 对 NDC z 多做一次 `*0.5+0.5`（真实 CSM 矩阵下阴影几乎全黑，改为仅 x/y 做 NDC→UV）。
+- **新增 gpuCheck**：`atmo.skyview`（GPU LUT vs CPU 参考，容差 2%）、`3d.shadow.cascades`（级数/阴影图就绪）；
+  6 个 gpuCheck 站点的 `light.shadowMapSize` 改为 `shadowParams[0]`。
+- **验收**：`make` exit 0；`make unit` = **396/0**；`make shaders` = 43 + 严格 43/43；`make gpuCheck` 编译通过
+  （无设备运行 SKIP）；`make mmdViewer` 编译通过；lint 改动文件 0 新增违规。**桌面视觉/数值验收未执行**。
+
+## 2026-10-31（六） — L1a–L1c：三条 3D 路径统一线性 HDR + 单次曝光/色调映射（379 cases / 0 failed；无 GPU 运行验证）
+
+- **HDR 合一路径**：`renderPass3D` 的 MSAA 颜色与 resolve 附件统一为 `R16G16B16A16_SFLOAT`，
+  resolve `finalLayout` 改为 `SHADER_READ_ONLY_OPTIMAL`（`vk3dInit.cpp`）；3D framebuffer 的 resolve 附件改用
+  `GN_Vk.hdrView`（不再直写 swapchain）。`hdrRenderPass` 与 `GN_VkBegin3DPassPBR_HDR` 的重复实现删除，
+  后者归并为 `GN_VkBegin3DPassPBR` 的别名（此前它以 `renderPass3D` 创建的 PBR 管线去绑 `hdrRenderPass`，不兼容）。
+- **延迟路径进 HDR**：`deferredLightRenderPass` 颜色附件改为 RGBA16F、`finalLayout=SHADER_READ_ONLY`，
+  framebuffer 挂 `hdrView`。
+- **合成传递**：`GN_VkEnd3DPass` / `GN_VkDeferredLighting` 结束后自动调用 `GN_VkCompositeToSwapchain`
+  （2D 叠层的 overlay render pass 以 PRESENT_SRC 开始，与合成输出一致）。
+- **后处理 CPU 基座**：新增 `src/graphics/postParams.h/.cpp`（32 B `sPOST_UBO`：曝光/tonemap 模式/Bloom 参数；
+  默认/回归档/校验/打包 + Reinhard/ACES 参考公式）与 `tests/unit/testPost.cpp`（8 用例）。
+- **POST UBO 与开关**：新增 `_Vulkan/vkPostProcess.cpp`（host-visible 32 B UBO + composite binding 2），
+  `GN_VkSetPost / GN_VkGetPost / GN_VkSetExposure / GN_VkSetTonemapMode`；默认 ACES、曝光 1、Bloom 0.3/0.8/0.3。
+- **Shader**：`gn3d_pbr.frag` / `gn3d_deferred_light.frag` 删除内嵌 Reinhard（输出线性 HDR）；
+  `gn3d_composite.frag` 重写为「曝光 → 阈值 Bloom → NONE/Reinhard/ACES 单次 tonemap」。
+- **修正（桌面截图白化）**：`evalSH9` / 探针 / SSGI 均按 irradiance 约定（含 `A_l=π` 余弦卷积），
+  而 Lambert 漫反射 BRDF 需 `/π`；旧代码在 `diffuseIBL` 直接乘 irradiance，导致环境项比直射光亮 **π 倍**。
+  PBR 与延迟着色器统一乘 `1/π`（`0.31830988618`），与 `CalcPBRLight*` 内直射光的 `/π` 对齐。
+  该 bug 此前被 shader 内 Reinhard 压住，换 ACES + Bloom 后暴露为整体白化。
+- **L1d Bloom mip 链**：新增 `_Vulkan/vkBloom.cpp`（5 级半分辨率链：13-tap 下采样 + 9-tap tent 加法上采样，
+  首级乘曝光 + 软阈值取亮部）与 `gn3d_bloom_down.frag` / `gn3d_bloom_up.frag`（复用 `gn3d_composite.vert`）；
+  每级独立 viewport 管线、每级帧缓冲/描述符，push constant 传 threshold/knee/exposure；resize 重建并重写 composite binding3。
+  `gn3d_composite.frag` 删除 4 邻域近似，改为采样 bloom level0 后乘强度。
+  默认 Bloom 调到 intensity 0.15 / threshold 1.0 / knee 0.5（白色衣物不再整片泛光；依据桌面截图白化观察）。
+- **L0c 现场标定入口**：查看器 `9/0` 调曝光 EV（±0.25，`GN_VkSetExposure`）、`7/8` 调 Bloom 强度（±0.05），
+  当前 `EV/exposure/bloom/tonemap` 显示在左上叠层（`GN_VkGetPost`）。
+- **L2a AA v1（FXAA，Lottes 2009）**：`gn3d_composite.frag` 在 tonemap 后做单 pass FXAA 3.11 风格
+  （对角 luma 定方向 + 3/4 采样混合，平坦区早退）；`sPOST_UBO.fxaa`（24 B 偏移）+ `GN_VkSetFxaa`，
+  查看器 `T` 键切换、叠层显示 `fxaa=`。SMAA 1× 因 Area/Search LUT 资产未入库而暂缓（接口仍走 composite 单 pass）。
+- **L0a GI 子开关**：`GN_VkSetSsaoEnabled(bool)` 写 `sGI_UBO.indirect.w`、`GN_VkSetSsgiStrength(float)` 写
+  `envParams.w`（钳制 [0,1]），与 `GN_VkEnableGI` / `GN_VkSetProbeWeight` 一样只改对应字段、保留 SH9/倍率/矩阵。
+- **L0e 论文补采（5 篇）**：Reinhard 2002 / SMAA 2012 / PCSS 2005 / SDSM / Wronski 2014 入库
+  `docs/papers/pdf/`（+29 MB），`MANIFEST.sha256` 扩到 17 条并 `sha256sum -c` 全过（17/17）；
+  `pdftotext` → `knowledgeAudit.sh --quiet` 扫描 17/17 均无 suspicious/malicious（15 attention + 2 clean，与旧库同口径）。
+  ACES 规范 / Jimenez 2014（426 MB PPTX）/ Karis TAA（PPTX）/ Sikachev SSR（PPTX）未取，已按题录登记。
+- **L3 阴影接线（查看器）**：`sMESH::DrawShadow` / `cMODEL::DrawShadow`（只投 OPAQUE 网格——阴影管线无片元 alpha test，
+  MASK/BLEND 会投出整片硬影）；查看器方向光改 `enableShadow=true`，`AppInit` 用模型世界 AABB 拟合正交光矩阵
+  （`Mat44LookAtRH` × `Mat44OrthoVK`，eye 沿太阳反方向外推），每帧在 3D pass 前跑
+  `GN_VkShadowPassBegin` → `DrawShadow` → `ShadowPassEnd`；`K` 键开关并同步 light UBO 的 `shadowType`。
+  未做：PCSS/CSM、光矩阵稳定化（texel snapping）、地面接收阴影（前向 `gn3d.frag` 不采样 shadow map）。
+- **L3b PCSS 软阴影**：`gn3d_pbr.frag` / `gn3d_deferred_light.frag` 的阴影从硬件 `sampler2DShadow` 比较
+  改为 `sampler2D` 原始深度手动比较；实现 PCSS（16 tap blocker search 半径 12 texel → 平均遮挡深度 →
+  半影半径 `clamp((receiver-blocker)*400, 1, 24)` texel → 16 tap PCF），常量按 2048² 阴影图取经验值。
+  `vk3dInit.cpp` 的 shadowSampler 同步改为 `compareEnable=FALSE` + NEAREST + CLAMP_TO_BORDER（border=白=无遮挡）。
+  未做：CSM 级联、texel snapping、参数桌面标定。
+- **L4a 大气 CPU 基座**：新增 `src/graphics/atmosphereParams.h/.cpp`（Hillaire 2020 参数：Rayleigh/Mie/Ozone
+  系数与尺度高度、40 步光学深度积分、256×64 透射率 LUT（线性 height/mu 参数化）+ 双线性采样），
+  `tests/unit/testAtmosphere.cpp` 7 用例（默认参数/校验钳制/天顶透射/地面遮挡/高度单调/球面求交/LUT 采样）。
+  **只做 CPU 数学与契约**；渲染接线（sky-view LUT、天空 shader、空气透视）未做。
+- **L4b 天空 CPU 参考**：`atmosphereParams.h/.cpp` 追加单次散射天空——`computeSkyRadiance`（32 步、
+  Rayleigh/Mie 相位、太阳透射率查表）、`computeSkyViewLut`（192×108，u=相对太阳方位角、v=天顶角）与
+  `evalSkyViewLut` 双线性采样；`testAtmosphere` +2 用例（方向亮度关系/地面遮挡/LUT 采样）。
+  **GPU 接线（LUT 上传 + 天空 shader 采样）仍未做。**
+- **L4c LUT 上传**：新增 `_Vulkan/vkAtmosphereLut.cpp`——CPU 生成透射率（256×64）与 sky-view（192×108）
+  LUT → staging → 两张 RGBA16F 纹理 + 线性采样器（固定尺寸、不随 resize）；`GN_VkGetAtmosphereLut()` 供回读；
+  新增 `_Vulkan/vkOnceCmd.cpp`（一次性命令缓冲 helper，`vkProbe` 改用同一实现）。
+  `gpuCheck` 新增 `atmo.lut`：回读透射率纹理与 CPU 期望值比较（3 点、容差 0.02），并检查 sky-view 中心项有限。
+  **天空 shader 采样仍未接（下一步 L4d）。**
+- **L4d 准备（天气→大气映射）**：`atmosphereParams` 新增 `sATMOSPHERE_WEATHER_INPUT` 与
+  `mapWeatherToAtmosphere`——云/雾增大 Mie 散射与吸收、太阳强度随云/雾衰减（越界钳制并过 validate）；
+  `testAtmosphere` +1 用例（晴空等价、云/雾单调、非法输入钳制）。渲染接线仍未做。
+- **验收**：`make` exit 0；`make unit` = **389 cases / 0 failed**（371 + 8 post + 10 atmosphere）；
+  `make shaders` 40 个（含 2 个 Bloom）+ 严格编译 40/40 通过；lint 写域 0 违规/0 告警；`make gpuCheck` 编译通过、
+  本机无 Vulkan 设备 SKIP、桌面待跑。**GPU 视觉/像素断言未运行**（`3d.post.*` 3 条新增用例等桌面执行）。
+- 限制：L0c 的固定基线截图/像素值需桌面补；L0d 的 SSAO/探针开关像素断言未做；SMAA/TAA 未做；
+  gpuCheck 旧色值站点由 `makeLegacyPostUbo()`（NONE + 关 Bloom）保持回归，新 `3d.post.*` 用例覆盖 ACES/Reinhard/曝光。
+
 ## 2026-10-31（五） — 桌面目视验收通过 + 文档收口
 
 - **目视验收通过**（2026-10-31，用户确认）：拖拽 resize（模型/AABB 无错位）、默认 GI IBL 画面、

@@ -76,8 +76,8 @@ void GN_VkShutdown3D() {
     destroyCloth();
     // P11-S3：雾 UBO（描述符集随池释放，这里只销毁缓冲/内存）。
     destroyAtmosphere();
-    // P11-S2b / S5 / S6b：云层、降水、贴花的动态顶点缓冲/管线布局（管线归 aPipelineCache）。
-    GN_VkCloudDestroy();
+    // S5 / S6b：降水、贴花的动态顶点缓冲/管线布局（管线归 aPipelineCache）。
+    GN_VkCloudCubeDestroy(); // L5b：立方体云 UBO/描述符集/管线布局
     GN_VkPrecipitationDestroy();
     GN_VkDecalDestroy();
 
@@ -131,6 +131,8 @@ void GN_VkShutdown3D() {
         vkFreeMemory(GN_Vk.device, GN_Vk.shadowUBOMemory, 0);
         GN_Vk.shadowUBOMemory = VK_NULL_HANDLE;
     }
+    // L3c：4 级 CSM 的层视图/framebuffer（必须在 shadowRenderPass/shadowImage 之前释放）
+    destroy3DShadowCascades();
     if(GN_Vk.shadowFramebuffer) {
         vkDestroyFramebuffer(GN_Vk.device, GN_Vk.shadowFramebuffer, 0);
         GN_Vk.shadowFramebuffer = VK_NULL_HANDLE;
@@ -193,6 +195,9 @@ void GN_VkShutdown3D() {
         GN_Vk.compositeDescriptorLayout = VK_NULL_HANDLE;
     }
     destroy3DCompositeFramebuffers();
+    destroy3DBloom(); // L1d：Bloom mip 图/fb/pass/layout
+    destroy3DAtmosphereLut(); // L4c：大气 LUT 纹理/sampler
+    destroy3DPost(); // L1：POST UBO（composite binding 2）
     if(GN_Vk.compositeRenderPass) {
         vkDestroyRenderPass(GN_Vk.device, GN_Vk.compositeRenderPass, 0);
         GN_Vk.compositeRenderPass = VK_NULL_HANDLE;

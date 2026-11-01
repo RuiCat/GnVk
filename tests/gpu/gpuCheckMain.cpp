@@ -4,6 +4,7 @@
 // 真实 GPU 桌面验收必须用本机 /dev/dri 上的 Vulkan 设备；无设备时退出码 2 = SKIP。
 #include <GN.h>
 #include "GN_Vk.h"
+#include "postParams.h" // L1：旧色值站点统一走线性直通（NONE + 关 Bloom）
 
 #include "gpuCheck2D.h"
 #include "gpuCheck3D.h"
@@ -15,7 +16,6 @@
 #include "gpuCheckSkinSsbo.h"
 #include "gpuCheckLod.h"
 #include "gpuCheckFog.h"
-#include "gpuCheckCloud.h"
 #include "gpuCheckPrecipitation.h"
 #include "gpuCheckDecal.h"
 #include "gpuCheckReport.h"
@@ -101,6 +101,8 @@ int main() {
     }
 
     PrintDevice();
+    // L1：3D 输出统一进 HDR 合成；旧站点按“线性直通 + 关 Bloom”回归，像素期望值保持不变。
+    GNg::GN_VkSetPost(GN3d::makeLegacyPostUbo());
     CheckCreation();
     GpuCheck::Run2DChecks();
     GpuCheck::Run3DChecks();
@@ -114,7 +116,6 @@ int main() {
     GpuCheck::RunBatchChecks();
     GpuCheck::RunLodChecks();
     GpuCheck::RunFogChecks();
-    GpuCheck::RunCloudChecks();
     GpuCheck::RunPrecipitationChecks();
     GpuCheck::RunDecalChecks();
 

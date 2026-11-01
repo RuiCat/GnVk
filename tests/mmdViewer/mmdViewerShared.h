@@ -29,11 +29,16 @@ extern int gFbHeight;                        // mmdViewer.cpp
 
 // 天气 / 降水（mmdViewerWeather.cpp）
 extern GN3d::WeatherSystem gWeather;
-extern GN3d::cPARTICLE_SYSTEM gRainParticles;
-extern GN3d::cPARTICLE_SYSTEM gSnowParticles;
+// L5b：每块云一个发射器（下标与 mmdViewerWeather.cpp 的 s_cloudCells 对齐）。
+extern const uint32_t CLOUD_CUBE_MAX;
+extern GN3d::cPARTICLE_SYSTEM gRainCells[];
+extern GN3d::cPARTICLE_SYSTEM gSnowCells[];
+extern uint32_t gRainAlive;
+extern uint32_t gRainCapacity;
+extern uint32_t gSnowAlive;
+extern uint32_t gSnowCapacity;
 extern bool gPrecipReady;
 extern bool gPrecipEnabled;
-extern bool gCloudLayerEnabled;
 extern GNg::sVEC3 gPrecipBoxCenter;
 extern GNg::sVEC3 gPrecipBoxHalf;
 extern float gRainRate;
@@ -58,8 +63,7 @@ extern bool gParticleBoxes;
 
 // ── 共享数值常量：唯一定义在 mmdViewerWeather.cpp ────────────────
 // 这些值被天气模块与叠层/主循环共用，两处必须一致，所以只定义一份。
-extern const float CLOUD_LAYER_HEIGHT;
-extern const float CLOUD_TILE_SIZE;
+extern const float CLOUD_FAR_PLANE; // L5b：立方体云块的最远可见距离（远平面下限）
 extern const float RAIN_SIZE_MIN;
 extern const float RAIN_SIZE_MAX;
 extern const float SNOW_SIZE_MIN;
@@ -69,8 +73,6 @@ extern const float SNOW_STREAK;
 extern const float PRECIP_DIR_Y;
 extern const float RAIN_GRAVITY_Y;
 extern const float SNOW_GRAVITY_Y;
-extern const float PRECIP_SPAWN_HALF_XZ;
-extern const float PRECIP_COLUMN_HEIGHT;
 
 // ── 相机与视角（mmdViewerCamera.cpp）──
 extern GN3d::cCAMERA gCamera; // 全查看器唯一的相机实例（定义在 mmdViewerCamera.cpp）
@@ -87,7 +89,6 @@ void updateCameraInput(float dt);
 void applyWeather();
 bool createPrecipitationSystems();
 void updatePrecipitation(float dt);
-void drawClouds(const GNg::sMAT44 &viewProjection, const GNg::sVEC3 &camera);
 void drawPrecipitation(const GNg::sMAT44 &viewProjection, const GNg::sVEC3 &right,
                        const GNg::sVEC3 &camUp);
 

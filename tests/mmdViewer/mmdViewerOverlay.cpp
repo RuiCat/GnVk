@@ -6,9 +6,30 @@
 
 #include "mmdViewerShared.h"
 #include "GN_Physics.h" // sDEBUG_LINE（粒子四边形调试线框）
+#include "GN_Vk.h"      // L0c：读取当前 POST（曝光/色调映射/Bloom）用于叠层显示
+#include "vkShadowCascade.h" // L3c：SHADOW_CASCADE_MAX（级联状态数组长度）
 
 #include <cmath>
 #include <cstdio>
+
+// L3c/L4 状态：定义分别在 mmdViewer.cpp（阴影）与 mmdViewerWeather.cpp（大气）。
+// 共享头 mmdViewerShared.h 属其他写域（只读），因此跨模块声明落在使用方 TU。
+extern bool gShadowValid;
+extern bool gShadowsEnabled;
+extern uint32_t gShadowCascadeCount;
+extern float gShadowCascadeSplits[GN3d::SHADOW_CASCADE_MAX];
+extern float gShadowTexelWorld[GN3d::SHADOW_CASCADE_MAX];
+extern uint32_t gShadowMapSize;
+extern float gShadowFar;
+extern bool gAtmosphereEnabled;
+extern bool gCloudsEnabled;
+extern uint32_t gCloudCubeCount;
+extern float gCloudCubeCoverage;
+extern GNg::sVEC3 gAtmosphereSunDir;
+extern float gAtmosphereSunIntensity;
+extern float gAtmosphereGroundRadius;
+extern float gAtmosphereTopRadius;
+extern float gAtmosphereCameraHeight;
 
 namespace {
 
@@ -94,25 +115,70 @@ void drawCoordOverlay() {
     gInfoText.OutText(line, 0, x, y, 0, 0, 0xFFFFFFFF, GNg::eBLEND_NORMAL);
     y += lineHeight;
 
+    // L0c：后处理参数（9/0 调 EV，7/8 调 Bloom 强度）。
+    GN3d::sPOST_UBO post;
+    if(GNg::GN_VkGetPost(&post)) {
+        std::snprintf(line, sizeof(line), "post  EV=%+.2f  exposure=%.3f  bloom=%.2f  tonemap=%d  fxaa=%d",
+                      post.ev, post.exposure, post.bloomIntensity, (int)post.tonemapMode,
+                      post.fxaa > 0.5f ? 1 : 0);
+        gInfoText.OutText(line, 0, x, y, 0, 0, 0xFF00FF00, GNg::eBLEND_NORMAL);
+        y += lineHeight;
+    }
+
+    // L3c：4 级 CSM 状态（K 键开关；分割点 / 每级 texel 世界尺寸由主循环每帧拟合写入）。
+    if (gShadowValid) {
+        std::snprintf(line, sizeof(line),
+                      "shadow  cascades=%u/%u  %s  far=%.1fm  map=%u  splits %.2f/%.2f/%.2f/%.2f",
+                      gShadowCascadeCount, GN3d::SHADOW_CASCADE_MAX,
+                      gShadowsEnabled ? "on " : "off", gShadowFar, gShadowMapSize,
+                      gShadowCascadeSplits[0], gShadowCascadeSplits[1],
+                      gShadowCascadeSplits[2], gShadowCascadeSplits[3]);
+    } else {
+        std::snprintf(line, sizeof(line), "shadow  (no fit: model AABB invalid)  K=%s",
+                      gShadowsEnabled ? "on" : "off");
+    }
+    gInfoText.OutText(line, 0, x, y, 0, 0, 0xFFFF66AA, GNg::eBLEND_NORMAL);
+    y += lineHeight;
+    std::snprintf(line, sizeof(line), "        texel %.4f/%.4f/%.4f/%.4f m/texel per cascade",
+                  gShadowTexelWorld[0], gShadowTexelWorld[1], gShadowTexelWorld[2],
+                  gShadowTexelWorld[3]);
+    gInfoText.OutText(line, 0, x, y, 0, 0, 0xFFAA66FF, GNg::eBLEND_NORMAL);
+    y += lineHeight;
+
+    // L4：空气透视状态（B 键开关；太阳方向/Rg/Rt/相机高度是最近一帧 applyWeather 的快照）。
+    std::snprintf(line, sizeof(line),
+                  "atmo    air=%s  sun(%.2f %.2f %.2f) I=%.1f  Rg=%.0fkm Rt=%.0fkm  camH=%.1fm",
+                  gAtmosphereEnabled ? "on" : "off", gAtmosphereSunDir.x, gAtmosphereSunDir.y,
+                  gAtmosphereSunDir.z, gAtmosphereSunIntensity,
+                  gAtmosphereGroundRadius / 1000.0f, gAtmosphereTopRadius / 1000.0f,
+                  gAtmosphereCameraHeight);
+    gInfoText.OutText(line, 0, x, y, 0, 0, 0xFF66CCFF, GNg::eBLEND_NORMAL);
+    y += lineHeight;
+
+    // L5b：立方体云状态（X 键开关；blocks 与覆盖率是最近一帧提交值）。
+    std::snprintf(line, sizeof(line), "clouds  cube=%s  blocks=%u  coverage=%.2f",
+                  gCloudsEnabled ? "on " : "off", gCloudCubeCount,
+                  gCloudCubeCoverage);
+    gInfoText.OutText(line, 0, x, y, 0, 0, 0xFFFFCC66, GNg::eBLEND_NORMAL);
+    y += lineHeight;
+
     std::snprintf(line, sizeof(line),
                   "rain   alive=%u/%u  rate=%.0f/s  size=%.3f..%.3f  streak=%.0f",
-                  gRainParticles.activeCount(), gRainParticles.capacity(), gRainRate, RAIN_SIZE_MIN,
+                  gRainAlive, gRainCapacity, gRainRate, RAIN_SIZE_MIN,
                   RAIN_SIZE_MAX, RAIN_STREAK);
     gInfoText.OutText(line, 0, x, y, 0, 0, 0xFF66DDFF, GNg::eBLEND_NORMAL);
     y += lineHeight;
 
     std::snprintf(line, sizeof(line),
                   "snow   alive=%u/%u  rate=%.0f/s  size=%.3f..%.3f  streak=%.0f",
-                  gSnowParticles.activeCount(), gSnowParticles.capacity(), gSnowRate, SNOW_SIZE_MIN,
+                  gSnowAlive, gSnowCapacity, gSnowRate, SNOW_SIZE_MIN,
                   SNOW_SIZE_MAX, SNOW_STREAK);
     gInfoText.OutText(line, 0, x, y, 0, 0, 0xFFFFFFFF, GNg::eBLEND_NORMAL);
     y += lineHeight;
 
     std::snprintf(line, sizeof(line),
-                  "emitter dir(0, %.0f, 0)  gravity y rain=%.2f snow=%.2f  plane xz=+-%.0f  "
-                  "column=%.0f m (world-fixed)",
-                  PRECIP_DIR_Y, RAIN_GRAVITY_Y, SNOW_GRAVITY_Y, PRECIP_SPAWN_HALF_XZ,
-                  PRECIP_COLUMN_HEIGHT);
+                  "emitter = cloud bottom face  gravity y rain=%.2f snow=%.2f  dir y=%.0f",
+                  RAIN_GRAVITY_Y, SNOW_GRAVITY_Y, PRECIP_DIR_Y);
     gInfoText.OutText(line, 0, x, y, 0, 0, 0xFFFFFFFF, GNg::eBLEND_NORMAL);
     y += lineHeight;
 
@@ -304,11 +370,13 @@ void drawParticleDebugBoxesFor(const GN3d::cPARTICLE_SYSTEM &system, float strea
 
 } // namespace
 
-// V 键：雨、雪两套粒子系统各画最近的若干四边形 AABB（旧版只画雨，雪天看不到任何盒子）。
+// V 键：每块云的雨/雪粒子系统各画最近的若干四边形 AABB。
 void drawParticleDebugBoxes(const GNg::sVEC3 &right, const GNg::sVEC3 &camUp) {
     if (!gParticleBoxes || !gPrecipReady) {
         return;
     }
-    drawParticleDebugBoxesFor(gRainParticles, RAIN_STREAK, right, camUp);
-    drawParticleDebugBoxesFor(gSnowParticles, SNOW_STREAK, right, camUp);
+    for (uint32_t i = 0; i < CLOUD_CUBE_MAX; ++i) {
+        drawParticleDebugBoxesFor(gRainCells[i], RAIN_STREAK, right, camUp);
+        drawParticleDebugBoxesFor(gSnowCells[i], SNOW_STREAK, right, camUp);
+    }
 }

@@ -3,7 +3,7 @@
 // ║  GN_mini — 延迟光照片段着色器 (PBR Cook-Torrance BRDF)  ║
 // ║  读取 4 个 G-Buffer 纹理 → 逐光源 PBR + Skybox IBL     ║
 // ║  GGX 法线分布 + Smith 几何遮蔽 + Fresnel-Schlick         ║
-// ║  Poisson 16点 PCF 软阴影 + Reinhard 色调映射             ║
+// ║  PCSS 软阴影 + CSM 选级（输出线性 HDR，tonemap 在 composite）║
 // ╚══════════════════════════════════════════════════════════╝
 
 #define MAX_LIGHTS 8         // 最大光源数 (与 LightUBO 对齐)
@@ -19,7 +19,8 @@ layout(binding = 3) uniform sampler2D gAOTex;          // RGBA8_UNORM: R=AO G=�
 layout(binding = 4) uniform sampler2D gDepthTex;       // D32 深度 (Vulkan NDC [0,1])
 
 // ── 阴影 + 天空盒 ────────────────────────────────────
-layout(binding = 5) uniform sampler2DShadow shadowSampler;  // 阴影比较采样器
+// L3c：阴影图改为 2D 数组（0..3 层 = CSM 级，契约 §4）；PCSS 仍手动比较原始深度。
+layout(binding = 5) uniform sampler2DArray shadowSampler;
 layout(binding = 6) uniform samplerCube  skyboxCubemap;     // 天空盒 Cubemap
 
 // ── 光源数据结构 ─────────────────────────────────────
@@ -44,15 +45,20 @@ layout(binding = 7) uniform LightUBO {
     vec4 ambientLight;           // 光源环境光
     float lightCount;            // 实际激活光源数
     float _p0, _p1, _p2;        // padding
-    mat4 shadowVP;               // 光源 VP 矩阵 (阴影映射用)
-    float smSize;                // Shadow Map 分辨率
-    float _p3, _p4, _p5;        // padding
+    // L3c：CSM 数据（契约 §3.2，std140 偏移 672 / 928 / 944 / 960，总长 976 B）。
+    mat4 shadowLightVP[4];       // 每级光源 VP（列主序）
+    vec4 shadowParams;           // x=阴影图分辨率, y=级数(1..4), z/w=0
+    vec4 cascadeSplits;          // 各级视距分割（米，升序；选级用包含测试）
+    vec4 shadowTexelWorld;       // 各级 texel 世界尺寸（米/texel，法线偏移用）
 } ld;
 
 // P11-S3：雾（独立 Weather UBO，绑定 8；density == 0 时无效果）
+// L4：扩为 4 个 vec4（64 B，契约 §3.1）；前两个 vec4 是旧指数雾 fallback 字段。
 layout(binding = 8) uniform FogUBO {
     vec4 fogColor;
     vec4 fogParams;  // x=density(1/m), y=heightFalloff(1/m), z=baseHeight(m), w=maxOpacity
+    vec4 atmosphere;   // xyz=太阳方向（单位、指向太阳）, w=太阳强度（C++ aAtmosphere）
+    vec4 atmosphere2;  // x=地面半径(m), y=大气顶半径(m), z=相机高度(m), w=空气透视开关0/1（C++ aAtmosphere2）
 } fog;
 
 // ── G1b：GI UBO（binding 9）+ 预滤波环境 cubemap（10）+ BRDF LUT（11，RG16F）──
@@ -84,6 +90,10 @@ layout(binding = 20) uniform sampler3D probeT5;
 layout(binding = 21) uniform sampler3D probeT6;
 layout(binding = 22) uniform sampler3D probeT7;
 layout(binding = 23) uniform sampler3D probeT8;
+// L4 大气 LUT（契约 §4：延迟 set0 binding 24/25，GI 槽位不动）；空气透视只用透射率 LUT，
+// sky-view LUT 留给后续天空/IBL 一致性复用（v1 延迟光照路径不采样）。
+layout(binding = 24) uniform sampler2D transmittanceLut;
+layout(binding = 25) uniform sampler2D skyViewLut;
 
 // 与 giParams::evalSh9 一致：y 向上世界空间，余弦卷积 A_l = π, 2π/3, π/4。
 vec3 evalSH9(vec3 n) {
@@ -141,6 +151,103 @@ float fogAmountAt(vec3 worldPosition) {
     return clamp(amount, 0.0, fog.fogParams.w);
 }
 
+// ═══════════════════════════════════════════════════════════
+//  L4：空气透视（契约 §6；8 步单次散射解析积分，非 froxel/LUT）
+//  常量逐值抄自 atmosphereParams.cpp::makeDefaultAtmosphereParams（契约 §7）。
+// ═══════════════════════════════════════════════════════════
+const vec3 RAYLEIGH_SCATTERING = vec3(5.802e-6, 13.558e-6, 33.100e-6); // σR（1/m）
+const float RAYLEIGH_SCALE_HEIGHT = 8000.0;  // Hr（m）
+const float MIE_SCATTERING = 3.996e-6;       // σM 散射（1/m）
+const float MIE_ABSORPTION = 4.400e-6;       // σM 吸收（1/m）
+const float MIE_EXTINCTION = MIE_SCATTERING + MIE_ABSORPTION; // 消光 = 散射 + 吸收
+const float MIE_SCALE_HEIGHT = 1200.0;       // Hm（m）
+const float MIE_ANISOTROPY = 0.8;            // HG 各向异性 g
+const vec3 OZONE_ABSORPTION = vec3(0.650e-6, 1.881e-6, 0.085e-6); // σO（1/m）
+const float OZONE_CENTER_HEIGHT = 25000.0;   // 臭氧帐篷中心（m）
+const float OZONE_WIDTH = 15000.0;           // 臭氧帐篷半宽（m）
+const int AERIAL_STEPS = 8;                  // 单次散射积分步数（契约 §6）
+
+// Rayleigh 相位：(3/16π)(1 + mu²)。
+float rayleighPhase(float mu) {
+    return (3.0 / (16.0 * PI)) * (1.0 + mu * mu);
+}
+
+// Henyey-Greenstein 近似（Mie 相位；与 atmosphereParams.cpp miePhase 同式）。
+float miePhase(float mu, float g) {
+    float g2 = g * g;
+    float denom = max(1.0 + g2 - 2.0 * g * mu, 1e-6);
+    return (1.0 - g2) / (4.0 * PI * denom * sqrt(denom));
+}
+
+// 臭氧帐篷密度（与 computeTransmittance 的 dO 同式）。
+float ozoneDensity(float height) {
+    return max(0.0, 1.0 - abs(height - OZONE_CENTER_HEIGHT) / OZONE_WIDTH);
+}
+
+// 透射率 LUT 查表（契约 §6：u = mu*0.5+0.5、v = h/(Rt-Rg)；与 evalTransmittanceLut 同一参数化）。
+vec3 sampleSunTransmittance(vec3 p, vec3 planetCenter, float groundRadius,
+                            float atmosphereRadius, vec3 sunDir) {
+    vec3 up = normalize(p - planetCenter);
+    float height = max(length(p - planetCenter) - groundRadius, 0.0);
+    float mu = dot(up, sunDir);
+    float height01 = clamp(height / max(atmosphereRadius - groundRadius, 1.0), 0.0, 1.0);
+    return textureLod(transmittanceLut, vec2(mu * 0.5 + 0.5, height01), 0.0).rgb;
+}
+
+// 契约 §6：沿相机→片元射线做 8 步单次散射积分，替换指数雾。
+// 返回 litColor * T_view + S * sunIntensity，并按 aParams[3]（maxOpacity）限制最终混合比例。
+vec3 applyAerialPerspective(vec3 litColor, vec3 worldPos) {
+    vec3 cameraPos = scene.cp.xyz;
+    vec3 delta = worldPos - cameraPos;
+    float tMax = length(delta);
+    if (tMax < 1e-4) return litColor;
+    vec3 viewDir = delta / tMax;
+
+    // 行星中心：世界 y-up；用 aAtmosphere2.z（相机离地高度）反推地面平面
+    // y = cameraPos.y - cameraHeight，使相机高度恰为 CPU 给的值。groundHeight=0 时
+    // C.y = -Rg，与契约 §6 一致；地面不在 y=0 时也不会把高度积分整体偏移。
+    float groundRadius = max(fog.atmosphere2.x, 1.0);
+    float atmosphereRadius = max(fog.atmosphere2.y, groundRadius + 1.0);
+    float cameraHeight = max(fog.atmosphere2.z, 0.0);
+    vec3 planetCenter = vec3(0.0, cameraPos.y - cameraHeight - groundRadius, 0.0);
+    vec3 sunDir = normalize(fog.atmosphere.xyz);
+    float sunIntensity = max(fog.atmosphere.w, 0.0);
+
+    float muView = dot(viewDir, sunDir);
+    float phaseR = rayleighPhase(muView);
+    float phaseM = miePhase(muView, MIE_ANISOTROPY);
+
+    float stepLen = tMax / float(AERIAL_STEPS);
+    vec3 viewTransmittance = vec3(1.0);
+    vec3 inscatter = vec3(0.0);
+    for (int i = 0; i < AERIAL_STEPS; ++i) {
+        vec3 p = cameraPos + viewDir * ((float(i) + 0.5) * stepLen);
+        float height = max(length(p - planetCenter) - groundRadius, 0.0);
+        float dR = exp(-height / RAYLEIGH_SCALE_HEIGHT);
+        float dM = exp(-height / MIE_SCALE_HEIGHT);
+        float dO = ozoneDensity(height);
+        // 太阳可见性：该点沿太阳方向的透射率 LUT。
+        vec3 sunT = sampleSunTransmittance(p, planetCenter, groundRadius, atmosphereRadius, sunDir);
+        // 单次散射累加（Rayleigh + Mie 相位；与 computeSkyRadiance 同式）。
+        vec3 scatter = RAYLEIGH_SCATTERING * (dR * phaseR) + vec3(MIE_SCATTERING * dM * phaseM);
+        inscatter += viewTransmittance * scatter * sunT * stepLen;
+        // 光学深度递增：σR*dR + σM_ext*dM + σO*hOzone(h)（契约 §6/§7）。
+        vec3 extinction = RAYLEIGH_SCATTERING * dR + vec3(MIE_EXTINCTION * dM)
+                        + OZONE_ABSORPTION * dO;
+        viewTransmittance *= exp(-extinction * stepLen);
+    }
+    viewTransmittance = clamp(viewTransmittance, 0.0, 1.0);
+    vec3 aerialColor = litColor * viewTransmittance + inscatter * sunIntensity; // 契约 §6
+
+    // 契约 §6：aParams[3] 对空气透视结果的作用 —— 最终混合比例不超过 maxOpacity
+    // （cap=1 时等价于物理结果；cap<1 时整体按比例退化为原色，便于与旧指数雾对照）。
+    float opacity = clamp(1.0 - min(viewTransmittance.r,
+                            min(viewTransmittance.g, viewTransmittance.b)), 0.0, 1.0);
+    float cap = clamp(fog.fogParams.w, 0.0, 1.0);
+    float blend = (opacity > 1e-5) ? min(1.0, cap / opacity) : 1.0;
+    return mix(litColor, aerialColor, blend);
+}
+
 layout(location = 0) out vec4 outColor;
 
 // ═══════════════════════════════════════════════════════════
@@ -156,30 +263,80 @@ const vec2 pd[16] = vec2[](
 );
 
 // ═══════════════════════════════════════════════════════════
-//  PCF 软阴影计算
+//  L3c：CSM 选级 + L3b PCSS 软阴影（blocker search + 半影半径 PCF；
+//  sampler2DArray 手动深度比较，layer = 选中级）
 // ═══════════════════════════════════════════════════════════
-float pcf(vec4 fls, vec3 N, vec3 L, vec3 wp) {
-    vec3 p = fls.xyz / max(fls.w, 0.0001);
-    p = p * 0.5 + 0.5;                        // NDC [-1,1] → UV [0,1]
+const float PCSS_SEARCH_TEXELS = 12.0;
+const float PCSS_DEPTH_TO_TEXELS = 400.0;
+const float PCSS_MIN_TEXELS = 1.0;
+const float PCSS_MAX_TEXELS = 24.0;
+// L3c 法线偏移：按选中级的 texel 世界尺寸平移世界位置（契约 §8；2 texel 为经验值，待桌面标定）。
+const float SHADOW_NORMAL_OFFSET_TEXELS = 2.0;
 
-    if (any(lessThan(p, vec3(0.0))) || any(greaterThan(p, vec3(1.0))))
+// 契约 §8：i=0..count-1 由近到远做包含测试（Vulkan NDC x/y/z ∈ [0,1]）；
+// 返回第一个命中级，都不命中返回 -1（无阴影）。
+int selectCascade(vec3 worldPos) {
+    int cascadeCount = int(clamp(ld.shadowParams.y, 1.0, 4.0));
+    for (int i = 0; i < cascadeCount; ++i) {
+        vec4 clip = ld.shadowLightVP[i] * vec4(worldPos, 1.0);
+        if (clip.w <= 0.0) continue;
+        vec3 ndc = clip.xyz / clip.w;
+        if (ndc.x >= 0.0 && ndc.x <= 1.0 &&
+            ndc.y >= 0.0 && ndc.y <= 1.0 &&
+            ndc.z >= 0.0 && ndc.z <= 1.0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+float shadowCompare(vec2 uv, float layer, float receiver) {
+    float occluder = textureLod(shadowSampler, vec3(uv, layer), 0.0).r;
+    return receiver <= occluder ? 1.0 : 0.0;
+}
+
+float pcf(vec4 fls, float layer, vec3 N, vec3 L, vec3 wp) {
+    // Vulkan NDC：x/y ∈ [-1,1] → UV [0,1]；z ∈ [0,1] 直接作深度（契约 §8，不重映射）。
+    vec3 ndc = fls.xyz / max(fls.w, 0.0001);
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) ||
+        ndc.z < 0.0 || ndc.z > 1.0)
         return 1.0;
 
     float bias = max(0.002 * (1.0 - dot(N, L)), 0.0005);
-    float sz   = max(ld.smSize, 1.0);
+    float sz   = max(ld.shadowParams.x, 1.0);
     float ts   = 1.0 / sz;
+    float receiver = ndc.z - bias;
 
     float angle = fract(sin(dot(wp.xy, vec2(12.9898, 78.233))) * 43758.5453)
                 * 2.0 * PI;
     float ca = cos(angle), sa = sin(angle);
 
+    // 1) 阻塞物搜索
+    float blockerSum = 0.0;
+    float blockerCount = 0.0;
+    for (int i = 0; i < 16; i++) {
+        vec2 o = vec2(pd[i].x * ca - pd[i].y * sa,
+                      pd[i].x * sa + pd[i].y * ca);
+        float occluder = textureLod(shadowSampler,
+                                    vec3(uv + o * ts * PCSS_SEARCH_TEXELS, layer), 0.0).r;
+        if (occluder < receiver) {
+            blockerSum += occluder;
+            blockerCount += 1.0;
+        }
+    }
+    if (blockerCount < 0.5) return 1.0;
+
+    // 2) 半影半径 ∝ 遮挡物-接收面深度差；3) 该半径做 PCF
+    float blocker = blockerSum / blockerCount;
+    float filterSize = clamp((receiver - blocker) * PCSS_DEPTH_TO_TEXELS,
+                             PCSS_MIN_TEXELS, PCSS_MAX_TEXELS);
     float shadow = 0.0;
     for (int i = 0; i < 16; i++) {
         vec2 o = vec2(pd[i].x * ca - pd[i].y * sa,
                       pd[i].x * sa + pd[i].y * ca);
-        shadow += texture(shadowSampler,
-                          vec3(p.xy + o * ts * 1.5,
-                               p.z - bias));
+        shadow += shadowCompare(uv + o * ts * filterSize, layer, receiver);
     }
     return shadow / 16.0;
 }
@@ -257,11 +414,16 @@ vec3 CalcPBRLightDeferred(Light L, vec3 N, vec3 V, vec3 wp,
                     + L.attenuation.z * d * d);
     }
 
-    // ── 阴影计算 ──────────────────────────────────
+    // ── 阴影计算（契约 §8：选级 + 层采样 + 按级 texel 世界尺寸做法线偏移）──
     float sh = 1.0;
     if (st > 0.5 && st < 1.5) {
-        vec4 fls = ld.shadowVP * vec4(wp, 1.0);
-        sh = pcf(fls, N, Ldir, wp);
+        int cascade = selectCascade(wp);
+        if (cascade >= 0) {
+            float texelWorld = ld.shadowTexelWorld[cascade];
+            vec3 shadowWorldPos = wp + N * (texelWorld * SHADOW_NORMAL_OFFSET_TEXELS);
+            vec4 fls = ld.shadowLightVP[cascade] * vec4(shadowWorldPos, 1.0);
+            sh = pcf(fls, float(cascade), N, Ldir, wp);
+        }
     }
 
     vec3 radiance = lc * att * sh;
@@ -364,10 +526,12 @@ void main() {
         if (probe.weight.x > 0.0) {
             ambientEnv = mix(ambientEnv, sampleProbeSh(wp, N), clamp(probe.weight.x, 0.0, 1.0));
         }
-        vec3 envDiffuse = kD * albedo * ambientEnv * gi.indirect.x * ao;
+        // evalSH9 / 探针 / SSGI 都按 irradiance 约定（含 A_l=π 余弦卷积）；Lambert 漫反射 BRDF 需
+        // 除以 π，否则环境项比直射光（CalcPBRLightDeferred 内已 /π）亮 π 倍。
+        vec3 envDiffuse = kD * albedo * ambientEnv * 0.31830988618 * gi.indirect.x * ao;
         // G4：SSGI 与 SH9 同尺度（SSGI shader 输出辐照度等价值）；w=0 时 mix 退化为 envDiffuse。
         vec3 ssgiRadiance = texture(ssgiTex, fragUV).rgb;
-        vec3 ssgiDiffuse = kD * albedo * ssgiRadiance * gi.indirect.x * ao;
+        vec3 ssgiDiffuse = kD * albedo * ssgiRadiance * 0.31830988618 * gi.indirect.x * ao;
         float ssgiWeight = clamp(gi.envParams.w, 0.0, 1.0);
         vec3 diffuseIBL = mix(envDiffuse, ssgiDiffuse, ssgiWeight);
         vec3 R = reflect(-V, N);
@@ -379,8 +543,13 @@ void main() {
     }
     vec3 color = ambient + Lo;
 
-    // ── Reinhard 色调映射 (HDR→LDR) ─────────────────
-    color = color / (color + vec3(1.0));
-
-    outColor = vec4(mix(fog.fogColor.rgb, color, 1.0 - fogAmountAt(wp)), 1.0);
+    // L1：输出线性 HDR；曝光/色调映射/Bloom 由 gn3d_composite.frag 统一处理。
+    // L4/L5：空气透视（AP）只负责远处的物理大气辉光；天气雾（fogParams.x / maxOpacity）
+    // 必须独立叠加——否则 FOG/STORM 下 fog.density 被完全绕过（AP 在 1 km 视距只有 ~1e-2 贡献）。
+    vec3 baseColor = color;
+    if (fog.atmosphere2.w > 0.5 && fog.atmosphere.w > 0.0) {
+        baseColor = applyAerialPerspective(color, wp);
+    }
+    vec3 fogged = mix(fog.fogColor.rgb, baseColor, 1.0 - fogAmountAt(wp));
+    outColor = vec4(fogged, 1.0);
 }

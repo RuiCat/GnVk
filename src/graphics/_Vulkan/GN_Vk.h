@@ -15,6 +15,8 @@
 #include "GN_3Dparticle.h" // P11-S5：降水绘制直接消费 CPU 粒子池（GN3d::sPARTICLE）
 #include "GN_3Ddecal.h" // P11-S6b：贴花渲染条目（GN3d::sDECAL_RENDER_ITEM）
 #include "giParams.h" // G1a：sGI_UBO 契约（GN_VkSetGI 参数类型）
+#include "postParams.h" // L1：sPOST_UBO 契约（GN_VkSetPost 参数类型）
+#include "atmosphereParams.h" // L4：sATMOSPHERE_PARAMS 契约（GN_VkSetAtmosphere 参数类型）
 
 namespace GNg {
 // ═══════════════════════════════════════════════════════════
@@ -131,6 +133,7 @@ struct alignas(16) VkModelPushConstPBR {
 typedef VkModelPushConstBP VkModelPushConst;
 
 // 天空参数（CPU → 天空 UBO；与 assets/shaders/gn3d_skybox.frag 的 SkyboxUBO 逐字段一致）
+// L4：末尾新增 vec4 atmosphereParams（144 B；UBO 总长 64 + 80 = 144）。
 struct VkSkyParams {
     float sunDirection[3] = {0.45f, 0.78f, 0.44f};
     float sunIntensity = 1.0f;
@@ -142,8 +145,12 @@ struct VkSkyParams {
     float windX = 0.0f;
     float windZ = 0.0f;
     float exposure = 1.0f;
+    // L4：x=atmosphereMix (0=解析渐变旧路径, 1=sky-view LUT 大气天空), y=辐亮度倍率, z/w=保留
+    float atmosphereMix = 1.0f;
+    float atmosphereIntensity = 1.0f;
+    float _pad[2] = {0.0f, 0.0f};
 };
-static_assert(sizeof(VkSkyParams) == 64, "VkSkyParams 必须为 64 字节");
+static_assert(sizeof(VkSkyParams) == 80, "VkSkyParams 必须为 80 字节");
 #endif // GN_USING_3D
 
 // ═══════════════════════════════════════════════════════════
@@ -531,15 +538,41 @@ void GN_VkBegin3DPassPBR_HDR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                              const void *lightUBO, uint32_t lightUBOSize);
 
 // — 阴影映射 —
-void GN_VkShadowPassBegin(const sMAT44 *lightViewProj);
+// L3c CSM：cascadeIndex 选择 0..3 级（越界钳制；默认 0 与旧单级行为等价）。
+// 每次 Begin/End 对应一级；查看器每帧按级循环提交。
+void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex = 0);
+// L3c：阴影级联层数（固定 4；gpuCheck 用它断言按层 framebuffer 已建）。
+uint32_t GN_VkShadowCascadeCount();
 void GN_VkShadowPassEnd();
 void GN_VkShadowDraw(const void *vertices, uint32_t vertexCount,
                      const uint32_t *indices, uint32_t indexCount,
                      const sMAT44 *modelMatrix);
 
 // — HDR 合成 (Bloom + 色调映射) —
-// 在 3D Pass 之后调用, 将 HDR 内容合成到 swapchain
+// 在 3D Pass 之后调用, 将 HDR 内容合成到 swapchain；GN_VkEnd3DPass /
+// GN_VkDeferredLighting 会自动调用一次（L1：3D 输出统一为线性 HDR）。
 void GN_VkCompositeToSwapchain();
+
+// — L1 后处理（曝光/色调映射/Bloom）—
+// 写 POST UBO；非法字段被钳制后写入（返回值表示输入是否原样合法）。缓冲不存在时静默忽略。
+bool GN_VkSetPost(const GN3d::sPOST_UBO &ubo);
+// 读取当前 POST 参数（空指针安全）；未初始化返回 false。
+bool GN_VkGetPost(GN3d::sPOST_UBO *out);
+// 以 EV 设置曝光（exposure = 2^EV）；EV 钳制到 [-10,10]。
+void GN_VkSetExposure(float ev);
+// 切换色调映射模式（0=NONE / 1=Reinhard / 2=ACES，越界钳制）。
+void GN_VkSetTonemapMode(int32_t mode);
+// L4c：读取大气 LUT 纹理（RGBA16F，SHADER_READ_ONLY；未就绪返回 false）。
+// 天空 shader 接线前供 gpuCheck 回读校验；transmittance 为 256×64、skyView 为 192×108。
+bool GN_VkGetAtmosphereLut(VkImage *transmittance, VkImage *skyView);
+// L4：设置当前大气参数与太阳方向（世界空间 y-up、指向太阳；内部归一化 + validate）。
+// 参数/太阳变化时标记 sky-view LUT 为脏，下一次 3D pass 前由 compute 重建；未初始化安全忽略。
+void GN_VkSetAtmosphere(const GN3d::sATMOSPHERE_PARAMS &params, const float sunDir[3]);
+// L4：读取大气 LUT 视图与采样器（供天空/光照描述符绑定；未就绪返回 false）。
+bool GN_VkGetAtmosphereLutViews(VkImageView *transmittanceView, VkImageView *skyView,
+                                VkSampler *transmittanceSampler, VkSampler *skySampler);
+// L2a：合成着色器内 FXAA 开关（false=关，默认；true=开）。只改 POST UBO.fxaa。
+void GN_VkSetFxaa(bool enabled);
 
 // — 天空盒 —
 // 设置天空参数（下一次 GN_VkDrawSkybox 生效）；未设置时使用 VkSkyParams 默认值。
@@ -554,6 +587,11 @@ void GN_VkSetGI(const GN3d::sGI_UBO &ubo);
 // — G1b：开/关 GI IBL。只改 GI UBO 的 indirect[0]/[1]（漫反射/镜面倍率），
 // 保留 SH9/envParams/invViewProj；GI UBO 不存在时静默返回。
 void GN_VkEnableGI(bool enable);
+
+// — L0a：GI 子开关（只改对应字段，保留其余；缓冲不存在时静默返回）—
+// SSAO 开关写 GI UBO.indirect.w；SSGI 强度写 envParams.w（0=关，钳制到 [0,1]）。
+void GN_VkSetSsaoEnabled(bool enable);
+void GN_VkSetSsgiStrength(float strength);
 
 // — G3：按当前天空参数重烘环境（6 面 → CPU 预滤波 → 上传 → 只更新 GI UBO 的 SH9）。
 // 必须在 3D pass 之外调用；未初始化/资源缺失/失败返回 false 且保留旧环境。
@@ -665,34 +703,43 @@ void GN_VkDestroyTexture(sTEXTURE_GPU &texture);
 struct sFOG_UBO {
     float aColor[4];
     float aParams[4];
+    // L4：大气空气透视（64 B 总长）。aAtmosphere.w 为太阳强度，aAtmosphere2.w 为开关。
+    float aAtmosphere[4]; // xyz=太阳方向（世界空间、指向太阳、单位向量）, w=太阳强度
+    float aAtmosphere2[4]; // x=地面半径(m), y=大气顶半径(m), z=相机高度(m), w=空气透视开关(0/1)
 };
+static_assert(sizeof(sFOG_UBO) == 64, "sFOG_UBO 必须为 64 字节");
 
 // 写入雾参数（密度/高度衰减被钳到 >= 0，最大不透明度钳到 [0,1]）；未初始化时安全忽略。
 // density == 0 表示关闭雾（默认值），既有画面不变。
 void GN_VkSetFog(const sFOG_UBO &fog);
 
-// ── P11-S2b：中景 billboard 云层 ────
-// 一块云层 = aTilesPerAxis² 个面向相机的四边形（顶点着色器内 billboard 展开），
-// 片元用 FBM 程序化 alpha（aCoverage 截断 + aSharpness 控制边缘），随风漂移、近处淡出。
-// tile 网格原点按相机 xz 取模对齐并以 aWind × aTimeSeconds 平移 ⇒ 云层"无限"且无接缝；
-// 管线：alpha 混合、深度测试开、深度写关、不剔除（L2 云层在 3D pass 内提交）。
-// 参数非法 / 未初始化 / 3D pass 外 / aTilesPerAxis 越界 返回 false。
-struct sCLOUD_DRAW_PARAMS {
-    sMAT44 aViewProj; // 主 pass 的 view-projection（列主序，与其它 3D 绘制一致）
-    GNg::sVEC3 aCameraPos; // 相机世界位置（视差与近处淡出）
-    float aLayerHeight = 0.0f; // 云层世界高度（m）
-    GNg::sVEC3 aWind; // 漂移速度（m/s，只用 x/z）
-    float aTileSize = 256.0f; // 单个 tile 的世界尺寸（m，必须 > 0）
-    uint32_t aTilesPerAxis = 1; // 每轴 tile 数（1..64；总四边形 = 平方）
-    float aCoverage = 0.5f; // 云量 0..1（越大越满）
-    float aSharpness = 0.5f; // 边缘锐度 0..1
-    float aOpacity = 1.0f; // 整体不透明度 0..1
-    float aTimeSeconds = 0.0f; // 漂移时间（秒）
-    float aNearFade = 0.0f; // 近处淡出距离（m，0 = 关）
+// ── L5b：云块（实例化**包围盒**：36 顶点 × N 实例，无顶点缓冲）──────────────
+// 方块**只是范围**（中心 + 半边长），不是云的外形：顶点着色器反转绕序，只画盒子背面当占位，
+// 片元在盒内 raymarch 三维噪声密度，并在盒内边界把密度收到 0 ⇒ 画面上看不到盒子。
+// 预乘 alpha 混合、深度测试开 / 深度写关、背面剔除。上限 kCloudCubeMaxInstances = 128。
+struct sCLOUD_CUBE_INSTANCE {
+    float aCenter[3] = {0.0f, 0.0f, 0.0f}; // 盒中心（世界坐标，m）
+    float aHalfSize = 50.0f; // 盒半边长（m）
+    float aTint[3] = {1.0f, 1.0f, 1.0f}; // 云色调（线性 HDR）
+    float aAlpha = 0.9f; // 密度倍率 0..1（不是不透明度）
 };
-bool GN_VkDrawCloud(const sCLOUD_DRAW_PARAMS &params);
-// 释放云层的顶点缓冲/管线布局（管线归 aPipelineCache）；可重复调用。
-void GN_VkCloudDestroy();
+struct sCLOUD_CUBE_PARAMS {
+    sMAT44 aViewProj; // 主 pass 的 view-projection（列主序）
+    GNg::sVEC3 aCameraPos; // 相机世界位置（距离雾用）
+    GNg::sVEC3 aSunDir; // 指向太阳的单位向量
+    float aSunIntensity = 1.0f; // 天气太阳强度 0..1
+    GNg::sVEC3 aAmbient; // 天空环境色
+    GNg::sVEC3 aFogColor; // 雾色
+    float aFogDensity = 0.0f; // 雾密度（1/m）
+    float aBaseAltitude = 220.0f; // 全场景统一的云底高度（m）：云底以下密度归零 ⇒ 平底
+    float aOvercast = 0.0f; // 阴雨程度 0..1：压暗云体（雨天=满天乌云）
+    const sCLOUD_CUBE_INSTANCE *aInstances = nullptr; // 方块数组（只读）
+    uint32_t aCount = 0; // 1..32
+};
+// 未初始化 / 不在 3D pass 内 / 实例指针为空 / aCount 为 0 或 > 32 返回 false。
+bool GN_VkDrawCloudCubes(const sCLOUD_CUBE_PARAMS &params);
+// 释放立方体云的 UBO / 描述符集 / 管线布局（管线归 aPipelineCache）；可重复调用。
+void GN_VkCloudCubeDestroy();
 
 // ── P11-S5：降水（CPU 展开 billboard，alpha 混合，深度测试开 / 深度写关）────
 // 每个活粒子展开成 2 个三角形（6 顶点，世界空间 billboard 面向相机）；

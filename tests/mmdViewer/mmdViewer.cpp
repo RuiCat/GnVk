@@ -27,13 +27,34 @@
 #include "mmd/pmxLoader.h"
 
 #include "GN_3Dtexture.h"
+#include "vkShadowCascade.h" // L3c：CSM CPU 拟合（级联分割 / 视锥角点 / texel snapping）
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <string>
 #include <vector>
+
+// L3c：4 级 CSM 的光矩阵与状态。每帧由 updateShadowCascades() 拟合；
+// 这些全局量同时被 mmdViewerOverlay.cpp 读取（共享头 mmdViewerShared.h 属其他写域，只读，
+// 所以跨模块声明落在各自 .cpp 的使用处）。
+GNg::sMAT44 gShadowCascadeVP[GN3d::SHADOW_CASCADE_MAX];
+bool gShadowValid = false;
+bool gShadowsEnabled = true;
+uint32_t gShadowCascadeCount = GN3d::SHADOW_CASCADE_MAX; // 契约 §8：级数默认 4
+float gShadowCascadeSplits[GN3d::SHADOW_CASCADE_MAX] = {0.0f, 0.0f, 0.0f, 0.0f};
+float gShadowTexelWorld[GN3d::SHADOW_CASCADE_MAX] = {0.0f, 0.0f, 0.0f, 0.0f};
+uint32_t gShadowMapSize = 2048;
+float gShadowFar = 0.0f;
+// 方向光的传播方向（指向场景的单位向量）：光矩阵沿它反推光源位置（与 cLIGHT 方向同向）。
+static const GNg::sVEC3 kSunDirection = {-0.35f, -0.85f, 0.4f};
+// L4：空气透视开关（定义在 mmdViewerWeather.cpp；B 键切换；叠层显示状态）。
+extern bool gAtmosphereEnabled;
+// L5b：立方体云开关（定义在 mmdViewerWeather.cpp；X 键切换；绘制也在该 TU）。
+extern bool gCloudsEnabled;
+void drawCloudCubes(const GNg::sMAT44 &viewProjection, const GNg::sVEC3 &camera);
 
 // ── 场景状态（主循环与场景装配持有）──
 GN3d::cMODEL gModel;
@@ -235,9 +256,9 @@ bool loadModel() {
     gLight = new GN3d::cLIGHT();
     GNg::sVEC3 ambient = {0.35f, 0.35f, 0.38f};
     gLight->SetAmbient(ambient, 1.0f);
-    GNg::sVEC3 sunDir = {-0.35f, -0.85f, 0.4f};
+    GNg::sVEC3 sunDir = kSunDirection;
     GNg::sVEC3 sunColor = {1.0f, 0.97f, 0.92f};
-    gLight->AddDirectional(sunDir, sunColor, 1.2f, false);
+    gLight->AddDirectional(sunDir, sunColor, 1.2f, true); // L3：方向光投影（K 键可关）
     GNg::sVEC3 fillPos = {gTarget.x + gHeight, gTarget.y + gHeight, gTarget.z + gHeight * 2.0f};
     GNg::sVEC3 fillColor = {0.45f, 0.5f, 0.6f};
     gLight->AddPoint(fillPos, gHeight * 8.0f, fillColor, 0.6f);
@@ -252,7 +273,7 @@ bool loadModel() {
                 gModel.aWorldAABB.aMin.y, gModel.aWorldAABB.aMax.y, groundHeight());
     std::printf("[mmdViewer] 操作: 左/右键拖动转视角, WASD 平移, Q/E 升降, Shift 加速, "
                 "方向键/J L 转视角, F 自由/轨道, R 重置, G 坐标轴/包围盒, H 坐标信息, "
-                "O 降水, P 贴花, V 粒子盒, C 云层\n");
+                "O 降水, P 贴花, V 粒子盒, C 云层, T FXAA, K 阴影(4 级 CSM), B 空气透视\n");
     std::printf("[mmdViewer] 轨道模式: 左/右键拖动绕模型旋转, 滚轮缩放, 中键拖动平移, F 回自由\n");
 
     std::printf("[mmdViewer] 天气: 1 晴 2 阴 3 雨 4 雪 5 雾 6 暴风雨（3 秒过渡）\n");
@@ -288,6 +309,97 @@ bool loadModel() {
     return true;
 }
 
+// L3c：阴影拟合用的「场景 AABB」= 模型世界 AABB + 地面承接区。
+// 模块会把每级视锥切片与它求交，若只给模型盒，模型之外的地面片段不在拟合盒内，
+// 地面上就看不到模型投影。地面承接区取模型盒四周 1.5×模型高、下沿压到地面。
+static GN3d::sAABB shadowSceneAABB() {
+    GN3d::sAABB box = gModel.aWorldAABB;
+    const float margin = gHeight > 0.0f ? gHeight * 1.5f : 1.0f;
+    box.aMin.x -= margin;
+    box.aMax.x += margin;
+    box.aMin.z -= margin;
+    box.aMax.z += margin;
+    const float ground = groundHeight();
+    if (ground < box.aMin.y) {
+        box.aMin.y = ground;
+    }
+    return box;
+}
+
+// L3c：每帧按相机视锥 + 场景 AABB 拟合 4 级 CSM（分割/角点/正交拟合/texel snapping 全在
+// vkShadowCascade.cpp）。结果同时写进 sLIGHT_UBO（着色器选级用）与本文件的 shadow pass 循环。
+// far 口径（契约 §8，Lead 已放宽）：far = max(AABB 对角, 相机到 AABB 最远角距离 + 0.5)。
+// 只取对角线时，相机站在场景外会让 4 级切片全落在相机与模型之间 ⇒ 阴影整片消失。
+static void updateShadowCascades(const GNg::sMAT44 &cameraView, float aspect) {
+    gShadowValid = false;
+    if (!gLight || !gModel.aWorldAABB.IsValid() || !(aspect > 0.0f)) {
+        return;
+    }
+    const GNg::sVEC3 extent = gModel.aWorldAABB.Extent();
+    const float diagonal =
+        2.0f * std::sqrt(extent.x * extent.x + extent.y * extent.y + extent.z * extent.z);
+    const GNg::sVEC3 camera = cameraPosition();
+    const GNg::sVEC3 &lo = gModel.aWorldAABB.aMin;
+    const GNg::sVEC3 &hi = gModel.aWorldAABB.aMax;
+    float farthestCorner = 0.0f;
+    for (uint32_t corner = 0; corner < 8; ++corner) {
+        const GNg::sVEC3 point = {(corner & 1u) ? hi.x : lo.x, (corner & 2u) ? hi.y : lo.y,
+                                  (corner & 4u) ? hi.z : lo.z};
+        const float dx = point.x - camera.x;
+        const float dy = point.y - camera.y;
+        const float dz = point.z - camera.z;
+        const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (distance > farthestCorner) {
+            farthestCorner = distance;
+        }
+    }
+    float farZ = diagonal > farthestCorner + 0.5f ? diagonal : farthestCorner + 0.5f;
+    if (!(farZ > 1.0f)) {
+        farZ = 1.0f; // 极小模型兜底：远处云层/地面不参与阴影拟合
+    }
+
+    GN3d::sSHADOW_CASCADE_DESC desc;
+    desc.aCameraView = cameraView;
+    desc.aFovYRad = gCamera.aFovY * GN3d::CAMERA_DEG_TO_RAD;
+    desc.aAspect = aspect;
+    desc.aNear = 0.1f; // 契约 §8 固定近平面
+    desc.aFar = farZ;
+    desc.aLightDirection = kSunDirection;
+    desc.aSceneAABB = shadowSceneAABB();
+    // 级数不得超过引擎实际分配的阴影层数（Lead 接线：4 层 D32 数组，GN_VkShadowCascadeCount）。
+    uint32_t cascadeCount = gShadowCascadeCount;
+    const uint32_t layerCount = GNg::GN_VkShadowCascadeCount();
+    if (cascadeCount > layerCount) {
+        cascadeCount = layerCount;
+    }
+    if (cascadeCount < 1u) {
+        cascadeCount = 1u;
+    }
+    desc.aCascadeCount = cascadeCount;
+    desc.aShadowMapSize = gShadowMapSize;
+    desc.aSplitLambda = 0.5f; // 契约 §8：对数/均匀各半（Lauritzen 固定分割）
+    desc.aTexelSnapping = true;
+
+    GN3d::sSHADOW_CASCADE_RESULT result;
+    if (!GN3d::buildShadowCascades(desc, &result)) {
+        return;
+    }
+    gShadowCascadeCount = result.aCount;
+    gShadowFar = farZ;
+    for (uint32_t i = 0; i < GN3d::SHADOW_CASCADE_MAX; ++i) {
+        gShadowCascadeVP[i] = result.aLightViewProj[i];
+        gShadowCascadeSplits[i] = result.aSplits[i];
+        gShadowTexelWorld[i] = result.aTexelWorld[i];
+    }
+    // sLIGHT_UBO：每级 lightVP + 级数/分割/texel 世界尺寸（法线偏移用）。
+    for (uint32_t i = 0; i < result.aCount; ++i) {
+        gLight->SetShadowLightVP(result.aLightViewProj[i], i);
+    }
+    gLight->SetShadowMapSize(static_cast<float>(result.aShadowMapSize));
+    gLight->SetShadowCascades(result.aCount, result.aSplits, result.aTexelWorld);
+    gShadowValid = true;
+}
+
 } // namespace
 
 extern "C" {
@@ -297,6 +409,8 @@ GN_CALL void AppInit() {
     // 用户裁决 A：查看器走前向 PBR + GI IBL（引擎初始化已完成、GI UBO 已由 init3DEnvironment 建好）；
     // 不启用延迟专用的 SSAO/SSGI/探针（查看器无 G-Buffer）。
     GNg::GN_VkEnableGI(true);
+    // L3c：阴影矩阵不在这里算——相机每帧移动，updateShadowCascades() 在 AppDisplay2D 里
+    // 用本帧的 view 矩阵按 4 级 CSM 拟合。
 }
 
 GN_CALL void AppUnInit() {
@@ -337,11 +451,10 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     GNg::sMAT44 projection;
     GNg::sMAT44 viewProjection;
     const float nearZ = clampValue(gHeight * 0.01f, 0.05f, 1.0f);
-    // 远平面至少要容下 300 m 的中景云层（P11-S2b），否则小模型时云层被整片裁掉。
+    // 远平面至少要容下立方体云块的分布范围（L5b：半径 900 m），否则小模型时云块被整片裁掉。
     float farZ = cameraDistance() * 8.0f + gHeight * 4.0f;
-    const float cloudFarZ = CLOUD_LAYER_HEIGHT + 2.0f * CLOUD_TILE_SIZE;
-    if(farZ < cloudFarZ) {
-        farZ = cloudFarZ;
+    if(farZ < CLOUD_FAR_PLANE) {
+        farZ = CLOUD_FAR_PLANE;
     }
     gCamera.SetNF(nearZ, farZ); // near/far 仍由查看器按模型高度/云层下限给，相机只负责组矩阵
     if(!gCamera.BuildViewProj(aspect, &view, &projection, &viewProjection)) {
@@ -350,13 +463,23 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     gLastViewProj = viewProjection;
     gLastViewProjValid = true;
 
+    // L3c：按本帧相机拟合 4 级 CSM（写 sLIGHT_UBO + shadow pass 用的光矩阵）。
+    updateShadowCascades(view, aspect);
+
+    // L3c：方向光阴影（在 3D pass 之前；只投 OPAQUE 网格，K 键切换）。
+    // 每级一次 Begin/End（cascadeIndex 选择 0..3 的深度层），逐级绘制同一批投影网格。
+    if (gShadowsEnabled && gShadowValid) {
+        for (uint32_t i = 0; i < gShadowCascadeCount; ++i) {
+            GNg::GN_VkShadowPassBegin(&gShadowCascadeVP[i], i);
+            gModel.DrawShadow();
+            GNg::GN_VkShadowPassEnd();
+        }
+    }
+
     GNg::GN_VkBegin3DPass(&viewProjection, &camera, gLight->GetUBO(), sizeof(GN3d::sLIGHT_UBO));
     GNg::GN_VkDrawSkybox(&viewProjection);
-    // drawClouds / drawDecals / drawPrecipitation 都收 `const sMAT44&`：
-    // 传 &viewProjection 会被 sMAT44(bool) 隐式接住变成单位矩阵（已把该构造函数改为 explicit）。
-    if (gCloudLayerEnabled) {
-        drawClouds(viewProjection, camera); // 天空盒之后、模型之前；C 键开关，默认关
-    }
+    // L5b：立方体云（独立云块）——天空盒之后、几何之前；前景几何随后自然覆盖云。
+    drawCloudCubes(viewProjection, camera);
     drawGround(); // 不透明地面：先画，供模型与贴花做深度/投影基准
     gModel.DrawPBRSorted(camera); // 先 OPAQUE/MASK，再 BLEND 由远到近（PNG 半透明材质）
     drawDecals(viewProjection); // 贴花贴在地面上（深度测试开、写关）
@@ -416,14 +539,49 @@ GN_CALL void AppRun(unsigned int nTime) {
     if (GN::Key1[GK_P]) { // 单独开关地面溅射贴花（排查用）
         gDecalEnabled = !gDecalEnabled;
     }
-    if (GN::Key1[GK_C]) { // 开关 S2b 中景 billboard 云层（默认关，见 gCloudLayerEnabled 注释）
-        gCloudLayerEnabled = !gCloudLayerEnabled;
-    }
+    // 旧 S2b 中景 billboard 云层键（C）已停用：云由 L5 体积云接管。
     if (GN::Key1[GK_V]) { // 开关粒子四边形包围盒（只画最近 16 个）
         gParticleBoxes = !gParticleBoxes;
     }
     if (GN::Key1[GK_R]) { // 回到默认正面视角
         resetCamera();
+    }
+    // L0c 亮度/Bloom 标定：9/0 调曝光 EV（±0.25），7/8 调 Bloom 强度（±0.05）；数值显示在左上叠层。
+    if (GN::Key1[GK_9] || GN::Key1[GK_0]) {
+        GN3d::sPOST_UBO post;
+        if (GNg::GN_VkGetPost(&post)) {
+            GNg::GN_VkSetExposure(post.ev + (GN::Key1[GK_9] ? -0.25f : 0.25f));
+        }
+    }
+    if (GN::Key1[GK_7] || GN::Key1[GK_8]) {
+        GN3d::sPOST_UBO post;
+        if (GNg::GN_VkGetPost(&post)) {
+            const float step = GN::Key1[GK_7] ? -0.05f : 0.05f;
+            float intensity = post.bloomIntensity + step;
+            if (intensity < 0.0f) intensity = 0.0f;
+            if (intensity > 1.0f) intensity = 1.0f;
+            post.bloomIntensity = intensity;
+            GNg::GN_VkSetPost(post);
+        }
+    }
+    if (GN::Key1[GK_T]) { // L2a：Toggle FXAA（前向已有 4× MSAA，默认关）
+        GN3d::sPOST_UBO post;
+        if (GNg::GN_VkGetPost(&post)) {
+            GNg::GN_VkSetFxaa(post.fxaa < 0.5f);
+        }
+    }
+    if (GN::Key1[GK_K]) { // L3c：Toggle 方向光阴影（同步改 light UBO 的 shadowType）
+        gShadowsEnabled = !gShadowsEnabled;
+        if (gLight && gLight->aCount > 0) {
+            gLight->aData.lights[0].direction[3] = gShadowsEnabled ? 1.0f : 0.0f;
+            gLight->aDirty = true;
+        }
+    }
+    if (GN::Key1[GK_B]) { // L4：Toggle 空气透视（sFOG_UBO.aAtmosphere2.w；关 = 旧指数雾 fallback）
+        gAtmosphereEnabled = !gAtmosphereEnabled;
+    }
+    if (GN::Key1[GK_X]) { // L5b：Toggle 立方体云（默认开；开启时天空 FBM 云让位）
+        gCloudsEnabled = !gCloudsEnabled;
     }
 
     // 自由飞行平移 + 键盘/鼠标转视角（顺序：平移 → 键盘转视角 → 鼠标拖拽）。

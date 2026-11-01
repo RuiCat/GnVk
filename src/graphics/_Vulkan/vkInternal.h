@@ -67,6 +67,25 @@ GN_VK_INTERNAL void init3DPbr(const std::vector<uint32_t> &pbrVert,
                               const std::vector<uint32_t> &pbrFrag);
 GN_VK_INTERNAL void init3DShadow(const std::vector<uint32_t> &shadowVertSpv);
 GN_VK_INTERNAL void init3DHdr();
+GN_VK_INTERNAL void create3DHdrImages(); // L1：HDR 目标须早于 renderPass3D 创建（resolve 目标）
+GN_VK_INTERNAL void init3DPost();        // L1：POST UBO + composite binding 2
+GN_VK_INTERNAL void destroy3DPost();
+GN_VK_INTERNAL bool init3DAtmosphereLut(); // L4c：CPU 大气 LUT → RGBA16F GPU 纹理
+GN_VK_INTERNAL void destroy3DAtmosphereLut();
+GN_VK_INTERNAL bool isAtmosphereLutReady();
+// L4：sky-view LUT 的 GPU compute（参数/太阳变化时重建；须在 render pass 之外录制）
+GN_VK_INTERNAL void recordAtmosphereLutUpdate(VkCommandBuffer cb);
+// L4：把 LUT 视图/采样器写入天空、PBR、延迟、环境烘焙的描述符集（LUT 就绪后调用一次）
+GN_VK_INTERNAL void wireAtmosphereDescriptors();
+// L3c CSM：4 层阴影图的按层 framebuffer（cascadeIndex 越界返回层 0）
+GN_VK_INTERNAL void destroy3DShadowCascades();
+GN_VK_INTERNAL VkFramebuffer shadowFramebufferForCascade(uint32_t cascadeIndex);
+GN_VK_INTERNAL bool isPostReady();       // POST UBO 可用才允许合成（避免未绑定 UBO 的 draw）
+GN_VK_INTERNAL bool init3DBloom();       // L1d：Bloom mip 链（render pass/管线/描述符/图）
+GN_VK_INTERNAL void destroy3DBloom();
+GN_VK_INTERNAL bool recreate3DBloomTargets(); // resize：mip 图/fb/管线按新尺寸重建
+GN_VK_INTERNAL bool isBloomReady();
+GN_VK_INTERNAL void recordBloomPasses(VkCommandBuffer cb); // composite 前录制（pass 之外）
 GN_VK_INTERNAL void init3DSkybox();
 GN_VK_INTERNAL void init3DEnvironment(); // G1a：GPU 6 面烘焙 → CPU 预滤波 → GI 资源上传
 GN_VK_INTERNAL void destroy3DEnvironment();
@@ -102,7 +121,6 @@ GN_VK_INTERNAL void create3DPbrPipeline(const std::vector<uint32_t> &pbrVert,
                                         const std::vector<uint32_t> &pbrFrag);
 GN_VK_INTERNAL void create3DSkyboxPipeline();
 GN_VK_INTERNAL void create3DHdrImages();
-GN_VK_INTERNAL void create3DHdrFramebuffers();
 GN_VK_INTERNAL void destroy3DHdrTargets();
 GN_VK_INTERNAL void recreate3DHdrTargets();
 GN_VK_INTERNAL void writeCompositeHdrBinding();
@@ -116,7 +134,6 @@ GN_VK_INTERNAL bool recreateParticleDrawPipeline();
 GN_VK_INTERNAL bool recreateClothDrawPipeline();
 GN_VK_INTERNAL bool recreateDecalPipeline();
 GN_VK_INTERNAL bool recreatePrecipitationPipeline();
-GN_VK_INTERNAL bool recreateCloudPipeline();
 GN_VK_INTERNAL bool recreateSkinnedSsboPipeline(); // task-27：SSBO 蒙皮（>128 关节）固定视口
 
 // ── G-Buffer 附件契约（冻结）──
@@ -142,6 +159,9 @@ GN_VK_INTERNAL void destroy3DDeferredLightFramebuffers();
 GN_VK_INTERNAL void create3DDeferredLightTargets();
 
 GN_VK_INTERNAL std::vector<uint32_t> LoadSPIRVFile(const char *path);
+// 初始化期一次性命令（帧外上传用）：分配/开始 + 结束/提交/等待/释放。
+GN_VK_INTERNAL VkCommandBuffer beginOnceCommand();
+GN_VK_INTERNAL bool submitOnceCommand(VkCommandBuffer cb);
 GN_VK_INTERNAL uint32_t FindMemType(uint32_t f, VkMemoryPropertyFlags p);
 GN_VK_INTERNAL void CreateBuf(VkDeviceSize sz, VkBufferUsageFlags u,
                               VkMemoryPropertyFlags p, VkBuffer &b, VkDeviceMemory &m);
