@@ -33,7 +33,8 @@ void drawHud() {
 
     const GNg::sVEC3 pos = gCamera.GetCoordV();
     const GNg::sVEC3 forward = gCamera.Forward();
-    const char *mode = gGpuRtPreview ? "GPU RT" : (gCpuRtPreview ? "CPU RT" : "engine");
+    const char *mode = gHwRtPreview ? "HW RT"
+                        : (gGpuRtPreview ? "GPU RT" : (gCpuRtPreview ? "CPU RT" : "engine"));
     std::snprintf(line, sizeof(line), "Cornell Box (%s)  light=%s", mode,
                   gLightMode == 0 ? "sun" : "point");
     gHudText.OutText(line, 0, x, y, 0, 0, 0xFFFFFFFF, GNg::eBLEND_NORMAL);
@@ -54,7 +55,7 @@ void drawHud() {
     gHudText.OutText(line, 0, x, y, 0, 0, 0xFFFFDD88, GNg::eBLEND_NORMAL);
     y += lineHeight;
 
-    std::snprintf(line, sizeof(line), "T CPU RT  Y GPU RT  O SSAO  P SSGI  I IBL  K light  R reset  H hud  F12 shot");
+    std::snprintf(line, sizeof(line), "T CPU  Y GPU  U HW RT  O SSAO  P SSGI  I IBL  K light  R reset  H hud  F12 shot");
     gHudText.OutText(line, 0, x, y, 0, 0, 0xFFFFDD88, GNg::eBLEND_NORMAL);
 }
 

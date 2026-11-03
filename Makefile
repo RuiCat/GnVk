@@ -270,14 +270,19 @@ mmdViewer: $(TARGET)
 CORNELL_SRC   := tests/cornellBox/main.cpp tests/cornellBox/cornellScene.cpp \
                  tests/cornellBox/cornellCamera.cpp tests/cornellBox/cornellHud.cpp \
                  tests/cornellBox/cornellGeometry.cpp tests/cornellBox/cornellCapture.cpp \
-                 tests/cornellBox/cornellCpuRt.cpp tests/cornellBox/cornellGpuRt.cpp
+                 tests/cornellBox/cornellCpuRt.cpp tests/cornellBox/cornellGpuRt.cpp \
+                 tests/cornellBox/cornellRtAs.cpp tests/cornellBox/cornellRtDevice.cpp
 CORNELL_BIN   := build/cornellBox
 CORNELL_FLAGS := -O2 -std=c++11 -pthread -fpermissive $(DEFINES) $(INCLUDES)
-CORNELL_SHADERS := assets/shaders/gn_cornell_rt.comp.spv
+CORNELL_SHADERS := assets/shaders/gn_cornell_rt.comp.spv assets/shaders/gn_cornell_rq.comp.spv
 
-$(CORNELL_SHADERS): assets/shaders/gn_cornell_rt.comp
-	@echo "$(YELLOW)🔧 编译 Cornell GPU RT 着色器...$(RESET)"
+assets/shaders/gn_cornell_rt.comp.spv: assets/shaders/gn_cornell_rt.comp
+	@echo "$(YELLOW)🔧 编译 Cornell compute RT 着色器...$(RESET)"
 	glslangValidator -V $< -o $@
+
+assets/shaders/gn_cornell_rq.comp.spv: assets/shaders/gn_cornell_rq.comp
+	@echo "$(YELLOW)🔧 编译 Cornell ray-query 着色器...$(RESET)"
+	glslangValidator -V --target-env vulkan1.2 $< -o $@
 
 .PHONY: cornellBox
 cornellBox: $(TARGET) $(CORNELL_SHADERS)
@@ -328,6 +333,7 @@ cornellRtProbe:
 CORNELL_GPU_RT_PROBE_SRC := tests/cornellBox/cornellGeometry.cpp \
                             tests/cornellBox/cornellCpuRt.cpp \
                             tests/cornellBox/cornellGpuRt.cpp \
+                            tests/cornellBox/cornellRtAs.cpp \
                             tests/cornellBox/cornellGpuRtProbe.cpp
 CORNELL_GPU_RT_PROBE_BIN := build/cornellGpuRtProbe
 
@@ -337,6 +343,22 @@ cornellGpuRtProbe: $(CORNELL_SHADERS)
 	@mkdir -p build
 	$(CXX) -O2 -std=c++11 -pthread $(CORNELL_GPU_RT_PROBE_SRC) -lvulkan -lpng -lz -o $(CORNELL_GPU_RT_PROBE_BIN)
 	@echo "$(GREEN)✅ 运行: ./$(CORNELL_GPU_RT_PROBE_BIN)$(RESET)"
+
+# ── Cornell 硬件 ray-query 自检（无窗口 Vulkan；无设备时 SKIP）──────
+CORNELL_HW_RT_PROBE_SRC := tests/cornellBox/cornellGeometry.cpp \
+                           tests/cornellBox/cornellCpuRt.cpp \
+                           tests/cornellBox/cornellGpuRt.cpp \
+                           tests/cornellBox/cornellRtAs.cpp \
+                           tests/cornellBox/cornellRtDevice.cpp \
+                           tests/cornellBox/cornellHwRtProbe.cpp
+CORNELL_HW_RT_PROBE_BIN := build/cornellHwRtProbe
+
+.PHONY: cornellHwRtProbe
+cornellHwRtProbe: $(CORNELL_SHADERS)
+	@echo "$(YELLOW)🧪 编译 Cornell 硬件光追自检...$(RESET)"
+	@mkdir -p build
+	$(CXX) -O2 -std=c++11 -pthread $(CORNELL_HW_RT_PROBE_SRC) -lvulkan -lpng -lz -o $(CORNELL_HW_RT_PROBE_BIN)
+	@echo "$(GREEN)✅ 运行: ./$(CORNELL_HW_RT_PROBE_BIN)$(RESET)"
 
 # ── Cornell Box 自检：确定性 + 位姿/种子敏感性（纯 CPU，可进 CI）────
 .PHONY: cornellCheck
@@ -392,14 +414,14 @@ debug: clean all
 .PHONY: clean
 clean:
 	@echo "$(YELLOW)🧹 清理编译产物...$(RESET)"
-	rm -rf $(BUILD_DIR) build/obj-asan libGN_mini*.* build/test_* build/unit_tests* build/gpuCheck build/cornellBox build/cornellPt build/cornellCompare build/cornellRtProbe build/cornellGpuRtProbe
+	rm -rf $(BUILD_DIR) build/obj-asan libGN_mini*.* build/test_* build/unit_tests* build/gpuCheck build/cornellBox build/cornellPt build/cornellCompare build/cornellRtProbe build/cornellGpuRtProbe build/cornellHwRtProbe
 	@echo "$(GREEN)✅ 清理完成$(RESET)"
 
 # ═══════════════════════════════════════════════════════════
 #  8. 着色器 (GLSL → SPIR-V)
 # ═══════════════════════════════════════════════════════════
 SHADER_DIR  := assets/shaders
-SHADER_SRC  := $(wildcard $(SHADER_DIR)/*.vert) $(wildcard $(SHADER_DIR)/*.frag) $(wildcard $(SHADER_DIR)/*.comp)
+SHADER_SRC  := $(filter-out $(SHADER_DIR)/gn_cornell_rq.comp,$(wildcard $(SHADER_DIR)/*.vert) $(wildcard $(SHADER_DIR)/*.frag) $(wildcard $(SHADER_DIR)/*.comp))
 SHADER_OUT  := $(SHADER_SRC:=.spv)
 
 .PHONY: shaders
@@ -407,7 +429,9 @@ shaders:
 	@echo "$(YELLOW)🔧 编译 GLSL → SPIR-V...$(RESET)"
 	@c=0; for f in $(SHADER_SRC); do \
 		glslangValidator -V "$$f" -o "$$f.spv" 2>/dev/null && c=$$((c+1)); \
-	done; echo "$(GREEN)✅ $$c 个着色器$(RESET)"
+	done; \
+	glslangValidator -V --target-env vulkan1.2 $(SHADER_DIR)/gn_cornell_rq.comp -o $(SHADER_DIR)/gn_cornell_rq.comp.spv 2>/dev/null && c=$$((c+1)); \
+	echo "$(GREEN)✅ $$c 个着色器$(RESET)"
 
 # ═══════════════════════════════════════════════════════════
 #  9. 帮助

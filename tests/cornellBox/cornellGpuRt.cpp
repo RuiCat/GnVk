@@ -10,6 +10,8 @@
 #include "cornellGpuRt.h"
 
 #include "cornellGeometry.h"
+#include "cornellRtAs.h"
+#include "cornellVkUtil.h"
 
 #include <cmath>
 #include <cstdint>
@@ -35,11 +37,7 @@ struct sRtParams {
     float aAccum[4];         // x=frameStartSample, y=reset(1=清空累积), z/w 保留
 };
 
-struct sBuffer {
-    VkBuffer aBuffer;
-    VkDeviceMemory aMemory;
-    void *aMapped;
-};
+using sBuffer = sVkBuffer;
 
 struct sState {
     bool aReady;
@@ -71,11 +69,14 @@ struct sState {
     unsigned int aQuadCount;
     unsigned int aSphereCount;
     unsigned int aMaterialCount;
+    eGpuRtBackend aBackend;
+    sRtAsScene aAsScene;
 };
 
 sState s_state = {};
 
-const char *kShaderPath = "assets/shaders/gn_cornell_rt.comp.spv";
+const char *kAnalyticShaderPath = "assets/shaders/gn_cornell_rt.comp.spv";
+const char *kRayQueryShaderPath = "assets/shaders/gn_cornell_rq.comp.spv";
 // 累积上限：达到后停止 dispatch、回放缓存（约 34 秒 @ 16 spp/帧，足够静态观察）。
 const unsigned int kMaxAccumSamples = 32768u;
 
@@ -99,57 +100,6 @@ bool loadSpv(const char *path, std::vector<unsigned int> *out) {
     std::fclose(file);
     if (read != static_cast<size_t>(size)) {
         std::fprintf(stderr, "[cornellGpuRt] 着色器读取不完整: %s\n", path);
-        return false;
-    }
-    return true;
-}
-
-uint32_t findMemoryType(VkPhysicalDevice physical, uint32_t typeBits,
-                        VkMemoryPropertyFlags required) {
-    VkPhysicalDeviceMemoryProperties props;
-    vkGetPhysicalDeviceMemoryProperties(physical, &props);
-    for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
-        if ((typeBits & (1u << i)) &&
-            (props.memoryTypes[i].propertyFlags & required) == required) {
-            return i;
-        }
-    }
-    return UINT32_MAX;
-}
-
-void destroyBuffer(VkDevice device, sBuffer *buffer) {
-    if (buffer->aMapped) {
-        vkUnmapMemory(device, buffer->aMemory);
-        buffer->aMapped = nullptr;
-    }
-    if (buffer->aBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(device, buffer->aBuffer, nullptr);
-        buffer->aBuffer = VK_NULL_HANDLE;
-    }
-    if (buffer->aMemory != VK_NULL_HANDLE) {
-        vkFreeMemory(device, buffer->aMemory, nullptr);
-        buffer->aMemory = VK_NULL_HANDLE;
-    }
-}
-
-bool createBuffer(VkDevice device, VkPhysicalDevice physical, VkDeviceSize size,
-                  VkBufferUsageFlags usage, VkMemoryPropertyFlags required, bool mapMemory,
-                  sBuffer *out) {
-    VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    bci.size = size;
-    bci.usage = usage;
-    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if (vkCreateBuffer(device, &bci, nullptr, &out->aBuffer) != VK_SUCCESS) return false;
-    VkMemoryRequirements req;
-    vkGetBufferMemoryRequirements(device, out->aBuffer, &req);
-    const uint32_t type = findMemoryType(physical, req.memoryTypeBits, required);
-    if (type == UINT32_MAX) return false;
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    mai.allocationSize = req.size;
-    mai.memoryTypeIndex = type;
-    if (vkAllocateMemory(device, &mai, nullptr, &out->aMemory) != VK_SUCCESS) return false;
-    if (vkBindBufferMemory(device, out->aBuffer, out->aMemory, 0) != VK_SUCCESS) return false;
-    if (mapMemory && vkMapMemory(device, out->aMemory, 0, size, 0, &out->aMapped) != VK_SUCCESS) {
         return false;
     }
     return true;
@@ -183,8 +133,9 @@ std::vector<float> packScene(const sCornellGeometry &geom) {
 }
 
 bool createPipeline() {
+    const bool rayQuery = s_state.aBackend == eGPU_RT_RAY_QUERY;
     std::vector<unsigned int> spv;
-    if (!loadSpv(kShaderPath, &spv)) return false;
+    if (!loadSpv(rayQuery ? kRayQueryShaderPath : kAnalyticShaderPath, &spv)) return false;
     VkShaderModuleCreateInfo smci = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     smci.codeSize = spv.size() * sizeof(unsigned int);
     smci.pCode = spv.data();
@@ -193,25 +144,22 @@ bool createPipeline() {
         return false;
     }
 
-    VkDescriptorSetLayoutBinding bindings[4] = {};
-    bindings[0].binding = 0;
+    VkDescriptorSetLayoutBinding bindings[8] = {};
+    for (int i = 0; i < 8; ++i) {
+        bindings[i].binding = static_cast<uint32_t>(i);
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    bindings[1].binding = 1;
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    bindings[2].binding = 2;
     bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    bindings[3].binding = 3;
     bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    dslci.bindingCount = 4;
+    dslci.bindingCount = rayQuery ? 8u : 4u;
     dslci.pBindings = bindings;
     if (vkCreateDescriptorSetLayout(s_state.aCtx.aDevice, &dslci, nullptr, &s_state.aSetLayout) !=
         VK_SUCCESS) {
@@ -260,14 +208,30 @@ bool createCommandAndFence() {
 }
 
 bool createDescriptorsAndBuffers(int width, int height) {
-    VkDescriptorPoolSize sizes[2] = {};
+    const bool rayQuery = s_state.aBackend == eGPU_RT_RAY_QUERY;
+    sCornellGeometry geom;
+    buildCornellGeometry(false, &geom);
+    s_state.aQuadCount = static_cast<unsigned int>(geom.aQuads.size());
+    s_state.aSphereCount = static_cast<unsigned int>(geom.aSpheres.size());
+    s_state.aMaterialCount = static_cast<unsigned int>(geom.aMaterials.size());
+    if (rayQuery &&
+        !buildRayQueryScene(s_state.aCtx.aDevice, s_state.aCtx.aPhysicalDevice,
+                            s_state.aCtx.aQueue, s_state.aCtx.aQueueFamily, geom,
+                            &s_state.aAsScene)) {
+        std::fprintf(stderr, "[cornellGpuRt] 加速结构构建失败\n");
+        return false;
+    }
+
+    VkDescriptorPoolSize sizes[3] = {};
     sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    sizes[0].descriptorCount = 3;
+    sizes[0].descriptorCount = rayQuery ? 6u : 3u;
     sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     sizes[1].descriptorCount = 1;
+    sizes[2].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    sizes[2].descriptorCount = 1;
     VkDescriptorPoolCreateInfo dpci = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     dpci.maxSets = 1;
-    dpci.poolSizeCount = 2;
+    dpci.poolSizeCount = rayQuery ? 3u : 2u;
     dpci.pPoolSizes = sizes;
     if (vkCreateDescriptorPool(s_state.aCtx.aDevice, &dpci, nullptr, &s_state.aDescriptorPool) !=
         VK_SUCCESS) {
@@ -283,39 +247,34 @@ bool createDescriptorsAndBuffers(int width, int height) {
     }
 
     const VkDeviceSize outBytes = static_cast<VkDeviceSize>(width) * height * 4u;
-    if (!createBuffer(s_state.aCtx.aDevice, s_state.aCtx.aPhysicalDevice, outBytes,
-                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                      true, &s_state.aOutBuffer)) {
+    if (!createVkBuffer(s_state.aCtx.aDevice, s_state.aCtx.aPhysicalDevice, outBytes,
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                        true, &s_state.aOutBuffer)) {
         return false;
     }
-    sCornellGeometry geom;
-    buildCornellGeometry(false, &geom);
-    s_state.aQuadCount = static_cast<unsigned int>(geom.aQuads.size());
-    s_state.aSphereCount = static_cast<unsigned int>(geom.aSpheres.size());
-    s_state.aMaterialCount = static_cast<unsigned int>(geom.aMaterials.size());
     const std::vector<float> scene = packScene(geom);
     const VkDeviceSize sceneBytes = static_cast<VkDeviceSize>(scene.size()) * sizeof(float);
-    if (!createBuffer(s_state.aCtx.aDevice, s_state.aCtx.aPhysicalDevice, sceneBytes,
-                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                      true, &s_state.aSceneBuffer)) {
+    if (!createVkBuffer(s_state.aCtx.aDevice, s_state.aCtx.aPhysicalDevice, sceneBytes,
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                        true, &s_state.aSceneBuffer)) {
         return false;
     }
     std::memcpy(s_state.aSceneBuffer.aMapped, scene.data(), static_cast<size_t>(sceneBytes));
-    if (!createBuffer(s_state.aCtx.aDevice, s_state.aCtx.aPhysicalDevice, sizeof(sRtParams),
-                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                      true, &s_state.aParamsBuffer)) {
+    if (!createVkBuffer(s_state.aCtx.aDevice, s_state.aCtx.aPhysicalDevice, sizeof(sRtParams),
+                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                        true, &s_state.aParamsBuffer)) {
         return false;
     }
     const VkDeviceSize accumBytes = static_cast<VkDeviceSize>(width) * height * 16u;
-    if (!createBuffer(s_state.aCtx.aDevice, s_state.aCtx.aPhysicalDevice, accumBytes,
-                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                      false, &s_state.aAccumBuffer)) {
+    if (!createVkBuffer(s_state.aCtx.aDevice, s_state.aCtx.aPhysicalDevice, accumBytes,
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, false, &s_state.aAccumBuffer)) {
         return false;
     }
 
@@ -323,13 +282,22 @@ bool createDescriptorsAndBuffers(int width, int height) {
     VkDescriptorBufferInfo sceneInfo = {s_state.aSceneBuffer.aBuffer, 0, VK_WHOLE_SIZE};
     VkDescriptorBufferInfo paramsInfo = {s_state.aParamsBuffer.aBuffer, 0, sizeof(sRtParams)};
     VkDescriptorBufferInfo accumInfo = {s_state.aAccumBuffer.aBuffer, 0, VK_WHOLE_SIZE};
-    VkWriteDescriptorSet writes[4] = {};
-    for (int i = 0; i < 4; ++i) {
+    VkDescriptorBufferInfo positionInfo = {s_state.aAsScene.aVertexBuffer.aBuffer, 0,
+                                           VK_WHOLE_SIZE};
+    VkDescriptorBufferInfo normalInfo = {s_state.aAsScene.aNormalBuffer.aBuffer, 0,
+                                         VK_WHOLE_SIZE};
+    VkDescriptorBufferInfo metaInfo = {s_state.aAsScene.aTriMetaBuffer.aBuffer, 0, VK_WHOLE_SIZE};
+    VkWriteDescriptorSetAccelerationStructureKHR asWrite = {
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+    asWrite.accelerationStructureCount = 1;
+    asWrite.pAccelerationStructures = &s_state.aAsScene.aTlas;
+    VkWriteDescriptorSet writes[8] = {};
+    const uint32_t writeCount = rayQuery ? 8u : 4u;
+    for (uint32_t i = 0; i < writeCount; ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet = s_state.aDescriptorSet;
-        writes[i].dstBinding = static_cast<uint32_t>(i);
+        writes[i].dstBinding = i;
         writes[i].descriptorCount = 1;
-        writes[i].pNext = nullptr;
     }
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     writes[0].pBufferInfo = &outInfo;
@@ -339,14 +307,27 @@ bool createDescriptorsAndBuffers(int width, int height) {
     writes[2].pBufferInfo = &paramsInfo;
     writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     writes[3].pBufferInfo = &accumInfo;
-    vkUpdateDescriptorSets(s_state.aCtx.aDevice, 4, writes, 0, nullptr);
+    if (rayQuery) {
+        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        writes[4].pNext = &asWrite;
+        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[5].pBufferInfo = &positionInfo;
+        writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[6].pBufferInfo = &normalInfo;
+        writes[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[7].pBufferInfo = &metaInfo;
+    }
+    vkUpdateDescriptorSets(s_state.aCtx.aDevice, writeCount, writes, 0, nullptr);
     return true;
 }
 
 } // namespace
 
-bool initGpuRt(const sGpuRtContext &ctx, int width, int height) {
-    if (s_state.aReady) return s_state.aWidth == width && s_state.aHeight == height;
+bool initGpuRt(const sGpuRtContext &ctx, int width, int height, eGpuRtBackend backend) {
+    if (s_state.aReady) {
+        return s_state.aWidth == width && s_state.aHeight == height && s_state.aBackend == backend;
+    }
+    if (backend == eGPU_RT_RAY_QUERY && ctx.aQueueFamily == UINT32_MAX) return false;
     if (ctx.aDevice == VK_NULL_HANDLE || ctx.aPhysicalDevice == VK_NULL_HANDLE ||
         ctx.aQueue == VK_NULL_HANDLE || width <= 0 || height <= 0) {
         return false;
@@ -354,6 +335,7 @@ bool initGpuRt(const sGpuRtContext &ctx, int width, int height) {
     s_state.aCtx = ctx;
     s_state.aWidth = width;
     s_state.aHeight = height;
+    s_state.aBackend = backend;
     if (!createPipeline() || !createCommandAndFence() ||
         !createDescriptorsAndBuffers(width, height)) {
         std::fprintf(stderr, "[cornellGpuRt] Vulkan 资源创建失败\n");
@@ -373,10 +355,11 @@ void shutdownGpuRt() {
         if (s_state.aCommandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(device, s_state.aCommandPool, nullptr);
         }
-        destroyBuffer(device, &s_state.aOutBuffer);
-        destroyBuffer(device, &s_state.aSceneBuffer);
-        destroyBuffer(device, &s_state.aParamsBuffer);
-        destroyBuffer(device, &s_state.aAccumBuffer);
+        destroyRayQueryScene(device, &s_state.aAsScene);
+        destroyVkBuffer(device, &s_state.aOutBuffer);
+        destroyVkBuffer(device, &s_state.aSceneBuffer);
+        destroyVkBuffer(device, &s_state.aParamsBuffer);
+        destroyVkBuffer(device, &s_state.aAccumBuffer);
         if (s_state.aDescriptorPool != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(device, s_state.aDescriptorPool, nullptr);
         }

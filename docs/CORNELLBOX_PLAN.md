@@ -127,12 +127,17 @@
 | `tests/cornellBox/cornellCpuRt.h/.cpp` | CPU 软光追预览：解析求交 + 3 bounce 路径追踪（8 spp） | 16 + 291 |
 | `tests/cornellBox/cornellCpuRtProbe.cpp` | CPU RT 自检：均值/nonBlack/PNG | 79 |
 | `tests/cornellBox/cornellGpuRt.h/.cpp` | GPU compute 光追预览：注入式 Vulkan 上下文、场景 SSBO、dispatch/回读、逐帧累积 | 43 + 498 |
-| `tests/cornellBox/cornellGpuRtProbe.cpp` | GPU 自检：与 CPU 同 seed 对比（MAE）+ 累积收敛 + 640×400 耗时 | 277 |
+| `tests/cornellBox/cornellGpuRtProbe.cpp` | 解析求交自检：与 CPU 同 seed 对比（MAE）+ 累积收敛 + 640×400 耗时 | 277 |
+| `tests/cornellBox/cornellRtDevice.h/.cpp` | 独立 VK_KHR_ray_query 设备（实例/设备/队列；引擎设备未开 AS 扩展） | 29 + 131 |
+| `tests/cornellBox/cornellRtAs.h/.cpp` | 场景三角化 + BLAS/TLAS 构建 + 位置/法线/三角形元数据 SSBO | 43 + 431 |
+| `tests/cornellBox/cornellHwRtProbe.cpp` | 硬件光追自检：与 CPU 对比（MAE）+ 累积收敛 + 耗时 | 177 |
+| `tests/cornellBox/cornellVkUtil.h` | 共用 Vulkan 缓冲工具（选内存类型/建缓冲/销毁） | 76 |
 | `tests/cornellBox/cornellPng.h` | RGBA8→RGB PNG（CPU/GPU 探针共用） | 58 |
-| `assets/shaders/gn_cornell_rt.comp` | GPU 路径追踪着色器（与 cornellCpuRt.cpp 同一套公式） | 263 |
+| `assets/shaders/gn_cornell_rt.comp` | GPU 路径追踪着色器（解析求交；与 cornellCpuRt.cpp 同一套公式） | 263 |
+| `assets/shaders/gn_cornell_rq.comp` | 硬件 ray-query 路径追踪着色器（TLAS + 重心插值法线） | 246 |
 
 > 命名遵循 `code-modularity`：文件名/函数 `camelCase`（`GN_*` 契约名、`main` 除外），类型 `PascalCase`；
-> 新增文件不得进 `LEGACY_NAMING`。构建后跑 lint（实测 20 文件 0 违规）。
+> 新增文件不得进 `LEGACY_NAMING`。构建后跑 lint（实测 26 文件 0 违规）。
 
 ### 3.2 构建
 
@@ -145,6 +150,9 @@ cornellBox: $(TARGET) $(CORNELL_SHADERS)
 
 assets/shaders/gn_cornell_rt.comp.spv: assets/shaders/gn_cornell_rt.comp
 	glslangValidator -V $< -o $@
+
+assets/shaders/gn_cornell_rq.comp.spv: assets/shaders/gn_cornell_rq.comp
+	glslangValidator -V --target-env vulkan1.2 $< -o $@
 ```
 
 - `make cornellBox` 编译引擎程序并确保 GPU RT 着色器已编译；`LD_LIBRARY_PATH=. ./build/cornellBox` 运行。
@@ -199,7 +207,8 @@ GN_VkDeferredLighting(viewProj, camera, lightUBO)  // 内部自动 composite
 | `I` | IBL 开关（`GN_VkEnableGI`） | 默认开 |
 | `K` | 光照变体（sun / point） | `L` 留给相机右转，不再复用 |
 | `T` | CPU 软件光追预览 | 真 ray-scene；路径追踪 8 spp / 3 bounce + 镜面；`sun` 无阴影、`point` 有阴影射线；320×200 约 30 ms |
-| `Y` | GPU compute 光追预览 | 同一套 ray-scene 搬到 compute；640×400 每帧 16 spp（约 10 ms），相机静止时逐帧累积收敛、移动时重置；无 GPU 自动回退 CPU |
+| `Y` | GPU compute 光追预览 | 解析求交搬到 compute；640×400 每帧 16 spp（约 10 ms），相机静止时逐帧累积收敛、移动时重置；无 GPU 自动回退 CPU |
+| `U` | 硬件 ray-query 光追预览 | BLAS/TLAS + `VK_KHR_ray_query`；与 CPU 同 seed MAE=0.015；640×400 每帧 16 spp（约 13 ms）；不可用时回退 `Y` |
 | `H` | HUD 开关 | 位姿、GI 状态、模式 |
 | `1..4` | canonical 位姿 | 与 `CORNELL_POSES` 一致 |
 | `F12` | 截图 | 引擎模式 `.local/cornellbox/engine-<epoch>.png`；预览模式 `.local/cornellbox/rt-<epoch>.png`（均为 tonemap 后、不含 HUD） |
@@ -212,6 +221,10 @@ GN_VkDeferredLighting(viewProj, camera, lightUBO)  // 内部自动 composite
   `buildCornellGeometry(false)` 场景（SSBO 上传，避免两套几何漂移）；每帧 16 spp、相机静止时把样本累加到
   accum SSBO（噪声按 1/√N 收敛，累积上限 32768 spp 后回放缓存），相机/光照变化时清零重来。
   与 `T` 互斥；设备不可用或建管线失败会打印原因并回退 `T`（CPU）。
+- **U = 硬件 ray-query 光追预览**：`cornellRtDevice.cpp` 建独立带 `VK_KHR_acceleration_structure`/`VK_KHR_ray_query`
+  的设备（引擎设备未开这些扩展）；`cornellRtAs.cpp` 把同一份几何三角化（球 16×32 段，共 2058 三角形）并建
+  BLAS + 单实例 TLAS；`gn_cornell_rq.comp` 用 ray query 打主射线/阴影射线/反射，按 primitive 取材质并插值法线。
+  与 `Y` 共用累积/回读/显示逻辑；初始化失败回退 `Y`（再失败回退 `T`）。
 - HUD 用引擎 2D 叠层（`GN_VkBegin2DPass` + 文本），不引入 ImGui。
 - 叠层显示：位姿、光照变体、IBL/SSAO/SSGI 状态、快捷键。
 
@@ -391,11 +404,12 @@ make unit
 | C2 PT 参考 | ✅ 代码级（CPU 本机实测） | `make cornellPt` / `make cornellCompare` exit 0；PNG 产出与红/绿渗色统计通过；引擎对拍待桌面截图 |
 | C2.5 CPU 软件光追预览 | ✅ 代码级 + CPU 实测 | `T` 切换；`make cornellRtProbe` mean≈(163,204,174)、nonBlack=100%；320×200≈30 ms |
 | C2.6 GPU compute 光追预览 | ✅ 真机实测 | `Y` 切换；`make cornellGpuRtProbe` PASS：与 CPU 同 seed 逐像素 MAE=0.000、累积 32 帧噪声降 5.72×；640×400 8/32/64/128 spp = 7.3/12.9/14.9/24.7 ms |
+| C2.7 硬件 ray-query 预览 | ✅ 真机实测 | `U` 切换；`make cornellHwRtProbe` PASS：与 CPU 同 seed MAE=0.015（maxDiff=9）、累积 32 帧噪声降 5.72×；640×400 8/32/64 spp = 8.8/17.9/30.4 ms（小场景 BVH 无速度优势，验证的是管线正确性） |
 | C3 DDGI | ⬜ 未开始 | 依赖 S2/S3 |
 | C4 盒内雾 | ⬜ 未开始 | 依赖 T1/T2 |
 
 - 构建/静态检查：`make cornellBox`、`make cornellPt`、`make cornellCompare`、`make cornellRtProbe`、
-  `make cornellGpuRtProbe` 均 exit 0；`make cornellCheck` PASS（同 seed 输出逐像素一致 `RMSE=0.000`；
+  `make cornellGpuRtProbe`、`make cornellHwRtProbe` 均 exit 0；`make cornellCheck` PASS（同 seed 输出逐像素一致 `RMSE=0.000`；
   不同 seed/位姿可区分）；`make unit` = 396 / 0；lint 见交付时实测。
 - **PT 本机实测**（CPU，无需 GPU）：320×200×64 spp = 0.32 s；640×400×64 spp = 1.30 s；
   `linear max=0.323, nan=0, inf=0`；区域均值（0..255）背墙左 `(128.6,111.5,107.8)`、背墙右
@@ -403,7 +417,7 @@ make unit
 - **GPU 环境（2026-11-03 更正）**：此前「本机无 Vulkan 设备」是受限沙箱看不到 `/dev/dri` 造成的误判。
   在可访问设备的会话里实测 `vulkaninfo`：AMD Radeon 780M（RADV PHOENIX / Mesa 26.2.6，Vulkan 1.4.354），
   支持 `VK_KHR_ray_query`、`VK_KHR_ray_tracing_pipeline`、`VK_KHR_acceleration_structure`。
-  因此 GPU compute 预览可在本机真机验证；`VK_KHR_ray_query` 后端仍未接（见 C2.6 / 下一步）。
+  因此 GPU 预览可在本机真机验证；测试程序的 `VK_KHR_ray_query` 后端已接（C2.7），引擎侧仍未接。
 - **引擎模式视觉**：F12 截图已实现（composite 后、HUD 前读回）；预览模式 F12 保存光追原图。
   通道顺序/翻转仍需目视确认。
 - 已知实现细节：
@@ -424,8 +438,10 @@ make unit
   - 纯 CPU 自检 `make cornellRtProbe`：mean≈(163,204,174)、nonBlack=100%；
   - GPU compute 后端已接（C2.6）：`Y` 键，640×400 每帧 16 spp；相机静止时逐帧累积，32 帧后平坦墙面噪声
     降 5.72×（自检实测），移动时重置。
-  - 硬件 ray query 后端未接（设备支持 `VK_KHR_ray_query`，但需要 BLAS/TLAS 构建与光追管线）。
-- 下一步：目视确认 `Y` 的累积收敛与移动重置；之后评估 `VK_KHR_ray_query` 后端；F12 与 PT 对拍记录 RMSE/MAE。
+  - 硬件 ray query 后端已接（C2.7）：`U` 键，独立 AS 设备 + BLAS/TLAS + ray query 着色器；
+    与 CPU 参考 MAE=0.015，验证的是管线正确性（该场景 7 个解析体，BVH 无速度优势）。
+- 下一步：目视确认 `Y`/`U` 的累积收敛与移动重置；F12 与 PT 对拍记录 RMSE/MAE；
+  引擎侧（非测试程序）接 `VK_KHR_ray_query` 属远期，需先统一设备扩展与 G-Buffer 兼容。
 
 ### 12.1 C2 复算命令
 
@@ -451,6 +467,12 @@ make cornellGpuRtProbe
 ./build/cornellGpuRtProbe
 # 期望：CPU/GPU mean 相同、MAE<2、ratio≥3×、PASS
 
-# 桌面：Y 切换 GPU 光追（静止 1–2 s 后收敛）；CORNELL_GPU_RT=1 启动即进入，便于无人值守截图
+# 硬件 ray-query 自检：与 CPU 同 seed 对比 + 累积收敛 + 640×400 耗时（无设备时 SKIP）
+make cornellHwRtProbe
+./build/cornellHwRtProbe
+# 期望：MAE<4、ratio≥3×、PASS
+
+# 桌面：Y 切换 GPU compute 光追、U 切换硬件 RT（静止 1–2 s 后收敛）
 CORNELL_GPU_RT=1 LD_LIBRARY_PATH=. ./build/cornellBox
+CORNELL_HW_RT=1  LD_LIBRARY_PATH=. ./build/cornellBox
 ```

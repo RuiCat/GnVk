@@ -7,6 +7,7 @@
 #include "cornellCapture.h"
 #include "cornellCpuRt.h"
 #include "cornellGpuRt.h"
+#include "cornellRtDevice.h"
 #include "cornellPng.h"
 
 #include <cstdio>
@@ -21,19 +22,50 @@ bool gCaptureRequested = false;
 const int kRtWidth = 640;
 const int kRtHeight = 400;
 const int kGpuRtSamples = 16; // 每帧新增路径数（相机静止时逐帧累积；移动时仅本帧样本）
+const int kHwRtSamples = 16;  // 硬件 ray query 每帧样本数（2058 三角形 BVH，比解析求交慢）
 GNg::sIMAGE *gRtImage = nullptr;
+Cornell::sRayQueryDevice gRayQueryDevice;
+bool gActiveRtBackend = -1; // -1 = 未初始化；否则为 eGpuRtBackend
 
 } // namespace
 
 namespace Cornell {
 bool gCpuRtPreview = false;
 bool gGpuRtPreview = false;
+bool gHwRtPreview = false;
 }
 
 void applyGiSwitches() {
     GNg::GN_VkSetSsaoEnabled(Cornell::gSsaoOn);
     GNg::GN_VkSetSsgiStrength(Cornell::gSsgiStrength);
     GNg::GN_VkEnableGI(Cornell::gEngineGiOn);
+}
+
+// 惰性切换模块后端：解析 compute 用引擎设备，ray query 用独立 AS 设备。
+bool ensureRtBackend(Cornell::eGpuRtBackend backend) {
+    if (Cornell::isGpuRtReady() && gActiveRtBackend == static_cast<int>(backend)) return true;
+    if (Cornell::isGpuRtReady()) Cornell::shutdownGpuRt();
+    gActiveRtBackend = -1;
+    Cornell::sGpuRtContext ctx;
+    if (backend == Cornell::eGPU_RT_RAY_QUERY) {
+        if (gRayQueryDevice.aDevice == VK_NULL_HANDLE &&
+            !Cornell::createRayQueryDevice(&gRayQueryDevice)) {
+            std::fprintf(stderr, "[cornellBox] ray-query 设备不可用\n");
+            return false;
+        }
+        ctx = {gRayQueryDevice.aDevice, gRayQueryDevice.aPhysical, gRayQueryDevice.aQueue,
+               gRayQueryDevice.aQueueFamily};
+    } else {
+        ctx = {GNg::GN_Vk.device, GNg::GN_Vk.physicalDevice, GNg::GN_Vk.graphicsQueue,
+               GNg::GN_Vk.graphicsFamily};
+    }
+    if (!Cornell::initGpuRt(ctx, kRtWidth, kRtHeight, backend)) {
+        std::fprintf(stderr, "[cornellBox] 光追后端初始化失败（backend=%d）\n",
+                     static_cast<int>(backend));
+        return false;
+    }
+    gActiveRtBackend = static_cast<int>(backend);
+    return true;
 }
 
 extern "C" {
@@ -53,10 +85,17 @@ GN_CALL void AppInit() {
     // 无人值守自检入口：CORNELL_GPU_RT=1 启动即进 GPU 光追预览（桌面/截图验证用）。
     const char *gpuRtEnv = std::getenv("CORNELL_GPU_RT");
     if (gpuRtEnv && gpuRtEnv[0] == '1') Cornell::gGpuRtPreview = true;
+    const char *hwRtEnv = std::getenv("CORNELL_HW_RT");
+    if (hwRtEnv && hwRtEnv[0] == '1') {
+        Cornell::gHwRtPreview = true;
+        Cornell::gGpuRtPreview = false;
+    }
 }
 
 GN_CALL void AppUnInit() {
     Cornell::shutdownGpuRt();
+    Cornell::destroyRayQueryDevice(&gRayQueryDevice);
+    gActiveRtBackend = -1;
     if (gRtImage) {
         delete gRtImage;
         gRtImage = nullptr;
@@ -85,7 +124,7 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
 
     // T = CPU 软光追预览；Y = GPU compute 软光追预览（同一套 ray-scene 求交，
     // 优先用 GPU，初始化/渲染失败时自动回退 CPU，保证没有 GPU 也能看）。
-    if (Cornell::gGpuRtPreview || Cornell::gCpuRtPreview) {
+    if (Cornell::gGpuRtPreview || Cornell::gHwRtPreview || Cornell::gCpuRtPreview) {
         const GNg::sVEC3 eye = Cornell::gCamera.GetCoordV();
         const GNg::sVEC3 fwd = Cornell::gCamera.Forward();
         const GNg::sVEC3 right = Cornell::gCamera.Right();
@@ -97,17 +136,10 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
         std::vector<unsigned char> pixels;
         bool rendered = false;
         if (Cornell::gGpuRtPreview) {
-            if (!Cornell::isGpuRtReady()) {
-                const Cornell::sGpuRtContext ctx = {GNg::GN_Vk.device, GNg::GN_Vk.physicalDevice,
-                                                    GNg::GN_Vk.graphicsQueue,
-                                                    GNg::GN_Vk.graphicsFamily};
-                if (!Cornell::initGpuRt(ctx, kRtWidth, kRtHeight)) {
-                    std::fprintf(stderr, "[cornellBox] GPU RT 初始化失败，回退 CPU RT\n");
-                    Cornell::gGpuRtPreview = false;
-                    Cornell::gCpuRtPreview = true;
-                }
-            }
-            if (Cornell::gGpuRtPreview) {
+            if (!ensureRtBackend(Cornell::eGPU_RT_ANALYTIC)) {
+                Cornell::gGpuRtPreview = false;
+                Cornell::gCpuRtPreview = true;
+            } else {
                 rendered = Cornell::renderGpuRt(kRtWidth, kRtHeight, eye3, fwd3, right3, up3,
                                                 Cornell::gCamera.aFovY, Cornell::gLightMode,
                                                 kGpuRtSamples, &pixels);
@@ -115,6 +147,21 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
                     std::fprintf(stderr, "[cornellBox] GPU RT 渲染失败，回退 CPU RT\n");
                     Cornell::gGpuRtPreview = false;
                     Cornell::gCpuRtPreview = true;
+                }
+            }
+        } else if (Cornell::gHwRtPreview) {
+            if (!ensureRtBackend(Cornell::eGPU_RT_RAY_QUERY)) {
+                std::fprintf(stderr, "[cornellBox] 硬件光追不可用，回退 GPU compute RT\n");
+                Cornell::gHwRtPreview = false;
+                Cornell::gGpuRtPreview = true;
+            } else {
+                rendered = Cornell::renderGpuRt(kRtWidth, kRtHeight, eye3, fwd3, right3, up3,
+                                                Cornell::gCamera.aFovY, Cornell::gLightMode,
+                                                kHwRtSamples, &pixels);
+                if (!rendered) {
+                    std::fprintf(stderr, "[cornellBox] HW RT 渲染失败，回退 GPU compute RT\n");
+                    Cornell::gHwRtPreview = false;
+                    Cornell::gGpuRtPreview = true;
                 }
             }
         }
@@ -195,11 +242,24 @@ GN_CALL void AppRun(unsigned int nTime) {
     if (GN::Key1[GK_F12]) gCaptureRequested = true;
     if (GN::Key1[GK_T]) {
         Cornell::gCpuRtPreview = !Cornell::gCpuRtPreview;
-        if (Cornell::gCpuRtPreview) Cornell::gGpuRtPreview = false;
+        if (Cornell::gCpuRtPreview) {
+            Cornell::gGpuRtPreview = false;
+            Cornell::gHwRtPreview = false;
+        }
     }
     if (GN::Key1[GK_Y]) {
         Cornell::gGpuRtPreview = !Cornell::gGpuRtPreview;
-        if (Cornell::gGpuRtPreview) Cornell::gCpuRtPreview = false;
+        if (Cornell::gGpuRtPreview) {
+            Cornell::gCpuRtPreview = false;
+            Cornell::gHwRtPreview = false;
+        }
+    }
+    if (GN::Key1[GK_U]) {
+        Cornell::gHwRtPreview = !Cornell::gHwRtPreview;
+        if (Cornell::gHwRtPreview) {
+            Cornell::gCpuRtPreview = false;
+            Cornell::gGpuRtPreview = false;
+        }
     }
     if (GN::Key1[GK_1]) Cornell::resetCamera(0);
     if (GN::Key1[GK_2]) Cornell::resetCamera(1);

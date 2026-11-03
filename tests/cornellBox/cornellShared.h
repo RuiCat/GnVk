@@ -50,6 +50,7 @@ extern float gSsgiStrength;
 extern bool gEngineGiOn;
 extern bool gCpuRtPreview;
 extern bool gGpuRtPreview;
+extern bool gHwRtPreview;
 
 void initHud();
 void releaseHud();
