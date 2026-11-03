@@ -187,7 +187,8 @@ bool requestSwapchainCapture(const char *path) {
     const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
     const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
     if (width == 0u || height == 0u) return false;
-    const VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * 4u;
+    const bool hdrSwap = GNg::GN_Vk.swapchainFormat == VK_FORMAT_R16G16B16A16_SFLOAT;
+    const VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * (hdrSwap ? 8u : 4u);
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     if (!createStagingBuffer(size, &buffer, &memory)) return false;
@@ -419,7 +420,9 @@ bool finishPendingCapture() {
     if (!s_pending.aPending) return false;
     const uint32_t w = s_pending.aWidth;
     const uint32_t h = s_pending.aHeight;
-    const VkDeviceSize bytesPerPixel = (s_pending.aHdr || s_pending.aNormal) ? 8u : 4u;
+    const bool hdrSwap = s_pending.aSwap &&
+                         GNg::GN_Vk.swapchainFormat == VK_FORMAT_R16G16B16A16_SFLOAT;
+    const VkDeviceSize bytesPerPixel = (s_pending.aHdr || s_pending.aNormal || hdrSwap) ? 8u : 4u;
     const VkDeviceSize size = static_cast<VkDeviceSize>(w) * h * bytesPerPixel;
     void *mapped = nullptr;
     if (vkMapMemory(GNg::GN_Vk.device, s_pending.aMemory, 0, size, 0, &mapped) != VK_SUCCESS) {
@@ -453,14 +456,25 @@ bool finishPendingCapture() {
             rgba[i * 4 + 3] = 255u;
         }
     } else {
-        std::memcpy(rgba.data(), raw.data(), raw.size());
         if (!s_pending.aSwap) return false;
         const VkFormat format = GNg::GN_Vk.swapchainFormat;
-        if (format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB) {
+        if (format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+            // swapchain 是 RGBA16F：composite 已做 ACES 色调映射，这里只需 linear→sRGB。
+            const uint16_t *halfs = reinterpret_cast<const uint16_t *>(raw.data());
             for (uint32_t i = 0; i < w * h; ++i) {
-                uint8_t tmp = rgba[i * 4 + 0];
-                rgba[i * 4 + 0] = rgba[i * 4 + 2];
-                rgba[i * 4 + 2] = tmp;
+                rgba[i * 4 + 0] = static_cast<uint8_t>(std::pow(std::min(1.0f, std::max(0.0f, halfToFloat(halfs[i * 4 + 0]))), 1.0f / 2.2f) * 255.0f + 0.5f);
+                rgba[i * 4 + 1] = static_cast<uint8_t>(std::pow(std::min(1.0f, std::max(0.0f, halfToFloat(halfs[i * 4 + 1]))), 1.0f / 2.2f) * 255.0f + 0.5f);
+                rgba[i * 4 + 2] = static_cast<uint8_t>(std::pow(std::min(1.0f, std::max(0.0f, halfToFloat(halfs[i * 4 + 2]))), 1.0f / 2.2f) * 255.0f + 0.5f);
+                rgba[i * 4 + 3] = 255u;
+            }
+        } else {
+            std::memcpy(rgba.data(), raw.data(), raw.size());
+            if (format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB) {
+                for (uint32_t i = 0; i < w * h; ++i) {
+                    uint8_t tmp = rgba[i * 4 + 0];
+                    rgba[i * 4 + 0] = rgba[i * 4 + 2];
+                    rgba[i * 4 + 2] = tmp;
+                }
             }
         }
     }
