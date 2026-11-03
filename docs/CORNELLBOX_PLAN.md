@@ -245,12 +245,17 @@ GN_VkDeferredLighting(viewProj, camera, lightUBO)  // 内部自动 composite
 
 ### 4.4 截图与复现
 
-- 已实现 `F12`：在 `GN_VkDeferredLighting` 之后、`GN_VkBegin2DPass` 之前读回 swapchain
-  （**不含 HUD**），存 `.local/cornellbox/engine-<epoch>.png`；实现见 `cornellCapture.cpp`。
-- 读回走 `GN_VkReadBack`；PNG 由 `cornellCapture.cpp` 内 libpng 直接写 RGB（不再走 `GN_SavePngFile`，
-  后者曾产出 0 字节文件）；BGRA 时先交换 R/B，行按读回顺序写（未翻转）。
-- **未在桌面验证**：通道顺序与上下翻转仅按实现推断；若截图颜色/方向不对，先调 BGRA 分支或行序。
-- 没有 sidecar、没有 headless `--frames`；对拍时人工隐藏 HUD（`H`）并用 F12。
+- 已实现 `F12`（两阶段）：在 `GN_VkDeferredLighting` 之后、`GN_VkBegin2DPass` 之前，把
+  swapchain→staging 的拷贝**录进当前帧命令缓冲**；下一帧帧首（引擎已 wait `inFlightFence`）
+  再写 `.local/cornellbox/engine-<epoch>.png`。实现见 `cornellCapture.cpp`。
+- 为什么不在帧中直接读回：帧中 swapchain 仍被正在录制的帧缓冲引用，另起命令缓冲读回得到的是
+  上一帧/未定义内容（实测品红条纹）。两阶段读回已修复该时序问题。
+- BGRA 时交换 R/B；行按 Vulkan 图像顺序（top-down）写，无需翻转。
+- `CORNELL_CAPTURE_ENGINE=1`：引擎模式隐藏 HUD、渲染 30 帧后自动 F12 并退出（无人值守对拍）。
+- **引擎模式视觉缺陷（2026-11-03 发现，未修）**：本机引擎模式（forward 与 deferred、GI 开/关）
+  输出均为几乎均匀的品红条纹；同帧两阶段截图、G-Buffer 调试通道、前向 pass 都能复现，
+  而 `T/Y/U` 预览路径正常。因此 `engine vs PT` 的 RMSE/MAE 对拍**暂不可用**，要先修引擎
+  3D→HDR→composite 链路（疑似 resize 后 HDR/G-Buffer 采样失效或合成描述符失效）。
 
 ---
 
@@ -401,7 +406,7 @@ make unit
 | 阶段 | 状态 | 证据 |
 |---|---|---|
 | C0 骨架 | ✅ 代码级（编译通过） | `tests/cornellBox/` 资源 + `make cornellBox` exit 0；自由相机 + 5 面墙/2 球 + 方向光 |
-| C1 引擎 GI | ✅ 代码级（接线） | 延迟路径 + `GN_VkSSAOPass/SSGIPass/UpdateProbes`；O/P/I/K/T/H/1-4/R/F12 键；HUD |
+| C1 引擎 GI | ⚠️ 代码级（视觉缺陷） | 延迟路径 + `GN_VkSSAOPass/SSGIPass/UpdateProbes` 已接；但本机引擎模式输出品红条纹（forward/deferred/GI-off 均复现），待修 |
 | C2 PT 参考 | ✅ 代码级（CPU 本机实测） | `make cornellPt` / `make cornellCompare` exit 0；PNG 产出与红/绿渗色统计通过；引擎对拍待桌面截图 |
 | C2.5 CPU 软件光追预览 | ✅ 代码级 + CPU 实测 | `T` 切换；`make cornellRtProbe` mean≈(163,204,174)、nonBlack=100%；320×200≈30 ms |
 | C2.6 GPU compute 光追预览 | ✅ 真机实测 | `Y` 切换；`make cornellGpuRtProbe` PASS：与 CPU 同 seed 逐像素 MAE=0.000、累积 32 帧噪声降 5.72×；640×400 8/32/64/128 spp = 7.3/12.9/14.9/24.7 ms |

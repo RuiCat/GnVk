@@ -24,6 +24,8 @@ const int kRtHeight = 400;
 const int kGpuRtSamples = 16; // 每帧新增路径数（相机静止时逐帧累积；移动时仅本帧样本）
 const int kHwRtSamples = 16;  // 硬件 ray query 每帧样本数（2058 三角形 BVH，比解析求交慢）
 GNg::sIMAGE *gRtImage = nullptr;
+bool gAutoCapture = false; // CORNELL_CAPTURE_ENGINE=1：引擎模式渲染若干帧后 F12 截图并退出
+int gAutoFrame = 0;
 Cornell::sRayQueryDevice gRayQueryDevice;
 bool gActiveRtBackend = -1; // -1 = 未初始化；否则为 eGpuRtBackend
 
@@ -82,6 +84,9 @@ GN_CALL void AppInit() {
     Cornell::gSsaoOn = true;
     Cornell::gSsgiStrength = 1.0f;
     applyGiSwitches();
+    // 后处理参数：不调用 GN_VkSetPost 时 POST UBO 是未初始化的（合成会读垃圾 → 品红条纹）。
+    GN3d::sPOST_UBO post = GN3d::makeDefaultPostUbo();
+    GNg::GN_VkSetPost(post);
     // 无人值守自检入口：CORNELL_GPU_RT=1 启动即进 GPU 光追预览（桌面/截图验证用）。
     const char *gpuRtEnv = std::getenv("CORNELL_GPU_RT");
     if (gpuRtEnv && gpuRtEnv[0] == '1') Cornell::gGpuRtPreview = true;
@@ -89,6 +94,22 @@ GN_CALL void AppInit() {
     if (hwRtEnv && hwRtEnv[0] == '1') {
         Cornell::gHwRtPreview = true;
         Cornell::gGpuRtPreview = false;
+    }
+    // 无人值守引擎对拍：引擎模式渲染 30 帧（等 GI 稳定）→ F12 → 34 帧退出。
+    const char *engineOnlyEnv = std::getenv("CORNELL_ENGINE_ONLY");
+    if (engineOnlyEnv && engineOnlyEnv[0] == '1') {
+        Cornell::gCpuRtPreview = false;
+        Cornell::gGpuRtPreview = false;
+        Cornell::gHwRtPreview = false;
+        Cornell::gShowHud = false;
+    }
+    const char *captureEnv = std::getenv("CORNELL_CAPTURE_ENGINE");
+    if (captureEnv && captureEnv[0] == '1') {
+        gAutoCapture = true;
+        Cornell::gCpuRtPreview = false;
+        Cornell::gGpuRtPreview = false;
+        Cornell::gHwRtPreview = false;
+        Cornell::gShowHud = false; // 对拍截图不要 HUD
     }
 }
 
@@ -211,16 +232,17 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     GNg::GN_VkUpdateProbes();
     GNg::GN_VkDeferredLighting(&viewProjection, &camera, light, sizeof(GN3d::sLIGHT_UBO));
 
-    // F12：在 composite 之后、HUD 之前读回 swapchain（不含叠层），供 cornellCompare 对拍。
+    // F12：在 composite 之后、HUD 之前把 swapchain→staging 拷贝录进本帧命令缓冲，
+    // 下一帧帧首写盘（两阶段；帧中直接读回会读到上一帧/未定义内容）。
     if (gCaptureRequested) {
         gCaptureRequested = false;
         char path[256];
         std::snprintf(path, sizeof(path), ".local/cornellbox/engine-%ld.png",
                       static_cast<long>(std::time(nullptr)));
-        if (Cornell::captureSwapchainPng(path)) {
-            std::printf("[cornellBox] 截图: %s\n", path);
+        if (Cornell::requestSwapchainCapture(path)) {
+            std::printf("[cornellBox] 截图已排队（下一帧写盘）: %s\n", path);
         } else {
-            std::fprintf(stderr, "[cornellBox] 截图失败: %s\n", path);
+            std::fprintf(stderr, "[cornellBox] 截图排队失败: %s\n", path);
         }
     }
 
@@ -233,6 +255,8 @@ GN_CALL void AppDisplay3D(unsigned int nTime) {
 }
 
 GN_CALL void AppRun(unsigned int nTime) {
+    // 两阶段截图：上一帧命令缓冲已提交并在 BeginFrame 等待过 fence，此处安全读 staging。
+    Cornell::finishPendingCapture();
     static unsigned int lastTime = 0;
     gDelta = static_cast<float>(nTime - lastTime) / 1000.0f;
     lastTime = nTime;
@@ -284,6 +308,14 @@ GN_CALL void AppRun(unsigned int nTime) {
     }
 
     Cornell::updateCamera(gDelta);
+
+    if (gAutoCapture) {
+        ++gAutoFrame;
+        if (gAutoFrame == 30) gCaptureRequested = true;
+        if (gAutoFrame == 34 && GT_MainWindow) {
+            glfwSetWindowShouldClose(GT_MainWindow, GLFW_TRUE);
+        }
+    }
 }
 
 } // extern "C"

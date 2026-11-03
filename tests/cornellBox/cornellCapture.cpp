@@ -1,7 +1,9 @@
-// tests/cornellBox/cornellCapture.cpp — 引擎 swapchain 读回并保存 PNG
+// tests/cornellBox/cornellCapture.cpp — 引擎 swapchain 两阶段截图（C2 对拍用）
 //
-// 职责：F12 截图（供 cornellCompare 与 PT 对拍）。读回的是已 composite 的 swapchain
-// （tonemap 后），因此与 PT 的 ACES+PNG 输出处于同一显示空间；HUD 在截图时不应绘制。
+// 为什么两阶段：swapchain 镜像在帧中仍被「正在录制」的帧命令缓冲引用，
+// 若在帧中另起命令缓冲直接读回，读到的是上一帧/未定义内容（实测品红条纹）。
+// 正确做法：在 composite 之后、HUD overlay 之前，把「swapchain→staging」的拷贝
+// 录进当前帧命令缓冲；下一帧帧首（引擎已 wait inFlightFence）再把 staging 写 PNG。
 #include "cornellCapture.h"
 
 #include <GN.h>
@@ -10,6 +12,8 @@
 
 #include <csetjmp>
 #include <cstdio>
+#include <cstring>
+#include <string>
 #include <vector>
 
 #ifdef _WIN32
@@ -30,8 +34,7 @@ bool makeDir(const char *path) {
 #endif
 }
 
-// 自己写 PNG（不走 GN_SavePngFile）：后者在 swapchain 读回时曾产出 0 字节文件，
-// 这里用 libpng 直接写 RGB，失败时能给出明确原因。
+// 自己写 PNG（不走 GN_SavePngFile）：后者在 swapchain 读回时曾产出 0 字节文件。
 bool writeRgbPng(const char *path, const uint8_t *rgba, int width, int height) {
     FILE *file = std::fopen(path, "wb");
     if (!file) {
@@ -76,6 +79,57 @@ bool writeRgbPng(const char *path, const uint8_t *rgba, int width, int height) {
     return true;
 }
 
+struct sPendingCapture {
+    bool aPending;
+    VkBuffer aBuffer;
+    VkDeviceMemory aMemory;
+    uint32_t aWidth;
+    uint32_t aHeight;
+    std::string aPath;
+};
+
+sPendingCapture s_pending = {false, VK_NULL_HANDLE, VK_NULL_HANDLE, 0u, 0u, {}};
+
+uint32_t findHostVisibleMemory(VkPhysicalDevice physical, uint32_t typeBits) {
+    VkPhysicalDeviceMemoryProperties props;
+    vkGetPhysicalDeviceMemoryProperties(physical, &props);
+    for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
+        const VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        if ((typeBits & (1u << i)) && (props.memoryTypes[i].propertyFlags & flags) == flags) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
+}
+
+bool createStagingBuffer(VkDeviceSize size, VkBuffer *buffer, VkDeviceMemory *memory) {
+    VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bci.size = size;
+    bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (vkCreateBuffer(GNg::GN_Vk.device, &bci, nullptr, buffer) != VK_SUCCESS) return false;
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(GNg::GN_Vk.device, *buffer, &req);
+    const uint32_t type = findHostVisibleMemory(GNg::GN_Vk.physicalDevice, req.memoryTypeBits);
+    if (type == UINT32_MAX) return false;
+    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = type;
+    if (vkAllocateMemory(GNg::GN_Vk.device, &mai, nullptr, memory) != VK_SUCCESS) return false;
+    return vkBindBufferMemory(GNg::GN_Vk.device, *buffer, *memory, 0) == VK_SUCCESS;
+}
+
+void destroyPending() {
+    if (s_pending.aBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(GNg::GN_Vk.device, s_pending.aBuffer, nullptr);
+    }
+    if (s_pending.aMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(GNg::GN_Vk.device, s_pending.aMemory, nullptr);
+    }
+    s_pending = sPendingCapture{false, VK_NULL_HANDLE, VK_NULL_HANDLE, 0u, 0u, {}};
+}
+
 } // namespace
 
 void ensureCaptureDir() {
@@ -83,41 +137,98 @@ void ensureCaptureDir() {
     makeDir(".local/cornellbox");
 }
 
-bool captureSwapchainPng(const char *path) {
-    if (!path) return false;
+bool requestSwapchainCapture(const char *path) {
+    if (!path || s_pending.aPending || !GNg::GN_Vk.initialized) return false;
     const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
     const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
-    if (width == 0 || height == 0) {
-        std::fprintf(stderr, "[cornellCapture] swapchain 尺寸为 0\n");
-        return false;
-    }
+    if (width == 0u || height == 0u) return false;
+    const VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * 4u;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (!createStagingBuffer(size, &buffer, &memory)) return false;
 
-    int size = 0;
-    uint8_t *data = GNg::GN_VkReadBack(0, 0, static_cast<int>(width), static_cast<int>(height),
-                                       &size);
-    if (!data) {
-        std::fprintf(stderr, "[cornellCapture] GN_VkReadBack 返回空（swapchain 布局/时机？）\n");
+    VkCommandBuffer cb = GNg::GN_Vk.commandBuffers[GNg::GN_Vk.currentFrame];
+    VkImage image = GNg::GN_Vk.swapchainImages[GNg::GN_Vk.currentFrame];
+    // composite pass 结束时 swapchain 已是 PRESENT_SRC；HUD overlay pass 也从它开始。
+    VkImageMemoryBarrier toTransfer = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    toTransfer.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.image = image;
+    toTransfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toTransfer.subresourceRange.levelCount = 1;
+    toTransfer.subresourceRange.layerCount = 1;
+    toTransfer.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                         &toTransfer);
+
+    VkBufferImageCopy region = {};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = {width, height, 1};
+    vkCmdCopyImageToBuffer(cb, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
+
+    VkImageMemoryBarrier toPresent = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    toPresent.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toPresent.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    toPresent.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toPresent.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toPresent.image = image;
+    toPresent.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toPresent.subresourceRange.levelCount = 1;
+    toPresent.subresourceRange.layerCount = 1;
+    toPresent.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    toPresent.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &toPresent);
+
+    s_pending.aPending = true;
+    s_pending.aBuffer = buffer;
+    s_pending.aMemory = memory;
+    s_pending.aWidth = width;
+    s_pending.aHeight = height;
+    s_pending.aPath = path;
+    return true;
+}
+
+bool finishPendingCapture() {
+    if (!s_pending.aPending) return false;
+    const VkDeviceSize size =
+        static_cast<VkDeviceSize>(s_pending.aWidth) * s_pending.aHeight * 4u;
+    void *mapped = nullptr;
+    if (vkMapMemory(GNg::GN_Vk.device, s_pending.aMemory, 0, size, 0, &mapped) != VK_SUCCESS) {
+        destroyPending();
         return false;
     }
-    if (size < static_cast<int>(width * height * 4u)) {
-        std::fprintf(stderr, "[cornellCapture] 读回字节数异常: %d < %u\n", size,
-                     width * height * 4u);
-        GNg::GN_VkReadBackFree(data);
-        return false;
-    }
+    std::vector<uint8_t> rgba(static_cast<size_t>(size));
+    std::memcpy(rgba.data(), mapped, static_cast<size_t>(size));
+    vkUnmapMemory(GNg::GN_Vk.device, s_pending.aMemory);
 
     const VkFormat format = GNg::GN_Vk.swapchainFormat;
     if (format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB) {
-        for (uint32_t i = 0; i < width * height; ++i) {
-            uint8_t tmp = data[i * 4 + 0];
-            data[i * 4 + 0] = data[i * 4 + 2];
-            data[i * 4 + 2] = tmp;
+        for (uint32_t i = 0; i < s_pending.aWidth * s_pending.aHeight; ++i) {
+            uint8_t tmp = rgba[i * 4 + 0];
+            rgba[i * 4 + 0] = rgba[i * 4 + 2];
+            rgba[i * 4 + 2] = tmp;
         }
     }
 
-    const bool ok = writeRgbPng(path, data, static_cast<int>(width), static_cast<int>(height));
-    GNg::GN_VkReadBackFree(data);
+    const bool ok = writeRgbPng(s_pending.aPath.c_str(), rgba.data(),
+                                static_cast<int>(s_pending.aWidth),
+                                static_cast<int>(s_pending.aHeight));
+    if (ok) {
+        std::printf("[cornellBox] 引擎截图: %s\n", s_pending.aPath.c_str());
+    }
+    destroyPending();
     return ok;
+}
+
+bool hasPendingCapture() {
+    return s_pending.aPending;
 }
 
 } // namespace Cornell

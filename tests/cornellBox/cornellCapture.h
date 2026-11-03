@@ -7,9 +7,14 @@ namespace Cornell {
 // 创建 .local/cornellbox/（幂等）。
 void ensureCaptureDir();
 
-// 读回当前 swapchain 并写 PNG。成功后 pathOut 为实际文件路径（由调用方提供缓冲）。
-// 注意：swapchain 若为 BGRA，会先交换 R/B；翻交由 SavePngFile 的 col_turn 处理。
-bool captureSwapchainPng(const char *path);
+// 两阶段截图（引擎模式）：在「当前帧命令缓冲」里录制 swapchain→staging 的拷贝，
+// 下一帧帧首（引擎已等待 inFlightFence）再把 staging 写成 PNG。
+//   * 不能在帧中直接提交独立命令缓冲读 swapchain：镜像还被本帧命令缓冲引用，
+//     读到的是上一帧/未定义内容（实测为品红条纹）。
+// request 在 composite 之后、HUD overlay 之前调用；finish 在下一帧 AppRun 调用。
+bool requestSwapchainCapture(const char *path);
+bool finishPendingCapture();
+bool hasPendingCapture();
 
 } // namespace Cornell
 #endif // CORNELL_CAPTURE_H
