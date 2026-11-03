@@ -50,6 +50,8 @@
 | [SKY_WEATHER_PLAN.md](SKY_WEATHER_PLAN.md) | S1–S6 天空/云/雾/降水与天气状态机 | L4/L5 **取代其中的天空与云**，需先解决 §5 决策 3 的冲突 |
 | [3D_FEATURE_PLAN.md](3D_FEATURE_PLAN.md) §3.6/§3.7 | P11/P12 阶段与验收 | 本文是 P12 之后的「光照与效果」总入口 |
 | [papers/README.md](papers/README.md) | 12 篇论文、校验与摄取口径 | 新文献按同一约定补采（L0e），不散落 `docs/` 根目录 |
+| [GI_RT_TYNDALL_PLAN.md](GI_RT_TYNDALL_PLAN.md) | 真实 GI/RT 现状分析、软件光线路线与丁达尔（云隙光）规划 | 本文只引用其结论；GI 深化与丁达尔实施以该文 §3/§4 为准（2026-11-02 补充） |
+| [CORNELLBOX_PLAN.md](CORNELLBOX_PLAN.md) | 独立 Cornell Box 测试程序（自由相机 + 引擎 GI / PT 参考） | GI 验证载体；C0/C1 先让延迟 GI 可见，C2 提供 ground truth（2026-11-02 补充） |
 
 ## 1. 现状（源码证据）
 

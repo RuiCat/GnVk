@@ -266,6 +266,104 @@ mmdViewer: $(TARGET)
 	$(CXX) $(MMD_VIEWER_FLAGS) $(MMD_VIEWER_SRC) -L. -l$(LIB_STEM) $(LIBS) -o $(MMD_VIEWER_BIN)
 	@echo "$(GREEN)✅ 运行: LD_LIBRARY_PATH=. ./$(MMD_VIEWER_BIN)$(RESET)"
 
+# ── Cornell Box 测试程序（独立场景/相机；编译不依赖 GPU）──────────
+CORNELL_SRC   := tests/cornellBox/main.cpp tests/cornellBox/cornellScene.cpp \
+                 tests/cornellBox/cornellCamera.cpp tests/cornellBox/cornellHud.cpp \
+                 tests/cornellBox/cornellGeometry.cpp tests/cornellBox/cornellCapture.cpp \
+                 tests/cornellBox/cornellCpuRt.cpp tests/cornellBox/cornellGpuRt.cpp
+CORNELL_BIN   := build/cornellBox
+CORNELL_FLAGS := -O2 -std=c++11 -pthread -fpermissive $(DEFINES) $(INCLUDES)
+CORNELL_SHADERS := assets/shaders/gn_cornell_rt.comp.spv
+
+$(CORNELL_SHADERS): assets/shaders/gn_cornell_rt.comp
+	@echo "$(YELLOW)🔧 编译 Cornell GPU RT 着色器...$(RESET)"
+	glslangValidator -V $< -o $@
+
+.PHONY: cornellBox
+cornellBox: $(TARGET) $(CORNELL_SHADERS)
+	@echo "$(YELLOW)🧪 编译 Cornell Box 测试程序...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(CORNELL_FLAGS) $(CORNELL_SRC) -L. -l$(LIB_STEM) $(LIBS) -o $(CORNELL_BIN)
+	@echo "$(GREEN)✅ 运行: LD_LIBRARY_PATH=. ./$(CORNELL_BIN)$(RESET)"
+
+# ── Cornell Box CPU 路径追踪参考（纯 CPU，不需要 Vulkan 设备）──────
+CORNELL_PT_SRC := tests/cornellBox/cornellGeometry.cpp \
+                  tests/cornellBox/cornellPathTracer.cpp \
+                  tests/cornellBox/cornellPtMain.cpp
+CORNELL_PT_BIN := build/cornellPt
+CORNELL_PT_FLAGS := -O3 -std=c++11 -pthread -Itests/cornellBox
+
+.PHONY: cornellPt
+cornellPt:
+	@echo "$(YELLOW)🧪 编译 Cornell Box 路径追踪参考...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(CORNELL_PT_FLAGS) $(CORNELL_PT_SRC) -lpng -lz -o $(CORNELL_PT_BIN)
+	@echo "$(GREEN)✅ 运行: ./$(CORNELL_PT_BIN) --spp=64 --out=/tmp/cornell-pt.png$(RESET)"
+
+# ── Cornell Box 图像误差对比（PT vs 引擎截图）────────────────────
+CORNELL_COMPARE_SRC := tests/cornellBox/cornellCompare.cpp
+CORNELL_COMPARE_BIN := build/cornellCompare
+
+.PHONY: cornellCompare
+cornellCompare:
+	@echo "$(YELLOW)🧪 编译 Cornell Box 误差对比工具...$(RESET)"
+	@mkdir -p build
+	$(CXX) -O2 -std=c++11 $(CORNELL_COMPARE_SRC) -lpng -lz -o $(CORNELL_COMPARE_BIN)
+	@echo "$(GREEN)✅ 运行: ./$(CORNELL_COMPARE_BIN) --ref=pt.png --test=engine.png$(RESET)"
+
+# ── Cornell CPU 软件光追预览自检（纯 CPU）──────────────────────────
+CORNELL_RT_PROBE_SRC := tests/cornellBox/cornellGeometry.cpp \
+                        tests/cornellBox/cornellCpuRt.cpp \
+                        tests/cornellBox/cornellCpuRtProbe.cpp
+CORNELL_RT_PROBE_BIN := build/cornellRtProbe
+
+.PHONY: cornellRtProbe
+cornellRtProbe:
+	@echo "$(YELLOW)🧪 编译 Cornell CPU 光追自检...$(RESET)"
+	@mkdir -p build
+	$(CXX) -O2 -std=c++11 -pthread $(CORNELL_RT_PROBE_SRC) -lpng -lz -o $(CORNELL_RT_PROBE_BIN)
+	@echo "$(GREEN)✅ 运行: ./$(CORNELL_RT_PROBE_BIN)$(RESET)"
+
+# ── Cornell GPU compute 光追自检（无窗口 Vulkan；无设备时 SKIP）──────
+CORNELL_GPU_RT_PROBE_SRC := tests/cornellBox/cornellGeometry.cpp \
+                            tests/cornellBox/cornellCpuRt.cpp \
+                            tests/cornellBox/cornellGpuRt.cpp \
+                            tests/cornellBox/cornellGpuRtProbe.cpp
+CORNELL_GPU_RT_PROBE_BIN := build/cornellGpuRtProbe
+
+.PHONY: cornellGpuRtProbe
+cornellGpuRtProbe: $(CORNELL_SHADERS)
+	@echo "$(YELLOW)🧪 编译 Cornell GPU 光追自检...$(RESET)"
+	@mkdir -p build
+	$(CXX) -O2 -std=c++11 -pthread $(CORNELL_GPU_RT_PROBE_SRC) -lvulkan -lpng -lz -o $(CORNELL_GPU_RT_PROBE_BIN)
+	@echo "$(GREEN)✅ 运行: ./$(CORNELL_GPU_RT_PROBE_BIN)$(RESET)"
+
+# ── Cornell Box 自检：确定性 + 位姿/种子敏感性（纯 CPU，可进 CI）────
+.PHONY: cornellCheck
+cornellCheck: cornellPt cornellCompare
+	@echo "$(YELLOW)🧪 Cornell PT 自检...$(RESET)"
+	@mkdir -p .local/cornellbox
+	./build/cornellPt --width=160 --height=100 --spp=8 --pose=0 --seed=7 \
+		--out=.local/cornellbox/check-a.png
+	./build/cornellPt --width=160 --height=100 --spp=8 --pose=0 --seed=7 \
+		--out=.local/cornellbox/check-b.png
+	./build/cornellPt --width=160 --height=100 --spp=8 --pose=0 --seed=8 \
+		--out=.local/cornellbox/check-c.png
+	./build/cornellPt --width=160 --height=100 --spp=8 --pose=1 --seed=7 \
+		--out=.local/cornellbox/check-p1.png
+	@./build/cornellCompare --ref=.local/cornellbox/check-a.png \
+		--test=.local/cornellbox/check-b.png > /tmp/cornell-self.txt
+	@grep -q 'RMSE=0.000' /tmp/cornell-self.txt || { cat /tmp/cornell-self.txt; exit 1; }
+	@./build/cornellCompare --ref=.local/cornellbox/check-a.png \
+		--test=.local/cornellbox/check-c.png > /tmp/cornell-seed.txt
+	@if grep -q 'RMSE=0.000' /tmp/cornell-seed.txt; then \
+		echo "FAIL: 不同 seed 输出相同"; cat /tmp/cornell-seed.txt; exit 1; fi
+	@./build/cornellCompare --ref=.local/cornellbox/check-a.png \
+		--test=.local/cornellbox/check-p1.png > /tmp/cornell-pose.txt
+	@if grep -q 'RMSE=0.000' /tmp/cornell-pose.txt; then \
+		echo "FAIL: 不同位姿输出相同"; cat /tmp/cornell-pose.txt; exit 1; fi
+	@echo "$(GREEN)✅ cornellCheck PASS（同 seed 一致；不同 seed/位姿可区分）$(RESET)"
+
 # ── ASan/UBSan 单元测试（独立构建目录与库名，不污染 release 产物）──
 .PHONY: asan
 asan:
@@ -294,7 +392,7 @@ debug: clean all
 .PHONY: clean
 clean:
 	@echo "$(YELLOW)🧹 清理编译产物...$(RESET)"
-	rm -rf $(BUILD_DIR) build/obj-asan libGN_mini*.* build/test_* build/unit_tests* build/gpuCheck
+	rm -rf $(BUILD_DIR) build/obj-asan libGN_mini*.* build/test_* build/unit_tests* build/gpuCheck build/cornellBox build/cornellPt build/cornellCompare build/cornellRtProbe build/cornellGpuRtProbe
 	@echo "$(GREEN)✅ 清理完成$(RESET)"
 
 # ═══════════════════════════════════════════════════════════
@@ -338,6 +436,11 @@ help:
 	@echo "║    make asan                ASan/UBSan 单测      ║"
 	@echo "║    make check               构建+单元测试        ║"
 	@echo "║    make gpuCheck            P1b GPU 管线验收     ║"
+	@echo "║    make cornellBox          Cornell Box 测试程序 ║"
+	@echo "║    make cornellPt           Cornell CPU 路径追踪 ║"
+	@echo "║    make cornellCompare      Cornell 误差对比     ║"
+	@echo "║    make cornellRtProbe      CPU 光追预览自检     ║"
+	@echo "║    make cornellCheck        Cornell PT 自检      ║"
 	@echo "║    make shaders             编译 GLSL → SPIR-V   ║"
 	@echo "║    make clean               清理                 ║"
 	@echo "║    make help                此帮助               ║"

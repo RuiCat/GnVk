@@ -351,6 +351,37 @@ vec3 wpFromDepth(float d, vec2 uv) {
     return view.xyz / view.w;
 }
 
+// 屏幕空间反射（v1，仅金属/低粗糙度）：沿反射方向步进，用深度重建判断命中。
+// 未命中返回 false，调用方回退到预滤波环境 cubemap。
+bool traceSsr(vec3 wp, vec3 N, vec3 V, out vec3 outColor) {
+    outColor = vec3(0.0);
+    vec3 R = reflect(-V, N);
+    vec3 origin = wp + N * 0.02;
+    // 0.08 m 步长 / 64 步 ≈ 5.1 m：保证不会跨过墙面（原 0.30 m 步长会直接跳过）。
+    for (int i = 0; i < 64; ++i) {
+        float t = 0.05 + float(i) * 0.08;
+        vec3 p = origin + R * t;
+        vec4 clip = scene.vp * vec4(p, 1.0);
+        if (clip.w <= 1e-6) break;
+        vec3 ndc = clip.xyz / clip.w;
+        if (ndc.z < 0.0 || ndc.z > 1.0) break;
+        vec2 uv = ndc.xy * 0.5 + 0.5;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
+        float d = texture(gDepthTex, uv).r;
+        if (d >= 0.9999) continue;
+        vec3 sp = wpFromDepth(d, uv);
+        float thickness = 0.03 + t * 0.01;
+        if (length(sp - p) <= thickness) {
+            vec3 hn = normalize(texture(gNormalRoughTex, uv).rgb * 2.0 - 1.0);
+            if (dot(hn, -R) <= 0.0) continue; // 只接受朝向反射射线的表面
+            vec3 ha = texture(gAlbedoMetalTex, uv).rgb;
+            outColor = ha * evalSH9(hn);
+            return true;
+        }
+    }
+    return false;
+}
+
 // ═══════════════════════════════════════════════════════════
 //  PBR Cook-Torrance BRDF 函数
 // ═══════════════════════════════════════════════════════════
@@ -501,6 +532,7 @@ void main() {
     float NdotV = max(dot(N, V), 0.0);
 
     vec3 ambient;
+    vec3 specularIBL = vec3(0.0);
     if (gi.indirect.x + gi.indirect.y <= 0.0) {
         // 分析环境光
         vec3 amb = scene.al.rgb * ld.ambientLight.rgb * 3.0;
@@ -515,7 +547,7 @@ void main() {
         vec3 diffuseIBL = kD * albedo * mix(amb, skyDiffuse, 0.5) * ao;
         // 镜面反射 IBL: 天空反射 × Fresnel × 粗糙度调制
         float specularOcclusion = 1.0 - roughness * 0.7;
-        vec3 specularIBL = skySpecular * F * specularOcclusion * 0.5;
+        specularIBL = skySpecular * F * specularOcclusion * 0.5;
         ambient = diffuseIBL + specularIBL;
     } else {
         // ─ split-sum IBL：SH9 漫反射 + 预滤波 cubemap × BRDF LUT 镜面 ─
@@ -538,8 +570,16 @@ void main() {
         float maxMip = max(gi.envParams.y - 1.0, 0.0);
         vec3 prefiltered = textureLod(envPrefilteredCube, R, roughness * maxMip).rgb;
         vec2 ab = texture(brdfLutTex, vec2(NdotV, roughness)).rg;
-        vec3 specularIBL = prefiltered * (F0 * ab.x + ab.y) * gi.indirect.y;
+        specularIBL = prefiltered * (F0 * ab.x + ab.y) * gi.indirect.y;
         ambient = diffuseIBL + specularIBL;
+    }
+    // SSR（v1）：金属/低粗糙度优先用屏幕空间反射，未命中回退上面的 IBL。
+    if (metallic > 0.05) {
+        vec3 ssrColor = vec3(0.0);
+        if (traceSsr(wp, N, V, ssrColor)) {
+            float ssrWeight = clamp((1.0 - roughness) * metallic, 0.0, 1.0);
+            ambient = ambient - specularIBL + mix(specularIBL, ssrColor, ssrWeight);
+        }
     }
     vec3 color = ambient + Lo;
 

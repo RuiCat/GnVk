@@ -1,0 +1,235 @@
+// tests/cornellBox/main.cpp — Cornell Box 测试程序入口（C0/C1）
+//
+// 职责：窗口/回调接线、延迟路径绘制顺序、GI 开关与快捷键。
+// 用法：make cornellBox && LD_LIBRARY_PATH=. ./build/cornellBox
+// 独立于 mmdViewer：无模型资产、无天气/云/大气；场景与相机见 cornellScene/cornellCamera。
+#include "cornellShared.h"
+#include "cornellCapture.h"
+#include "cornellCpuRt.h"
+#include "cornellGpuRt.h"
+#include "cornellPng.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <vector>
+
+namespace {
+
+float gDelta = 0.016f;
+bool gCaptureRequested = false;
+const int kRtWidth = 640;
+const int kRtHeight = 400;
+const int kGpuRtSamples = 16; // 每帧新增路径数（相机静止时逐帧累积；移动时仅本帧样本）
+GNg::sIMAGE *gRtImage = nullptr;
+
+} // namespace
+
+namespace Cornell {
+bool gCpuRtPreview = false;
+bool gGpuRtPreview = false;
+}
+
+void applyGiSwitches() {
+    GNg::GN_VkSetSsaoEnabled(Cornell::gSsaoOn);
+    GNg::GN_VkSetSsgiStrength(Cornell::gSsgiStrength);
+    GNg::GN_VkEnableGI(Cornell::gEngineGiOn);
+}
+
+extern "C" {
+
+GN_CALL void AppInit() {
+    if (!Cornell::initScene()) {
+        std::fprintf(stderr, "[cornellBox] 场景/光源初始化失败\n");
+    }
+    Cornell::initCamera();
+    Cornell::initHud();
+    Cornell::ensureCaptureDir();
+    // 默认开启 GI/SSGI：Cornell 程序的目的就是看间接光；A/S 留给相机移动，GI 键改用 O/P/I/K。
+    Cornell::gEngineGiOn = true;
+    Cornell::gSsaoOn = true;
+    Cornell::gSsgiStrength = 1.0f;
+    applyGiSwitches();
+    // 无人值守自检入口：CORNELL_GPU_RT=1 启动即进 GPU 光追预览（桌面/截图验证用）。
+    const char *gpuRtEnv = std::getenv("CORNELL_GPU_RT");
+    if (gpuRtEnv && gpuRtEnv[0] == '1') Cornell::gGpuRtPreview = true;
+}
+
+GN_CALL void AppUnInit() {
+    Cornell::shutdownGpuRt();
+    if (gRtImage) {
+        delete gRtImage;
+        gRtImage = nullptr;
+    }
+    Cornell::releaseHud();
+    Cornell::releaseScene();
+}
+
+GN_CALL void AppDisplay2D(unsigned int nTime) {
+    (void)nTime;
+    if (!Cornell::gLight) return;
+
+    float aspect = 1280.0f / 800.0f;
+    int fbWidth = 1280;
+    int fbHeight = 800;
+    if (::GT_MainWindow) {
+        int width = 0;
+        int height = 0;
+        glfwGetFramebufferSize(::GT_MainWindow, &width, &height);
+        if (width > 0 && height > 0) {
+            aspect = static_cast<float>(width) / static_cast<float>(height);
+            fbWidth = width;
+            fbHeight = height;
+        }
+    }
+
+    // T = CPU 软光追预览；Y = GPU compute 软光追预览（同一套 ray-scene 求交，
+    // 优先用 GPU，初始化/渲染失败时自动回退 CPU，保证没有 GPU 也能看）。
+    if (Cornell::gGpuRtPreview || Cornell::gCpuRtPreview) {
+        const GNg::sVEC3 eye = Cornell::gCamera.GetCoordV();
+        const GNg::sVEC3 fwd = Cornell::gCamera.Forward();
+        const GNg::sVEC3 right = Cornell::gCamera.Right();
+        const GNg::sVEC3 up = Cornell::gCamera.Up();
+        const float eye3[3] = {eye.x, eye.y, eye.z};
+        const float fwd3[3] = {fwd.x, fwd.y, fwd.z};
+        const float right3[3] = {right.x, right.y, right.z};
+        const float up3[3] = {up.x, up.y, up.z};
+        std::vector<unsigned char> pixels;
+        bool rendered = false;
+        if (Cornell::gGpuRtPreview) {
+            if (!Cornell::isGpuRtReady()) {
+                const Cornell::sGpuRtContext ctx = {GNg::GN_Vk.device, GNg::GN_Vk.physicalDevice,
+                                                    GNg::GN_Vk.graphicsQueue,
+                                                    GNg::GN_Vk.graphicsFamily};
+                if (!Cornell::initGpuRt(ctx, kRtWidth, kRtHeight)) {
+                    std::fprintf(stderr, "[cornellBox] GPU RT 初始化失败，回退 CPU RT\n");
+                    Cornell::gGpuRtPreview = false;
+                    Cornell::gCpuRtPreview = true;
+                }
+            }
+            if (Cornell::gGpuRtPreview) {
+                rendered = Cornell::renderGpuRt(kRtWidth, kRtHeight, eye3, fwd3, right3, up3,
+                                                Cornell::gCamera.aFovY, Cornell::gLightMode,
+                                                kGpuRtSamples, &pixels);
+                if (!rendered) {
+                    std::fprintf(stderr, "[cornellBox] GPU RT 渲染失败，回退 CPU RT\n");
+                    Cornell::gGpuRtPreview = false;
+                    Cornell::gCpuRtPreview = true;
+                }
+            }
+        }
+        if (!rendered && Cornell::gCpuRtPreview) {
+            rendered = Cornell::renderCpuRt(kRtWidth, kRtHeight, eye3, fwd3, right3, up3,
+                                            Cornell::gCamera.aFovY, Cornell::gLightMode, &pixels);
+        }
+        if (rendered) {
+            if (!gRtImage) gRtImage = new GNg::sIMAGE();
+            gRtImage->DataFill(pixels.data(), GNg::CR_RGBA, kRtWidth, kRtHeight);
+        }
+        // F12 在预览模式保存光追原图（不含 HUD），供与 PT 参考对拍。
+        if (gCaptureRequested) {
+            gCaptureRequested = false;
+            if (rendered) {
+                char path[256];
+                std::snprintf(path, sizeof(path), ".local/cornellbox/rt-%ld.png",
+                              static_cast<long>(std::time(nullptr)));
+                if (Cornell::writeRgbPng(path, pixels, kRtWidth, kRtHeight)) {
+                    std::printf("[cornellBox] 光追截图: %s\n", path);
+                }
+            }
+        }
+        GNg::GN_VkBegin2DPass();
+        if (gRtImage && gRtImage->vkImageView) {
+            GNg::ImageDraw4P(gRtImage, 0, 0, fbWidth, fbHeight, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                             0xFFFFFFFFu, 0xFFFFFFFFu, 0);
+        }
+        Cornell::drawHud();
+        return;
+    }
+
+    GNg::sMAT44 view;
+    GNg::sMAT44 projection;
+    GNg::sMAT44 viewProjection;
+    if (!Cornell::gCamera.BuildViewProj(aspect, &view, &projection, &viewProjection)) {
+        return;
+    }
+    const GNg::sVEC3 camera = Cornell::gCamera.GetCoordV();
+    const GN3d::sLIGHT_UBO *light = Cornell::gLight->GetUBO();
+
+    GNg::GN_VkBegin3DPassDeferred(&viewProjection, &camera, light, sizeof(GN3d::sLIGHT_UBO));
+    Cornell::drawScene(viewProjection, camera);
+    // 顺序与引擎契约一致：G-Buffer → SSAO → SSGI → 探针 → 延迟光照（内部自动合成）。
+    GNg::GN_VkSSAOPass();
+    GNg::GN_VkSSGIPass();
+    GNg::GN_VkUpdateProbes();
+    GNg::GN_VkDeferredLighting(&viewProjection, &camera, light, sizeof(GN3d::sLIGHT_UBO));
+
+    // F12：在 composite 之后、HUD 之前读回 swapchain（不含叠层），供 cornellCompare 对拍。
+    if (gCaptureRequested) {
+        gCaptureRequested = false;
+        char path[256];
+        std::snprintf(path, sizeof(path), ".local/cornellbox/engine-%ld.png",
+                      static_cast<long>(std::time(nullptr)));
+        if (Cornell::captureSwapchainPng(path)) {
+            std::printf("[cornellBox] 截图: %s\n", path);
+        } else {
+            std::fprintf(stderr, "[cornellBox] 截图失败: %s\n", path);
+        }
+    }
+
+    GNg::GN_VkBegin2DPass();
+    Cornell::drawHud();
+}
+
+GN_CALL void AppDisplay3D(unsigned int nTime) {
+    (void)nTime;
+}
+
+GN_CALL void AppRun(unsigned int nTime) {
+    static unsigned int lastTime = 0;
+    gDelta = static_cast<float>(nTime - lastTime) / 1000.0f;
+    lastTime = nTime;
+    if (gDelta <= 0.0f || gDelta > 0.5f) gDelta = 0.016f;
+
+    if (GN::Key1[GK_H]) Cornell::gShowHud = !Cornell::gShowHud;
+    if (GN::Key1[GK_F12]) gCaptureRequested = true;
+    if (GN::Key1[GK_T]) {
+        Cornell::gCpuRtPreview = !Cornell::gCpuRtPreview;
+        if (Cornell::gCpuRtPreview) Cornell::gGpuRtPreview = false;
+    }
+    if (GN::Key1[GK_Y]) {
+        Cornell::gGpuRtPreview = !Cornell::gGpuRtPreview;
+        if (Cornell::gGpuRtPreview) Cornell::gCpuRtPreview = false;
+    }
+    if (GN::Key1[GK_1]) Cornell::resetCamera(0);
+    if (GN::Key1[GK_2]) Cornell::resetCamera(1);
+    if (GN::Key1[GK_3]) Cornell::resetCamera(2);
+    if (GN::Key1[GK_4]) Cornell::resetCamera(3);
+    if (GN::Key1[GK_R]) Cornell::resetCamera(0);
+    if (GN::Key1[GK_O]) {
+        Cornell::gSsaoOn = !Cornell::gSsaoOn;
+        GNg::GN_VkSetSsaoEnabled(Cornell::gSsaoOn);
+    }
+    if (GN::Key1[GK_P]) {
+        Cornell::gSsgiStrength += 0.5f;
+        if (Cornell::gSsgiStrength > 1.0f) Cornell::gSsgiStrength = 0.0f;
+        GNg::GN_VkSetSsgiStrength(Cornell::gSsgiStrength);
+    }
+    if (GN::Key1[GK_I]) {
+        Cornell::gEngineGiOn = !Cornell::gEngineGiOn;
+        GNg::GN_VkEnableGI(Cornell::gEngineGiOn);
+    }
+    if (GN::Key1[GK_K]) {
+        Cornell::rebuildLights(Cornell::gLightMode == 0 ? 1 : 0);
+    }
+
+    Cornell::updateCamera(gDelta);
+}
+
+} // extern "C"
+
+GN_MAIN;
+GN_InitLoadCallBackFunc(AppInit, AppUnInit);
+GN_InitLoopCallBackFunc(AppDisplay2D, AppDisplay3D, AppRun);
+GN_StartRun("Cornell Box (GnVk)", 1280, 800, 0, false, true, true, 0, 0, 0, 0);
+GN_EXIT;

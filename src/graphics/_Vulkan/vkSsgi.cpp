@@ -146,6 +146,7 @@ void writeSsgiDescriptors() {
     if(!GN_Vk.ssgiDescriptorSet || !GN_Vk.ssgiDenoiseDescriptorSet) return;
     VkDescriptorBufferInfo ubo = {GN_Vk.ssgiUBOBuffer, 0, sizeof(GN3d::sSSGI_UBO)};
     VkDescriptorBufferInfo giUbo = {GN_Vk.giUBOBuffer, 0, sizeof(GN3d::sGI_UBO)};
+    VkDescriptorBufferInfo lightUbo = {GN_Vk.lightBuffer3D, 0, sizeof(GN3d::sLIGHT_UBO)};
     VkDescriptorImageInfo normal = {GN_Vk.ssgiSampler, GN_Vk.gNormalRoughView,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorImageInfo depth = {GN_Vk.ssgiSampler, GN_Vk.gDepthView,
@@ -156,8 +157,8 @@ void writeSsgiDescriptors() {
                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorImageInfo denoised = {GN_Vk.ssgiSampler, GN_Vk.ssgiDenoisedView,
                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet w[8] = {};
-    for(int i = 0; i < 8; i++) w[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    VkWriteDescriptorSet w[9] = {};
+    for(int i = 0; i < 9; i++) w[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     const VkDescriptorSet ssgiSet = GN_Vk.ssgiDescriptorSet;
     const VkDescriptorSet denoiseSet = GN_Vk.ssgiDenoiseDescriptorSet;
     w[0].dstSet = ssgiSet;
@@ -185,22 +186,28 @@ void writeSsgiDescriptors() {
     w[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     w[4].descriptorCount = 1;
     w[4].pBufferInfo = &giUbo;
-    w[5].dstSet = denoiseSet;
-    w[5].dstBinding = 0;
-    w[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    // 5 = LightUBO：SSGI 命中点的直接光（读 8 光源 + ambient + count 前缀）。
+    w[5].dstSet = ssgiSet;
+    w[5].dstBinding = 5;
+    w[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     w[5].descriptorCount = 1;
-    w[5].pImageInfo = &raw;
+    w[5].pBufferInfo = &lightUbo;
     w[6].dstSet = denoiseSet;
-    w[6].dstBinding = 1;
+    w[6].dstBinding = 0;
     w[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     w[6].descriptorCount = 1;
-    w[6].pImageInfo = &depth;
+    w[6].pImageInfo = &raw;
     w[7].dstSet = denoiseSet;
-    w[7].dstBinding = 2;
+    w[7].dstBinding = 1;
     w[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     w[7].descriptorCount = 1;
-    w[7].pImageInfo = &normal;
-    vkUpdateDescriptorSets(GN_Vk.device, 8, w, 0, 0);
+    w[7].pImageInfo = &depth;
+    w[8].dstSet = denoiseSet;
+    w[8].dstBinding = 2;
+    w[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    w[8].descriptorCount = 1;
+    w[8].pImageInfo = &normal;
+    vkUpdateDescriptorSets(GN_Vk.device, 9, w, 0, 0);
     // 延迟 layout binding 13 = 去噪后的 SSGI（半分辨率，线性上采样）。
     if(GN_Vk.deferredLightDescriptorSet) {
         VkWriteDescriptorSet wd = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -214,7 +221,7 @@ void writeSsgiDescriptors() {
 }
 
 bool createSsgiLayouts() {
-    VkDescriptorSetLayoutBinding ssgiBindings[5] = {};
+    VkDescriptorSetLayoutBinding ssgiBindings[6] = {};
     ssgiBindings[0].binding = 0;
     ssgiBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     ssgiBindings[0].descriptorCount = 1;
@@ -229,8 +236,12 @@ bool createSsgiLayouts() {
     ssgiBindings[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     ssgiBindings[4].descriptorCount = 1;
     ssgiBindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    ssgiBindings[5].binding = 5;
+    ssgiBindings[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    ssgiBindings[5].descriptorCount = 1;
+    ssgiBindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     VkDescriptorSetLayoutCreateInfo slci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    slci.bindingCount = 5;
+    slci.bindingCount = 6;
     slci.pBindings = ssgiBindings;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &slci, 0, &GN_Vk.ssgiDescriptorLayout) !=
        VK_SUCCESS)

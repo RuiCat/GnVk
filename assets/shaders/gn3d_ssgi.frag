@@ -26,6 +26,47 @@ layout(binding = 4, set = 0) uniform GIUBO {
     mat4 invViewProj;
 } gi;
 
+// 命中点直接光：只读 LightUBO 前缀（8 光源 + ambient + count），不需要 CSM 字段。
+struct SsgiLight {
+    vec4 color;
+    vec4 position;   // w: 0=方向光, 1=点光, 2=聚光
+    vec4 direction;  // 方向光：传播方向
+    vec4 attenuation;
+    vec4 coneAngles;
+};
+layout(binding = 5, set = 0) uniform LightUBO {
+    SsgiLight lights[8];
+    vec4 ambientLight;
+    vec4 lightCountPad; // x=实际光源数
+} ld;
+
+// 命中点直接光的「辐照度等价值」：albedo × E（延迟端统一再除 π）。
+// v1 只处理方向光、不做阴影；Cornell 的 sun 模式足够。
+vec3 directIrradianceAtHit(vec3 albedo, vec3 n, vec3 p) {
+    vec3 sum = vec3(0.0);
+    int count = int(ld.lightCountPad.x);
+    for (int i = 0; i < 8; ++i) {
+        if (i >= count) break;
+        vec4 color = ld.lights[i].color;
+        float type = ld.lights[i].position.w;
+        if (type < 0.5) {
+            vec3 L = normalize(-ld.lights[i].direction.xyz);
+            float ndl = max(dot(n, L), 0.0);
+            sum += albedo * color.rgb * color.a * ndl;
+        } else if (type < 1.5) {
+            vec3 toLight = ld.lights[i].position.xyz - p;
+            float dist = length(toLight);
+            if (dist < 1e-4) continue;
+            vec3 L = toLight / dist;
+            float ndl = max(dot(n, L), 0.0);
+            vec4 att = ld.lights[i].attenuation;
+            float falloff = 1.0 / max(att.x + att.y * dist + att.z * dist * dist, 1e-4);
+            sum += albedo * color.rgb * color.a * falloff * ndl;
+        }
+    }
+    return sum;
+}
+
 vec3 worldPosFromDepth(float d, vec2 uv) {
     vec4 clip = vec4(uv * 2.0 - 1.0, d, 1.0);
     vec4 world = ssgi.invViewProj * clip;
@@ -106,7 +147,7 @@ void main() {
                 vec3 hitNormal =
                     normalize(texture(gNormalTex, uv).rgb * 2.0 - 1.0);
                 vec3 hitAlbedo = texture(gAlbedoTex, uv).rgb;
-                hit = hitAlbedo * evalSH9(hitNormal);
+                hit = hitAlbedo * evalSH9(hitNormal) + directIrradianceAtHit(hitAlbedo, hitNormal, storedPos);
                 break;
             }
         }

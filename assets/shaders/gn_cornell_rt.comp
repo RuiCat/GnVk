@@ -1,0 +1,263 @@
+// gn_cornell_rt.comp — Cornell Box 的 GPU compute 路径追踪预览（T 的第二个后端）
+//
+// 与 tests/cornellBox/cornellCpuRt.cpp 同一套公式：7 个解析体、直接光 + 天空 fill、
+// 3 次弹射（漫反射余弦采样 + 俄罗斯轮盘）、金属镜面反射；场景由 CPU 侧
+// buildCornellGeometry(false) 打包成 SSBO，避免两套几何/材质漂移。
+//
+// 布局契约（与 tests/cornellBox/cornellGpuRt.cpp 逐字段一致）：
+//   set 0 binding 0 = outPixels : uint 数组，RGBA8 打包（小端 = R,G,B,A 字节）
+//   set 0 binding 1 = scene     : vec4 数组
+//       四边形 i（4 个 vec4）：[p0.xyz, material]、[u.xyz, 0]、[v.xyz, 0]、[normal.xyz, 0]
+//       球 j（2 个 vec4）    ：[center.xyz, radius]、[material, 0, 0, 0]
+//       材质 k（2 个 vec4）  ：[albedo.xyz, metallic]、[emission.xyz, 0]
+//   set 0 binding 2 = params    : std140，见 RtParams
+//   set 0 binding 3 = accum     : vec4 数组（rgb = 样本和, w = 样本数；相机静止时逐帧累加）
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(std430, binding = 0) writeonly buffer OutPixels { uint pixels[]; } outBuf;
+layout(std430, binding = 1) readonly buffer SceneData { vec4 data[]; } sceneData;
+layout(std430, binding = 3) buffer AccumData { vec4 accum[]; } accumData;
+layout(std140, binding = 2) uniform RtParams {
+    vec4 eye;      // xyz = 相机位置
+    vec4 fwd;      // xyz = 前向
+    vec4 camRight; // xyz = 右向
+    vec4 camUp;    // xyz = 上向
+    vec4 cam;      // x = tanHalfFov, y = aspect, z = lightMode(0=sun,1=point), w = sampleCount
+    vec4 size;     // x = width, y = height
+    vec4 sunDir;   // xyz = 太阳方向（与 CPU 的 SUN_DIRECTION 一致）
+    vec4 lightPos; // xyz = 点光位置（与 CPU 一致）
+    uvec4 counts;  // x = quadCount, y = sphereCount, z = materialCount
+    vec4 accumParams; // x = frameStartSample, y = reset(1=清空累积), z/w 保留
+} u;
+
+const float PI = 3.14159265359;
+const float EPS = 1.0e-4;
+const int PT_BOUNCES = 3;
+
+struct Hit {
+    float t;
+    vec3 normal;
+    int material;
+    bool valid;
+};
+
+uint rngStep(inout uint state) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return state;
+}
+
+float rnd(inout uint state) {
+    return float(rngStep(state) & 0x00FFFFFFu) / 16777216.0;
+}
+
+vec3 skyColor(vec3 dir) {
+    const float t = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+    const vec3 horizon = vec3(0.62, 0.70, 0.82);
+    const vec3 zenith = vec3(0.12, 0.30, 0.68);
+    return mix(horizon, zenith, t);
+}
+
+vec3 cosineDir(vec3 n, inout uint state) {
+    const float r1 = rnd(state);
+    const float r2 = rnd(state);
+    const float phi = 2.0 * PI * r2;
+    const float radius = sqrt(r1);
+    const float z = sqrt(max(0.0, 1.0 - r1));
+    const vec3 up = abs(n.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    const vec3 t = normalize(cross(up, n));
+    const vec3 b = cross(n, t);
+    return normalize(t * cos(phi) * radius + b * sin(phi) * radius + n * z);
+}
+
+bool intersectQuad(vec3 p0, vec3 qu, vec3 qv, vec3 qn, int material, vec3 ro, vec3 rd,
+                   float tMax, inout Hit hit) {
+    const float denom = dot(qn, rd);
+    if (abs(denom) < 1.0e-7) return false;
+    const float t = dot(qn, p0 - ro) / denom;
+    if (t <= EPS || t >= tMax) return false;
+    const vec3 p = ro + rd * t;
+    const vec3 rel = p - p0;
+    const float uu = dot(qu, qu);
+    const float vv = dot(qv, qv);
+    if (uu < 1.0e-8 || vv < 1.0e-8) return false;
+    const float a = dot(rel, qu) / uu;
+    const float b = dot(rel, qv) / vv;
+    if (a < 0.0 || a > 1.0 || b < 0.0 || b > 1.0) return false;
+    hit.t = t;
+    hit.normal = dot(qn, rd) > 0.0 ? -qn : qn;
+    hit.material = material;
+    hit.valid = true;
+    return true;
+}
+
+bool intersectSphere(vec3 center, float radius, int material, vec3 ro, vec3 rd, float tMax,
+                     inout Hit hit) {
+    const vec3 oc = ro - center;
+    const float b = dot(oc, rd);
+    const float c = dot(oc, oc) - radius * radius;
+    const float disc = b * b - c;
+    if (disc < 0.0) return false;
+    const float root = sqrt(disc);
+    float t = -b - root;
+    if (t <= EPS) t = -b + root;
+    if (t <= EPS || t >= tMax) return false;
+    const vec3 p = ro + rd * t;
+    vec3 n = normalize(p - center);
+    if (dot(n, rd) > 0.0) n = -n;
+    hit.t = t;
+    hit.normal = n;
+    hit.material = material;
+    hit.valid = true;
+    return true;
+}
+
+Hit trace(vec3 ro, vec3 rd, float tMax) {
+    Hit best;
+    best.valid = false;
+    best.t = tMax;
+    best.normal = vec3(0.0);
+    best.material = 0;
+    Hit cur;
+    cur.valid = false;
+    for (uint i = 0u; i < u.counts.x; ++i) {
+        const uint base = i * 4u;
+        const vec3 p0 = sceneData.data[base + 0u].xyz;
+        const int material = int(sceneData.data[base + 0u].w);
+        const vec3 qu = sceneData.data[base + 1u].xyz;
+        const vec3 qv = sceneData.data[base + 2u].xyz;
+        const vec3 qn = sceneData.data[base + 3u].xyz;
+        if (intersectQuad(p0, qu, qv, qn, material, ro, rd, best.t, cur) && cur.valid) {
+            best = cur;
+            cur.valid = false;
+        }
+    }
+    const uint sphereBase = u.counts.x * 4u;
+    for (uint i = 0u; i < u.counts.y; ++i) {
+        const uint base = sphereBase + i * 2u;
+        const vec3 center = sceneData.data[base + 0u].xyz;
+        const float radius = sceneData.data[base + 0u].w;
+        const int material = int(sceneData.data[base + 1u].x);
+        if (intersectSphere(center, radius, material, ro, rd, best.t, cur) && cur.valid) {
+            best = cur;
+            cur.valid = false;
+        }
+    }
+    return best;
+}
+
+vec3 shadeDirect(Hit hit, vec3 p, int lightMode) {
+    const uint materialBase =
+        u.counts.x * 4u + u.counts.y * 2u + uint(hit.material) * 2u;
+    const vec3 albedo = sceneData.data[materialBase + 0u].xyz;
+    // 与 CPU 一致：背光/阴影面至少保留天空朝向的 fill，避免纯黑。
+    const vec3 fill = albedo * skyColor(hit.normal) * 0.22;
+    vec3 result = vec3(0.0);
+    if (lightMode == 0) {
+        // 与引擎 sun 对齐：方向光不做阴影（引擎 sun 也没有 shadow pass）。
+        const vec3 toLight = normalize(-u.sunDir.xyz);
+        const float ndl = dot(hit.normal, toLight);
+        if (ndl <= 0.0) return fill;
+        result = albedo * (ndl / PI * 3.0);
+    } else {
+        const vec3 toLight = u.lightPos.xyz - p;
+        const float dist = length(toLight);
+        if (dist <= EPS) return fill;
+        const vec3 l = toLight / dist;
+        const float ndl = dot(hit.normal, l);
+        if (ndl <= 0.0) return fill;
+        const vec3 origin = p + hit.normal * (EPS * 10.0);
+        if (trace(origin, l, dist - EPS).valid) return fill;
+        const float range = 9.0;
+        const float att = 1.0 / (1.0 + 2.0 / range * dist + 1.0 / (range * range) * dist * dist);
+        result = albedo * (ndl / PI * 14.0 * att);
+    }
+    return result + fill;
+}
+
+vec3 radiance(vec3 ro, vec3 rd, int lightMode, inout uint state) {
+    vec3 result = vec3(0.0);
+    vec3 throughput = vec3(1.0);
+    vec3 currentOrigin = ro;
+    vec3 currentDir = rd;
+    for (int bounce = 0; bounce < PT_BOUNCES; ++bounce) {
+        const Hit hit = trace(currentOrigin, currentDir, 1.0e30);
+        if (!hit.valid) {
+            result += throughput * skyColor(currentDir);
+            break;
+        }
+        const vec3 p = currentOrigin + currentDir * hit.t;
+        const uint materialBase =
+            u.counts.x * 4u + u.counts.y * 2u + uint(hit.material) * 2u;
+        const vec3 albedo = sceneData.data[materialBase + 0u].xyz;
+        const float metallic = sceneData.data[materialBase + 0u].w;
+        if (metallic > 0.5) {
+            currentOrigin = p + hit.normal * (EPS * 10.0);
+            currentDir = normalize(reflect(currentDir, hit.normal));
+            throughput *= albedo;
+            continue;
+        }
+        result += throughput * shadeDirect(hit, p, lightMode);
+        currentOrigin = p + hit.normal * (EPS * 10.0);
+        currentDir = cosineDir(hit.normal, state);
+        throughput *= albedo;
+        if (bounce >= 2) {
+            const float survive = 0.8;
+            if (rnd(state) > survive) break;
+            throughput *= 1.0 / survive;
+        }
+    }
+    return result;
+}
+
+float toLinearByte(float value) {
+    value = (value * (2.51 * value + 0.03)) / (value * (2.43 * value + 0.59) + 0.14);
+    value = clamp(value, 0.0, 1.0);
+    return pow(value, 1.0 / 2.2);
+}
+
+uint packRgba(vec3 color) {
+    const uint r = uint(toLinearByte(color.r) * 255.0 + 0.5);
+    const uint g = uint(toLinearByte(color.g) * 255.0 + 0.5);
+    const uint b = uint(toLinearByte(color.b) * 255.0 + 0.5);
+    return r | (g << 8) | (b << 16) | (255u << 24);
+}
+
+void main() {
+    const uvec2 pixel = gl_GlobalInvocationID.xy;
+    const int width = int(u.size.x);
+    const int height = int(u.size.y);
+    if (int(pixel.x) >= width || int(pixel.y) >= height) return;
+
+    const vec3 eye = u.eye.xyz;
+    const vec3 forward = normalize(u.fwd.xyz);
+    const vec3 rightDir = normalize(u.camRight.xyz);
+    const vec3 upDir = normalize(u.camUp.xyz);
+    const float tanHalf = u.cam.x;
+    const float aspect = u.cam.y;
+    const int lightMode = int(u.cam.z);
+    const int sampleCount = int(u.cam.w);
+
+    const float uu = (float(pixel.x) + 0.5) / float(width);
+    const float vv = (float(pixel.y) + 0.5) / float(height);
+    const vec3 dir = normalize(forward + rightDir * ((2.0 * uu - 1.0) * tanHalf * aspect) +
+                               upDir * ((1.0 - 2.0 * vv) * tanHalf));
+
+    const uint pixelIndex = pixel.y * uint(width) + pixel.x;
+    if (u.accumParams.y > 0.5) accumData.accum[pixelIndex] = vec4(0.0);
+    vec3 sum = accumData.accum[pixelIndex].rgb;
+    float count = accumData.accum[pixelIndex].w;
+    const uint seed = uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + 17u;
+    const uint frameStart = uint(u.accumParams.x);
+    for (int s = 0; s < sampleCount; ++s) {
+        uint state = seed + (frameStart + uint(s)) * 0x9E3779B9u;
+        if (state == 0u) state = 1u;
+        sum += radiance(eye, dir, lightMode, state);
+        count += 1.0;
+    }
+    accumData.accum[pixelIndex] = vec4(sum, count);
+    outBuf.pixels[pixelIndex] = packRgba(count > 0.0 ? sum / count : vec3(0.0));
+}
