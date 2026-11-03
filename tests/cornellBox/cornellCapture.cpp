@@ -83,7 +83,10 @@ bool writeRgbPng(const char *path, const uint8_t *rgba, int width, int height) {
 
 struct sPendingCapture {
     bool aPending;
-    bool aHdr; // true = HDR RGBA16F，false = swapchain RGBA8
+    bool aHdr;    // RGBA16F（ACES+gamma）
+    bool aNormal; // RGBA16F（法线编码，原样 RGB，不 tonemap）
+    bool aAlbedo; // RGBA8_SRGB 原样
+    bool aSwap;   // swapchain RGBA8，需 BGR 交换
     VkBuffer aBuffer;
     VkDeviceMemory aMemory;
     uint32_t aWidth;
@@ -91,7 +94,8 @@ struct sPendingCapture {
     std::string aPath;
 };
 
-sPendingCapture s_pending = {false, false, VK_NULL_HANDLE, VK_NULL_HANDLE, 0u, 0u, {}};
+sPendingCapture s_pending = {false, false, false, false, false, VK_NULL_HANDLE,
+                               VK_NULL_HANDLE, 0u, 0u, {}};
 
 uint32_t findHostVisibleMemory(VkPhysicalDevice physical, uint32_t typeBits) {
     VkPhysicalDeviceMemoryProperties props;
@@ -167,7 +171,8 @@ void destroyPending() {
     if (s_pending.aMemory != VK_NULL_HANDLE) {
         vkFreeMemory(GNg::GN_Vk.device, s_pending.aMemory, nullptr);
     }
-    s_pending = sPendingCapture{false, false, VK_NULL_HANDLE, VK_NULL_HANDLE, 0u, 0u, {}};
+    s_pending = sPendingCapture{false, false, false, false, false, VK_NULL_HANDLE,
+                                 VK_NULL_HANDLE, 0u, 0u, {}};
 }
 
 } // namespace
@@ -227,6 +232,7 @@ bool requestSwapchainCapture(const char *path) {
                          nullptr, 1, &toPresent);
 
     s_pending.aPending = true;
+    s_pending.aSwap = true;
     s_pending.aBuffer = buffer;
     s_pending.aMemory = memory;
     s_pending.aWidth = width;
@@ -294,11 +300,126 @@ bool requestHdrCapture(const char *path) {
     return true;
 }
 
+// 直抓某个 SHADER_READ_ONLY 布局的 RGBA8 图（albedo 附件等），原样写 PNG，不经 tonemap。
+static bool requestReadonlyImageCapture(const char *path, VkImage image) {
+    if (!path || s_pending.aPending || !GNg::GN_Vk.initialized || image == VK_NULL_HANDLE) {
+        return false;
+    }
+    const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
+    const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
+    if (width == 0u || height == 0u) return false;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (!createStagingBuffer(static_cast<VkDeviceSize>(width) * height * 4u, &buffer, &memory)) {
+        return false;
+    }
+    VkCommandBuffer cb = GNg::GN_Vk.commandBuffers[GNg::GN_Vk.currentFrame];
+    VkImageMemoryBarrier toT = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    toT.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    toT.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toT.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toT.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toT.image = image;
+    toT.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toT.subresourceRange.levelCount = 1;
+    toT.subresourceRange.layerCount = 1;
+    toT.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    toT.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toT);
+    VkBufferImageCopy region = {};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = {width, height, 1};
+    vkCmdCopyImageToBuffer(cb, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
+    VkImageMemoryBarrier toR = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    toR.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toR.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    toR.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toR.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toR.image = image;
+    toR.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toR.subresourceRange.levelCount = 1;
+    toR.subresourceRange.layerCount = 1;
+    toR.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    toR.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                         &toR);
+    s_pending.aPending = true;
+    s_pending.aAlbedo = true;
+    s_pending.aBuffer = buffer;
+    s_pending.aMemory = memory;
+    s_pending.aWidth = width;
+    s_pending.aHeight = height;
+    s_pending.aPath = path;
+    return true;
+}
+
+bool requestAlbedoCapture(const char *path) {
+    return requestReadonlyImageCapture(path, GNg::GN_Vk.gAlbedoMetalImage);
+}
+
+// 直抓 RGBA16F 的 G-Buffer 法线附件（复用 requestHdrCapture 的拷贝逻辑，但 8 字节/像素）。
+bool requestNormalCapture(const char *path) {
+    if (!path || s_pending.aPending || !GNg::GN_Vk.initialized) return false;
+    if (GNg::GN_Vk.gNormalRoughImage == VK_NULL_HANDLE) return false;
+    const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
+    const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (!createStagingBuffer(static_cast<VkDeviceSize>(width) * height * 8u, &buffer, &memory)) {
+        return false;
+    }
+    VkCommandBuffer cb = GNg::GN_Vk.commandBuffers[GNg::GN_Vk.currentFrame];
+    VkImage image = GNg::GN_Vk.gNormalRoughImage;
+    VkImageMemoryBarrier toT = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    toT.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    toT.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toT.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toT.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toT.image = image;
+    toT.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toT.subresourceRange.levelCount = 1;
+    toT.subresourceRange.layerCount = 1;
+    toT.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    toT.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toT);
+    VkBufferImageCopy region = {};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = {width, height, 1};
+    vkCmdCopyImageToBuffer(cb, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
+    VkImageMemoryBarrier toR = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    toR.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toR.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    toR.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toR.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toR.image = image;
+    toR.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toR.subresourceRange.levelCount = 1;
+    toR.subresourceRange.layerCount = 1;
+    toR.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    toR.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                         &toR);
+    s_pending.aPending = true;
+    s_pending.aNormal = true;
+    s_pending.aBuffer = buffer;
+    s_pending.aMemory = memory;
+    s_pending.aWidth = width;
+    s_pending.aHeight = height;
+    s_pending.aPath = path;
+    return true;
+}
+
 bool finishPendingCapture() {
     if (!s_pending.aPending) return false;
     const uint32_t w = s_pending.aWidth;
     const uint32_t h = s_pending.aHeight;
-    const VkDeviceSize bytesPerPixel = s_pending.aHdr ? 8u : 4u;
+    const VkDeviceSize bytesPerPixel = (s_pending.aHdr || s_pending.aNormal) ? 8u : 4u;
     const VkDeviceSize size = static_cast<VkDeviceSize>(w) * h * bytesPerPixel;
     void *mapped = nullptr;
     if (vkMapMemory(GNg::GN_Vk.device, s_pending.aMemory, 0, size, 0, &mapped) != VK_SUCCESS) {
@@ -310,7 +431,17 @@ bool finishPendingCapture() {
     vkUnmapMemory(GNg::GN_Vk.device, s_pending.aMemory);
 
     std::vector<uint8_t> rgba(static_cast<size_t>(w) * h * 4u);
-    if (s_pending.aHdr) {
+    if (s_pending.aAlbedo) {
+        std::memcpy(rgba.data(), raw.data(), raw.size());
+    } else if (s_pending.aNormal) {
+        const uint16_t *halfs = reinterpret_cast<const uint16_t *>(raw.data());
+        for (uint32_t i = 0; i < w * h; ++i) {
+            rgba[i * 4 + 0] = static_cast<uint8_t>(std::min(1.0f, std::max(0.0f, halfToFloat(halfs[i * 4 + 0]))) * 255.0f + 0.5f);
+            rgba[i * 4 + 1] = static_cast<uint8_t>(std::min(1.0f, std::max(0.0f, halfToFloat(halfs[i * 4 + 1]))) * 255.0f + 0.5f);
+            rgba[i * 4 + 2] = static_cast<uint8_t>(std::min(1.0f, std::max(0.0f, halfToFloat(halfs[i * 4 + 2]))) * 255.0f + 0.5f);
+            rgba[i * 4 + 3] = 255u;
+        }
+    } else if (s_pending.aHdr) {
         const uint16_t *halfs = reinterpret_cast<const uint16_t *>(raw.data());
         for (uint32_t i = 0; i < w * h; ++i) {
             const float r = tonemapAcesGamma(halfToFloat(halfs[i * 4 + 0]));
@@ -323,6 +454,7 @@ bool finishPendingCapture() {
         }
     } else {
         std::memcpy(rgba.data(), raw.data(), raw.size());
+        if (!s_pending.aSwap) return false;
         const VkFormat format = GNg::GN_Vk.swapchainFormat;
         if (format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB) {
             for (uint32_t i = 0; i < w * h; ++i) {
@@ -336,7 +468,9 @@ bool finishPendingCapture() {
     const bool ok = writeRgbPng(s_pending.aPath.c_str(), rgba.data(), static_cast<int>(w),
                                 static_cast<int>(h));
     if (ok) {
-        std::printf("[cornellBox] %s: %s\n", s_pending.aHdr ? "HDR 截图" : "引擎截图",
+        std::printf("[cornellBox] %s: %s\n",
+                    s_pending.aAlbedo   ? "albedo 截图"
+                    : (s_pending.aNormal ? "normal 截图" : (s_pending.aHdr ? "HDR 截图" : "引擎截图")),
                     s_pending.aPath.c_str());
     }
     destroyPending();

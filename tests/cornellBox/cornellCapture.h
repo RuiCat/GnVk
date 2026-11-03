@@ -16,6 +16,10 @@ bool requestSwapchainCapture(const char *path);
 // 诊断：直接抓 HDR 目标（R16G16B16A16_SFLOAT），CPU 端做 ACES+gamma 后写 PNG，
 // 用于区分「3D pass 没写进 HDR」还是「composite 采样 HDR 出错」。
 bool requestHdrCapture(const char *path);
+// 诊断：直抓 G-Buffer albedo 附件（RGBA8_SRGB，原样写 PNG，不经 tonemap）。
+bool requestAlbedoCapture(const char *path);
+// 诊断：直抓 G-Buffer 法线附件（RGBA16F，N*0.5+0.5 原样转 RGB，不经 tonemap）。
+bool requestNormalCapture(const char *path);
 bool finishPendingCapture();
 bool hasPendingCapture();
 

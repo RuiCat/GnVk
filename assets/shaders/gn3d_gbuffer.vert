@@ -42,7 +42,12 @@ void main() {
 
     // ── TBN 矩阵 (Gram-Schmidt 正交化) ───────────────
     // 用于片元着色器中法线贴图的切线空间→世界空间变换
-    vec3 T = normalize(mat3(pc.model) * inTangent);
+    vec3 T = mat3(pc.model) * inTangent;
+    // 程序化网格可能没有切线（inTangent=0）：normalize(0) 会得到 NaN，污染 TBN 与法线。
+    // 此时任取一个不平行于 N 的轴，再 Gram-Schmidt 正交化。
+    if (dot(T, T) < 1.0e-8) {
+        T = abs(N.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    }
     T = normalize(T - dot(T, N) * N);   // 确保 T ⊥ N
     vec3 B = cross(N, T);               // 副法线
     fragTBN = mat3(T, B, N);            // 列主序: [T, B, N]

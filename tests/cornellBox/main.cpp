@@ -237,11 +237,17 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     if (gCaptureRequested) {
         gCaptureRequested = false;
         const bool captureHdr = std::getenv("CORNELL_CAPTURE_HDR") != nullptr;
+        const bool captureAlbedo = std::getenv("CORNELL_CAPTURE_ALBEDO") != nullptr;
+        const bool captureNormal = std::getenv("CORNELL_CAPTURE_NORMAL") != nullptr;
         char path[256];
         std::snprintf(path, sizeof(path), ".local/cornellbox/%s-%ld.png",
-                      captureHdr ? "hdr" : "engine", static_cast<long>(std::time(nullptr)));
-        const bool ok = captureHdr ? Cornell::requestHdrCapture(path)
-                                   : Cornell::requestSwapchainCapture(path);
+                      captureHdr ? "hdr"
+                                 : (captureAlbedo ? "albedo" : (captureNormal ? "normal" : "engine")),
+                      static_cast<long>(std::time(nullptr)));
+        const bool ok = captureHdr    ? Cornell::requestHdrCapture(path)
+                        : captureAlbedo ? Cornell::requestAlbedoCapture(path)
+                        : captureNormal ? Cornell::requestNormalCapture(path)
+                                        : Cornell::requestSwapchainCapture(path);
         if (ok) {
             std::printf("[cornellBox] 截图已排队（下一帧写盘）: %s\n", path);
         } else {
