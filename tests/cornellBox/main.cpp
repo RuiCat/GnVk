@@ -86,6 +86,8 @@ GN_CALL void AppInit() {
     applyGiSwitches();
     // 后处理参数：不调用 GN_VkSetPost 时 POST UBO 是未初始化的（合成会读垃圾 → 品红条纹）。
     GN3d::sPOST_UBO post = GN3d::makeDefaultPostUbo();
+    // 引擎合成 pass 的 FXAA：延迟路径是 1-sample G-Buffer，没有 MSAA，开 FXAA 抗锯齿。
+    post.fxaa = 1.0f;
     GNg::GN_VkSetPost(post);
     // 无人值守自检入口：CORNELL_GPU_RT=1 启动即进 GPU 光追预览（桌面/截图验证用）。
     const char *gpuRtEnv = std::getenv("CORNELL_GPU_RT");

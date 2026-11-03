@@ -243,11 +243,6 @@ void main() {
     const int lightMode = int(u.cam.z);
     const int sampleCount = int(u.cam.w);
 
-    const float uu = (float(pixel.x) + 0.5) / float(width);
-    const float vv = (float(pixel.y) + 0.5) / float(height);
-    const vec3 dir = normalize(forward + rightDir * ((2.0 * uu - 1.0) * tanHalf * aspect) +
-                               upDir * ((1.0 - 2.0 * vv) * tanHalf));
-
     const uint pixelIndex = pixel.y * uint(width) + pixel.x;
     if (u.accumParams.y > 0.5) accumData.accum[pixelIndex] = vec4(0.0);
     vec3 sum = accumData.accum[pixelIndex].rgb;
@@ -257,6 +252,13 @@ void main() {
     for (int s = 0; s < sampleCount; ++s) {
         uint state = seed + (frameStart + uint(s)) * 0x9E3779B9u;
         if (state == 0u) state = 1u;
+        // 子像素抖动：配合多样本/逐帧累积做抗锯齿（与 cornellCpuRt 同 seed 顺序）。
+        const float jx = rnd(state);
+        const float jy = rnd(state);
+        const float uu = (float(pixel.x) + jx) / float(width);
+        const float vv = (float(pixel.y) + jy) / float(height);
+        const vec3 dir = normalize(forward + rightDir * ((2.0 * uu - 1.0) * tanHalf * aspect) +
+                                   upDir * ((1.0 - 2.0 * vv) * tanHalf));
         sum += radiance(eye, dir, lightMode, state);
         count += 1.0;
     }

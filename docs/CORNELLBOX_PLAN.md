@@ -260,6 +260,8 @@ GN_VkDeferredLighting(viewProj, camera, lightUBO)  // 内部自动 composite
   （G-Buffer 法线附件恒黑），延迟光照输出垃圾；已在 vert 加零切线回退。
   (2) 引擎 swapchain 是 **RGBA16F**（格式 97），旧截图按 RGBA8 读回导致品红；已按半精度解码。
   修复后引擎模式正常渲染（本机 tall 窗口 aspect≈0.769，pose 0 只见背面白墙）。
+  抗锯齿：预览 T/Y/U 用**子像素抖动 + 多样本/逐帧累积**做 AA；引擎延迟路径在 composite 开 **FXAA**
+  （`post.fxaa=1`，延迟 G-Buffer 是 1-sample，无 MSAA）。
   `engine vs PT`：PT 1280x800 pose0 sun 64spp 对比引擎截图 → **RMSE=20.678 / MAE=17.942 / max=177
   （0..255），signed mean R=19.95 G=18.76 B=14.35（ref-test，PT 略亮）**。差值来自 SSGI/SSAO/IBL
   对间接光的近似 vs 路径追踪 ground truth，属预期量级。

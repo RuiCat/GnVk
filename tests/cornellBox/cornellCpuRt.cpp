@@ -262,16 +262,19 @@ bool renderCpuRt(int width, int height, const float eye[3], const float fwd[3],
         workers.push_back(std::thread([&, t]() {
             for (int y = static_cast<int>(t); y < height; y += static_cast<int>(threadCount)) {
                 for (int x = 0; x < width; ++x) {
-                    const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(width);
-                    const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(height);
-                    sRay ray;
-                    ray.aOrigin = camera;
-                    ray.aDir = normalize(add(add(forward, mul(cameraRight, (2.0f * u - 1.0f) * tanHalf * aspect)),
-                                             mul(cameraUp, (1.0f - 2.0f * v) * tanHalf)));
                     sVec3 sum = v3(0.0f, 0.0f, 0.0f);
                     const unsigned int seed = static_cast<unsigned int>(x * 1973 + y * 9277 + 17);
                     for (int sample = 0; sample < PT_SAMPLES; ++sample) {
                         sRng rng(seed + static_cast<unsigned int>(sample) * 0x9E3779B9u);
+                        // 子像素抖动：多样本/逐帧累积把边缘平均成抗锯齿（AA）。
+                        const float jx = rng.next();
+                        const float jy = rng.next();
+                        const float u = (static_cast<float>(x) + jx) / static_cast<float>(width);
+                        const float v = (static_cast<float>(y) + jy) / static_cast<float>(height);
+                        sRay ray;
+                        ray.aOrigin = camera;
+                        ray.aDir = normalize(add(add(forward, mul(cameraRight, (2.0f * u - 1.0f) * tanHalf * aspect)),
+                                                 mul(cameraUp, (1.0f - 2.0f * v) * tanHalf)));
                         sum = add(sum, radiance(geometry, ray, lightMode, rng));
                     }
                     const sVec3 c = mul(sum, 1.0f / static_cast<float>(PT_SAMPLES));
