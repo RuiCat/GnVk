@@ -209,6 +209,8 @@ struct GN_VkContext {
     uint32_t currentFrame;
     bool initialized;
     int viewWidth, viewHeight;
+    // 设备是否已启用 VK_KHR_acceleration_structure + ray_query（硬件光追加速）。
+    bool rayQuerySupported;
 
 #ifdef GN_USING_3D
     // — MSAA —
@@ -400,7 +402,7 @@ struct GN_VkContext {
     VkPipeline gBufferDebugPipeline;
 #endif
 
-    GN_VkContext() : initialized(false), swapchainImages(0), swapchainViews(0),
+    GN_VkContext() : initialized(false), rayQuerySupported(false), swapchainImages(0), swapchainViews(0),
                      framebuffers(0), commandBuffers(0),
                      defaultImage(VK_NULL_HANDLE), defaultImageMemory(VK_NULL_HANDLE),
                      defaultImageView(VK_NULL_HANDLE), defaultDS(VK_NULL_HANDLE),
@@ -422,6 +424,8 @@ extern GN_VkContext GN_Vk;
 void GN_VkInit(GLFWwindow *window, int w, int h);
 void GN_VkShutdown();
 void GN_VkResize(int w, int h);
+// 引擎设备是否支持并已启用硬件光追（VK_KHR_acceleration_structure + VK_KHR_ray_query）。
+bool GN_VkRayQuerySupported();
 bool GN_VkBeginFrame();
 void GN_VkEndFrame();
 

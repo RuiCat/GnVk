@@ -50,13 +50,19 @@ bool ensureRtBackend(Cornell::eGpuRtBackend backend) {
     gActiveRtBackend = -1;
     Cornell::sGpuRtContext ctx;
     if (backend == Cornell::eGPU_RT_RAY_QUERY) {
-        if (gRayQueryDevice.aDevice == VK_NULL_HANDLE &&
-            !Cornell::createRayQueryDevice(&gRayQueryDevice)) {
-            std::fprintf(stderr, "[cornellBox] ray-query 设备不可用\n");
-            return false;
+        if (GNg::GN_VkRayQuerySupported()) {
+            // 引擎设备已启用 AS/ray_query：硬件光追直接用引擎设备（引擎级加速）。
+            ctx = {GNg::GN_Vk.device, GNg::GN_Vk.physicalDevice, GNg::GN_Vk.graphicsQueue,
+                   GNg::GN_Vk.graphicsFamily};
+        } else {
+            if (gRayQueryDevice.aDevice == VK_NULL_HANDLE &&
+                !Cornell::createRayQueryDevice(&gRayQueryDevice)) {
+                std::fprintf(stderr, "[cornellBox] ray-query 设备不可用\n");
+                return false;
+            }
+            ctx = {gRayQueryDevice.aDevice, gRayQueryDevice.aPhysical, gRayQueryDevice.aQueue,
+                   gRayQueryDevice.aQueueFamily};
         }
-        ctx = {gRayQueryDevice.aDevice, gRayQueryDevice.aPhysical, gRayQueryDevice.aQueue,
-               gRayQueryDevice.aQueueFamily};
     } else {
         ctx = {GNg::GN_Vk.device, GNg::GN_Vk.physicalDevice, GNg::GN_Vk.graphicsQueue,
                GNg::GN_Vk.graphicsFamily};
@@ -79,6 +85,8 @@ GN_CALL void AppInit() {
     Cornell::initCamera();
     Cornell::initHud();
     Cornell::ensureCaptureDir();
+    std::fprintf(stderr, "[cornellBox] 引擎设备硬件光追(VK_KHR_ray_query)=%s\n",
+                 GNg::GN_VkRayQuerySupported() ? "on" : "off");
     // 默认开启 GI/SSGI：Cornell 程序的目的就是看间接光；A/S 留给相机移动，GI 键改用 O/P/I/K。
     Cornell::gEngineGiOn = true;
     Cornell::gSsaoOn = true;

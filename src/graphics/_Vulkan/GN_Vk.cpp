@@ -15,6 +15,7 @@
 #include "vkInternal.h"
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace GNg {
 
@@ -81,7 +82,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     // Instance
     VkApplicationInfo ai = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
     ai.pApplicationName = "GN_mini";
-    ai.apiVersion = VK_API_VERSION_1_0;
+    ai.apiVersion = VK_API_VERSION_1_1; // 1.1: 硬件光追(AS/ray_query)与 Features2 需要
     uint32_t extCount = 0;
     const char **exts = glfwGetRequiredInstanceExtensions(&extCount);
     VkInstanceCreateInfo ici = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
@@ -136,13 +137,58 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     qci.queueFamilyIndex = GN_Vk.graphicsFamily;
     qci.queueCount = 1;
     qci.pQueuePriorities = &qp;
-    const char *dexts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+
+    // 硬件光追（RT）能力：仅在驱动支持时启用 AS/ray_query 扩展与特性，否则保持原样。
+    std::vector<const char *> dexts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    bool rayQuery = false;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeat = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    VkPhysicalDeviceRayQueryFeaturesKHR rqFeat = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+    VkPhysicalDeviceBufferDeviceAddressFeatures bdaFeat = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
+    {
+        uint32_t ec = 0;
+        vkEnumerateDeviceExtensionProperties(GN_Vk.physicalDevice, nullptr, &ec, nullptr);
+        std::vector<VkExtensionProperties> eps(ec);
+        vkEnumerateDeviceExtensionProperties(GN_Vk.physicalDevice, nullptr, &ec, eps.data());
+        bool hasAs = false, hasRq = false, hasDho = false, hasBda = false;
+        for (uint32_t i = 0; i < ec; ++i) {
+            const char *n = eps[i].extensionName;
+            if (std::strcmp(n, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) == 0) hasAs = true;
+            else if (std::strcmp(n, VK_KHR_RAY_QUERY_EXTENSION_NAME) == 0) hasRq = true;
+            else if (std::strcmp(n, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) == 0) hasDho = true;
+            else if (std::strcmp(n, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0) hasBda = true;
+        }
+        if (hasAs && hasRq) {
+            VkPhysicalDeviceFeatures2 f2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+            asFeat.pNext = &rqFeat;
+            rqFeat.pNext = &bdaFeat;
+            f2.pNext = &asFeat;
+            vkGetPhysicalDeviceFeatures2(GN_Vk.physicalDevice, &f2);
+            if (asFeat.accelerationStructure && rqFeat.rayQuery && bdaFeat.bufferDeviceAddress) {
+                rayQuery = true;
+                dexts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+                dexts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+                if (hasDho) dexts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+                if (hasBda) dexts.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+            }
+        }
+    }
+
     VkDeviceCreateInfo dci = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
-    dci.enabledExtensionCount = 1;
-    dci.ppEnabledExtensionNames = dexts;
+    dci.enabledExtensionCount = static_cast<uint32_t>(dexts.size());
+    dci.ppEnabledExtensionNames = dexts.data();
+    if (rayQuery) {
+        asFeat.accelerationStructure = VK_TRUE;
+        rqFeat.rayQuery = VK_TRUE;
+        bdaFeat.bufferDeviceAddress = VK_TRUE;
+        dci.pNext = &asFeat;
+    }
     VkCheck(vkCreateDevice(GN_Vk.physicalDevice, &dci, 0, &GN_Vk.device), "vkCreateDevice");
+    GN_Vk.rayQuerySupported = rayQuery;
     vkGetDeviceQueue(GN_Vk.device, GN_Vk.graphicsFamily, 0, &GN_Vk.graphicsQueue);
     // P1b：设备就绪后初始化管线缓存（所有缓存的管线在 GN_VkShutdown 里统一 Release）
     GN_Vk.aPipelineCache.Init(GN_Vk.device);
@@ -810,6 +856,10 @@ static bool recreate2DPipelines() {
 }
 
 // ── 窗口尺寸变化：重建 swapchain、视图与 framebuffer（3D 目标需随窗口重建） ──
+bool GN_VkRayQuerySupported() {
+    return GN_Vk.rayQuerySupported;
+}
+
 void GN_VkResize(int w, int h) {
     if(w <= 0 || h <= 0) return;
     GN_Vk.viewWidth = w;

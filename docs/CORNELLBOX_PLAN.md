@@ -226,6 +226,9 @@ GN_VkDeferredLighting(viewProj, camera, lightUBO)  // 内部自动 composite
   BLAS + 单实例 TLAS；`gn_cornell_rq.comp` 用 ray query 打主射线/阴影射线/反射，按 primitive 取材质并插值法线。
   与 `Y` 共用累积/回读/显示逻辑；初始化失败回退 `Y`（再失败回退 `T`）。
   背面/掠射命中的数值退化按 miss 处理（避免金属球轮廓出现黑点污染累积）。
+  **引擎级加速（2026-11-03）**：引擎实例升到 Vulkan 1.1，设备在驱动支持时自动启用
+  `VK_KHR_acceleration_structure` + `VK_KHR_ray_query`（`GN_VkRayQuerySupported()`）；
+  `U` 预览优先复用**引擎设备**做 ray query（不再需要独立设备），不可用时回退独立设备。
 - HUD 用引擎 2D 叠层（`GN_VkBegin2DPass` + 文本），不引入 ImGui。
 - 叠层显示：位姿、光照变体、IBL/SSAO/SSGI 状态、快捷键。
 
@@ -253,7 +256,7 @@ GN_VkDeferredLighting(viewProj, camera, lightUBO)  // 内部自动 composite
 - BGRA 时交换 R/B；行按 Vulkan 图像顺序（top-down）写，无需翻转。
 - `CORNELL_CAPTURE_ENGINE=1`：引擎模式隐藏 HUD、渲染 30 帧后自动 F12 并退出（无人值守对拍）。
 - **引擎模式已修复（2026-11-03）**：三个根因——
-  (3) 相机 aspect 误用窗口 framebuffer（niri 把窗口 tile 成 1122x1459 竖条，但 swapchain 仍 1280x800），
+  (3) 相机 aspect 误用窗口 framebuffer（niri 把窗口 tile 成竖条，但 swapchain 仍 1280x800），
   导致视口窄竖条、只见背面墙；已改用 swapchain extent 的 aspect。
   此前「品红条纹」有两个根因——
   (1) 程序化网格 `inTangent=0`，`gn3d_gbuffer.vert` 里 `normalize(0)` 产生 NaN，污染法线
