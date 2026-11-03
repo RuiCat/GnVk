@@ -10,6 +10,8 @@
 
 #include <png.h>
 
+#include <cmath>
+#include <cstdint>
 #include <csetjmp>
 #include <cstdio>
 #include <cstring>
@@ -81,6 +83,7 @@ bool writeRgbPng(const char *path, const uint8_t *rgba, int width, int height) {
 
 struct sPendingCapture {
     bool aPending;
+    bool aHdr; // true = HDR RGBA16F，false = swapchain RGBA8
     VkBuffer aBuffer;
     VkDeviceMemory aMemory;
     uint32_t aWidth;
@@ -88,7 +91,7 @@ struct sPendingCapture {
     std::string aPath;
 };
 
-sPendingCapture s_pending = {false, VK_NULL_HANDLE, VK_NULL_HANDLE, 0u, 0u, {}};
+sPendingCapture s_pending = {false, false, VK_NULL_HANDLE, VK_NULL_HANDLE, 0u, 0u, {}};
 
 uint32_t findHostVisibleMemory(VkPhysicalDevice physical, uint32_t typeBits) {
     VkPhysicalDeviceMemoryProperties props;
@@ -120,6 +123,43 @@ bool createStagingBuffer(VkDeviceSize size, VkBuffer *buffer, VkDeviceMemory *me
     return vkBindBufferMemory(GNg::GN_Vk.device, *buffer, *memory, 0) == VK_SUCCESS;
 }
 
+
+// 半精度 float → float（诊断 HDR dump 用）。
+float halfToFloat(uint16_t h) {
+    const uint32_t sign = static_cast<uint32_t>(h & 0x8000u) << 16;
+    uint32_t exp = (h >> 10) & 0x1Fu;
+    uint32_t mant = h & 0x3FFu;
+    uint32_t bits;
+    if (exp == 0) {
+        if (mant == 0) {
+            bits = sign;
+        } else {
+            exp = 1;
+            while ((mant & 0x400u) == 0) {
+                mant <<= 1;
+                --exp;
+            }
+            mant &= 0x3FFu;
+            bits = sign | ((exp + 112u) << 23) | (mant << 13);
+        }
+    } else if (exp == 0x1Fu) {
+        bits = sign | 0x7F800000u | (mant << 13);
+    } else {
+        bits = sign | ((exp + 112u) << 23) | (mant << 13);
+    }
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
+}
+
+// 与 PT/合成一致的 ACES fit + gamma 2.2。
+float tonemapAcesGamma(float v) {
+    v = (v * (2.51f * v + 0.03f)) / (v * (2.43f * v + 0.59f) + 0.14f);
+    if (v < 0.0f) v = 0.0f;
+    if (v > 1.0f) v = 1.0f;
+    return std::pow(v, 1.0f / 2.2f);
+}
+
 void destroyPending() {
     if (s_pending.aBuffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(GNg::GN_Vk.device, s_pending.aBuffer, nullptr);
@@ -127,7 +167,7 @@ void destroyPending() {
     if (s_pending.aMemory != VK_NULL_HANDLE) {
         vkFreeMemory(GNg::GN_Vk.device, s_pending.aMemory, nullptr);
     }
-    s_pending = sPendingCapture{false, VK_NULL_HANDLE, VK_NULL_HANDLE, 0u, 0u, {}};
+    s_pending = sPendingCapture{false, false, VK_NULL_HANDLE, VK_NULL_HANDLE, 0u, 0u, {}};
 }
 
 } // namespace
@@ -195,33 +235,109 @@ bool requestSwapchainCapture(const char *path) {
     return true;
 }
 
+
+bool requestHdrCapture(const char *path) {
+    if (!path || s_pending.aPending || !GNg::GN_Vk.initialized) return false;
+    if (GNg::GN_Vk.hdrImage == VK_NULL_HANDLE) return false;
+    const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
+    const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
+    if (width == 0u || height == 0u) return false;
+    const VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * 8u;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (!createStagingBuffer(size, &buffer, &memory)) return false;
+
+    VkCommandBuffer cb = GNg::GN_Vk.commandBuffers[GNg::GN_Vk.currentFrame];
+    VkImage image = GNg::GN_Vk.hdrImage;
+    // HDR 在 composite 后被采样（finalLayout SHADER_READ_ONLY），这里转 TRANSFER_SRC 拷贝。
+    VkImageMemoryBarrier toTransfer = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    toTransfer.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.image = image;
+    toTransfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toTransfer.subresourceRange.levelCount = 1;
+    toTransfer.subresourceRange.layerCount = 1;
+    toTransfer.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                         &toTransfer);
+    VkBufferImageCopy region = {};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = {width, height, 1};
+    vkCmdCopyImageToBuffer(cb, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
+    VkImageMemoryBarrier toRead = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    toRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    toRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toRead.image = image;
+    toRead.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toRead.subresourceRange.levelCount = 1;
+    toRead.subresourceRange.layerCount = 1;
+    toRead.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    toRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                         &toRead);
+
+    s_pending.aPending = true;
+    s_pending.aHdr = true;
+    s_pending.aBuffer = buffer;
+    s_pending.aMemory = memory;
+    s_pending.aWidth = width;
+    s_pending.aHeight = height;
+    s_pending.aPath = path;
+    return true;
+}
+
 bool finishPendingCapture() {
     if (!s_pending.aPending) return false;
-    const VkDeviceSize size =
-        static_cast<VkDeviceSize>(s_pending.aWidth) * s_pending.aHeight * 4u;
+    const uint32_t w = s_pending.aWidth;
+    const uint32_t h = s_pending.aHeight;
+    const VkDeviceSize bytesPerPixel = s_pending.aHdr ? 8u : 4u;
+    const VkDeviceSize size = static_cast<VkDeviceSize>(w) * h * bytesPerPixel;
     void *mapped = nullptr;
     if (vkMapMemory(GNg::GN_Vk.device, s_pending.aMemory, 0, size, 0, &mapped) != VK_SUCCESS) {
         destroyPending();
         return false;
     }
-    std::vector<uint8_t> rgba(static_cast<size_t>(size));
-    std::memcpy(rgba.data(), mapped, static_cast<size_t>(size));
+    std::vector<uint8_t> raw(static_cast<size_t>(size));
+    std::memcpy(raw.data(), mapped, static_cast<size_t>(size));
     vkUnmapMemory(GNg::GN_Vk.device, s_pending.aMemory);
 
-    const VkFormat format = GNg::GN_Vk.swapchainFormat;
-    if (format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB) {
-        for (uint32_t i = 0; i < s_pending.aWidth * s_pending.aHeight; ++i) {
-            uint8_t tmp = rgba[i * 4 + 0];
-            rgba[i * 4 + 0] = rgba[i * 4 + 2];
-            rgba[i * 4 + 2] = tmp;
+    std::vector<uint8_t> rgba(static_cast<size_t>(w) * h * 4u);
+    if (s_pending.aHdr) {
+        const uint16_t *halfs = reinterpret_cast<const uint16_t *>(raw.data());
+        for (uint32_t i = 0; i < w * h; ++i) {
+            const float r = tonemapAcesGamma(halfToFloat(halfs[i * 4 + 0]));
+            const float g = tonemapAcesGamma(halfToFloat(halfs[i * 4 + 1]));
+            const float b = tonemapAcesGamma(halfToFloat(halfs[i * 4 + 2]));
+            rgba[i * 4 + 0] = static_cast<uint8_t>(r * 255.0f + 0.5f);
+            rgba[i * 4 + 1] = static_cast<uint8_t>(g * 255.0f + 0.5f);
+            rgba[i * 4 + 2] = static_cast<uint8_t>(b * 255.0f + 0.5f);
+            rgba[i * 4 + 3] = 255u;
+        }
+    } else {
+        std::memcpy(rgba.data(), raw.data(), raw.size());
+        const VkFormat format = GNg::GN_Vk.swapchainFormat;
+        if (format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB) {
+            for (uint32_t i = 0; i < w * h; ++i) {
+                uint8_t tmp = rgba[i * 4 + 0];
+                rgba[i * 4 + 0] = rgba[i * 4 + 2];
+                rgba[i * 4 + 2] = tmp;
+            }
         }
     }
 
-    const bool ok = writeRgbPng(s_pending.aPath.c_str(), rgba.data(),
-                                static_cast<int>(s_pending.aWidth),
-                                static_cast<int>(s_pending.aHeight));
+    const bool ok = writeRgbPng(s_pending.aPath.c_str(), rgba.data(), static_cast<int>(w),
+                                static_cast<int>(h));
     if (ok) {
-        std::printf("[cornellBox] 引擎截图: %s\n", s_pending.aPath.c_str());
+        std::printf("[cornellBox] %s: %s\n", s_pending.aHdr ? "HDR 截图" : "引擎截图",
+                    s_pending.aPath.c_str());
     }
     destroyPending();
     return ok;

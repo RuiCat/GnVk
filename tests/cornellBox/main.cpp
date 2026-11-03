@@ -236,10 +236,13 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     // 下一帧帧首写盘（两阶段；帧中直接读回会读到上一帧/未定义内容）。
     if (gCaptureRequested) {
         gCaptureRequested = false;
+        const bool captureHdr = std::getenv("CORNELL_CAPTURE_HDR") != nullptr;
         char path[256];
-        std::snprintf(path, sizeof(path), ".local/cornellbox/engine-%ld.png",
-                      static_cast<long>(std::time(nullptr)));
-        if (Cornell::requestSwapchainCapture(path)) {
+        std::snprintf(path, sizeof(path), ".local/cornellbox/%s-%ld.png",
+                      captureHdr ? "hdr" : "engine", static_cast<long>(std::time(nullptr)));
+        const bool ok = captureHdr ? Cornell::requestHdrCapture(path)
+                                   : Cornell::requestSwapchainCapture(path);
+        if (ok) {
             std::printf("[cornellBox] 截图已排队（下一帧写盘）: %s\n", path);
         } else {
             std::fprintf(stderr, "[cornellBox] 截图排队失败: %s\n", path);
