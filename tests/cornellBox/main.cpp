@@ -87,6 +87,31 @@ GN_CALL void AppInit() {
     Cornell::ensureCaptureDir();
     std::fprintf(stderr, "[cornellBox] 引擎设备硬件光追(VK_KHR_ray_query)=%s\n",
                  GNg::GN_VkRayQuerySupported() ? "on" : "off");
+    // S1 验证：用引擎 API 从 Cornell 网格构建设备场景 AS（GI 的 ray query 前置）。
+    if (GNg::GN_VkRayQuerySupported()) {
+        GNg::GN_VkRayQueryBeginScene();
+        for (size_t i = 0; i < Cornell::gMeshes.size(); ++i) {
+            const Cornell::sMesh &m = Cornell::gMeshes[i];
+            if (m.aVertices.empty() || m.aIndices.size() < 3) continue;
+            std::vector<float> positions(m.aVertices.size() * 3u);
+            std::vector<float> normals(m.aVertices.size() * 3u);
+            for (size_t v = 0; v < m.aVertices.size(); ++v) {
+                positions[v * 3 + 0] = m.aVertices[v].px;
+                positions[v * 3 + 1] = m.aVertices[v].py;
+                positions[v * 3 + 2] = m.aVertices[v].pz;
+                normals[v * 3 + 0] = m.aVertices[v].nx;
+                normals[v * 3 + 1] = m.aVertices[v].ny;
+                normals[v * 3 + 2] = m.aVertices[v].nz;
+            }
+            GNg::GN_VkRayQueryAddMesh(positions.data(), normals.data(), m.aIndices.data(),
+                                      static_cast<uint32_t>(m.aVertices.size()),
+                                      static_cast<uint32_t>(m.aIndices.size()),
+                                      static_cast<uint32_t>(i));
+        }
+        const bool asOk = GNg::GN_VkRayQueryEndScene();
+        std::fprintf(stderr, "[cornellBox] 引擎场景 AS=%s tlas=%p\n", asOk ? "ok" : "FAIL",
+                     (void *)GNg::GN_VkRayQuerySceneTlas());
+    }
     // 默认开启 GI/SSGI：Cornell 程序的目的就是看间接光；A/S 留给相机移动，GI 键改用 O/P/I/K。
     Cornell::gEngineGiOn = true;
     Cornell::gSsaoOn = true;

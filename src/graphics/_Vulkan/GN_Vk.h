@@ -426,6 +426,18 @@ void GN_VkShutdown();
 void GN_VkResize(int w, int h);
 // 引擎设备是否支持并已启用硬件光追（VK_KHR_acceleration_structure + VK_KHR_ray_query）。
 bool GN_VkRayQuerySupported();
+
+// ── 场景加速结构（GI 用）────────────────────────────────────────
+// 用法：BeginScene → 若干 AddMesh(world-space) → EndScene（构建 BLAS/TLAS）→
+//       SceneReady() 为 true 后，shader 可用 SceneTlas() 做 ray query。
+// v1 只支持静态场景；场景变化需 DestroyScene 后重建。
+bool GN_VkRayQueryBeginScene();
+void GN_VkRayQueryAddMesh(const float *positions, const float *normals, const uint32_t *indices,
+                          uint32_t vertexCount, uint32_t indexCount, uint32_t materialId);
+bool GN_VkRayQueryEndScene();
+bool GN_VkRayQuerySceneReady();
+VkAccelerationStructureKHR GN_VkRayQuerySceneTlas();
+void GN_VkRayQueryDestroyScene();
 bool GN_VkBeginFrame();
 void GN_VkEndFrame();
 

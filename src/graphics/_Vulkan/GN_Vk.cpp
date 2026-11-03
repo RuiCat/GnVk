@@ -552,6 +552,7 @@ void GN_VkBegin2DPass() {
 void GN_VkShutdown() {
     if(!GN_Vk.initialized) return;
     vkDeviceWaitIdle(GN_Vk.device);
+    GN_VkRayQueryDestroyScene();
     // P1b：缓存持有的管线必须先于 renderPass / VkDevice 销毁
     GN_Vk.aPipelineCache.Release();
 #ifdef GN_USING_3D
