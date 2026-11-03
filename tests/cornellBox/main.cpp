@@ -129,19 +129,16 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     (void)nTime;
     if (!Cornell::gLight) return;
 
-    float aspect = 1280.0f / 800.0f;
+    // 相机 aspect 必须跟「实际渲染目标」= swapchain 一致，而不是窗口 framebuffer：
+    // niri 会把窗口 tile 成竖长条（1122x1459），但 swapchain 仍是 1280x800，
+    // 若用 framebuffer 的 aspect，视口会变成窄竖条、只见背面墙。
     int fbWidth = 1280;
     int fbHeight = 800;
-    if (::GT_MainWindow) {
-        int width = 0;
-        int height = 0;
-        glfwGetFramebufferSize(::GT_MainWindow, &width, &height);
-        if (width > 0 && height > 0) {
-            aspect = static_cast<float>(width) / static_cast<float>(height);
-            fbWidth = width;
-            fbHeight = height;
-        }
+    if (GNg::GN_Vk.swapchainExtent.width > 0u && GNg::GN_Vk.swapchainExtent.height > 0u) {
+        fbWidth = static_cast<int>(GNg::GN_Vk.swapchainExtent.width);
+        fbHeight = static_cast<int>(GNg::GN_Vk.swapchainExtent.height);
     }
+    float aspect = static_cast<float>(fbWidth) / static_cast<float>(fbHeight);
 
     // T = CPU 软光追预览；Y = GPU compute 软光追预览（同一套 ray-scene 求交，
     // 优先用 GPU，初始化/渲染失败时自动回退 CPU，保证没有 GPU 也能看）。

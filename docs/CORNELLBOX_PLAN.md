@@ -252,12 +252,17 @@ GN_VkDeferredLighting(viewProj, camera, lightUBO)  // 内部自动 composite
   上一帧/未定义内容（实测品红条纹）。两阶段读回已修复该时序问题。
 - BGRA 时交换 R/B；行按 Vulkan 图像顺序（top-down）写，无需翻转。
 - `CORNELL_CAPTURE_ENGINE=1`：引擎模式隐藏 HUD、渲染 30 帧后自动 F12 并退出（无人值守对拍）。
-- **引擎模式已修复（2026-11-03）**：此前「品红条纹」有两个根因——
+- **引擎模式已修复（2026-11-03）**：三个根因——
+  (3) 相机 aspect 误用窗口 framebuffer（niri 把窗口 tile 成 1122x1459 竖条，但 swapchain 仍 1280x800），
+  导致视口窄竖条、只见背面墙；已改用 swapchain extent 的 aspect。
+  此前「品红条纹」有两个根因——
   (1) 程序化网格 `inTangent=0`，`gn3d_gbuffer.vert` 里 `normalize(0)` 产生 NaN，污染法线
   （G-Buffer 法线附件恒黑），延迟光照输出垃圾；已在 vert 加零切线回退。
   (2) 引擎 swapchain 是 **RGBA16F**（格式 97），旧截图按 RGBA8 读回导致品红；已按半精度解码。
   修复后引擎模式正常渲染（本机 tall 窗口 aspect≈0.769，pose 0 只见背面白墙）。
-  `engine vs PT` 需把 PT 渲染成与引擎窗口相同的 extent/aspect 再对比。
+  `engine vs PT`：PT 1280x800 pose0 sun 64spp 对比引擎截图 → **RMSE=20.678 / MAE=17.942 / max=177
+  （0..255），signed mean R=19.95 G=18.76 B=14.35（ref-test，PT 略亮）**。差值来自 SSGI/SSAO/IBL
+  对间接光的近似 vs 路径追踪 ground truth，属预期量级。
 
 ---
 
@@ -408,7 +413,7 @@ make unit
 | 阶段 | 状态 | 证据 |
 |---|---|---|
 | C0 骨架 | ✅ 代码级（编译通过） | `tests/cornellBox/` 资源 + `make cornellBox` exit 0；自由相机 + 5 面墙/2 球 + 方向光 |
-| C1 引擎 GI | ✅ 代码级（已修，待桌面目视复验） | 延迟路径 + `GN_VkSSAOPass/SSGIPass/UpdateProbes`；法线 NaN 与 HDR 截图误读均已修；tall 窗口 aspect 下 pose 0 只见背面墙 |
+| C1 引擎 GI | ✅ 真机实测 | 延迟路径 + `GN_VkSSAOPass/SSGIPass/UpdateProbes`；法线 NaN / HDR 截图误读 / 相机 aspect 均已修；engine vs PT(sun) RMSE=20.7、MAE=17.9 |
 | C2 PT 参考 | ✅ 代码级（CPU 本机实测） | `make cornellPt` / `make cornellCompare` exit 0；PNG 产出与红/绿渗色统计通过；引擎对拍待桌面截图 |
 | C2.5 CPU 软件光追预览 | ✅ 代码级 + CPU 实测 | `T` 切换；`make cornellRtProbe` mean≈(163,204,174)、nonBlack=100%；320×200≈30 ms |
 | C2.6 GPU compute 光追预览 | ✅ 真机实测 | `Y` 切换；`make cornellGpuRtProbe` PASS：与 CPU 同 seed 逐像素 MAE=0.000、累积 32 帧噪声降 5.72×；640×400 8/32/64/128 spp = 7.3/12.9/14.9/24.7 ms |
