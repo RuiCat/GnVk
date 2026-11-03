@@ -59,7 +59,9 @@
 ### 1.2 本文不做什么
 
 - 不改任何源码；不新增 API；不冻结新契约（所有 UBO/资源布局在实现阶段另行冻结）。
-- 不做硬件光追落地（`LIGHTING_PLAN §0.2` 已判远期），只保留「以后可替换的 ray 后端」接口设计。
+- 不做**引擎渲染路径**的硬件光追落地（`LIGHTING_PLAN §0.2` 已判远期），只保留「以后可替换的 ray 后端」接口设计。
+  （2026-11-03 补充：独立测试程序 `tests/cornellBox` 已接 `VK_KHR_ray_query` 预览，见 `CORNELLBOX_PLAN.md` §4.2/§12；
+  它不改引擎 GI 路径，只作为硬件 RT 管线与对拍验证载体。）
 - 不做离线烘焙 lightmap（场景运行时加载、天气动态，`GI_PLAN §0`）。
 
 ---
@@ -80,7 +82,7 @@
 | 8 | 云 | 盒内 raymarch（20 步，云盖 16 步）；太阳方向 1 次密度采样；预乘 alpha、深度写关 | `gn3d_cloud_cube.frag:29-33,124-161`；`vkCloudCube.cpp:67-86` | 自阴影近似 |
 | 9 | 时域 | 无 TAA、无 velocity 附件；只有单帧双边 | `gn3d_ssgi_denoise.frag`；全仓无 TAA/velocity 资源 | 缺失 |
 | 10 | 计算管线 | `vkCmdDispatch` 已有 4 处调用（粒子/布料/大气 LUT） | `vkParticleCompute.cpp:312`；`vkClothCompute.cpp:306,319`；`vkAtmosphereLut.cpp:524` | 可用 |
-| 11 | 硬件光追 | 无 `VK_KHR_ray*`、无加速结构 | `grep -rniE 'ray_query|accelerationstructure|raytracing' src` → 无输出 | 无 |
+| 11 | 硬件光追 | 引擎 `src/` 无 `VK_KHR_ray*`、无加速结构；测试程序 `tests/cornellBox` 已接 ray query 预览（2026-11-03） | `grep -rniE 'ray_query|accelerationstructure|raytracing' src` → 无输出；`grep -rn 'rayQuery' tests/cornellBox` → 有 | 引擎侧无 |
 | 12 | 场景求交 | CPU 静态 AABB BVH，支持射线查询，但**只有盒**、未接 GI | `GN_SpatialBVH.cpp:161`；`GN_Spatial.cpp:272` | 未接线 |
 | 13 | 应用消费 | 唯一查看器走前向 PBR，只开 GI IBL；SSAO/SSGI/探针只在 gpuCheck 调用且默认关 | `mmdViewer.cpp:409-411,479-489`；`gpuCheck3D.cpp:312-316` | 「做了看不到」 |
 | 14 | 帧并发 | 只有一条 `inFlightFence`；时域历史必须双缓冲 | `GN_Vk.cpp:478` | 约束 |
@@ -217,6 +219,8 @@ furnace test 误差 < 1%；与离线参考帧的相对误差比当前下降（�
 - 保留 `rayScene` 抽象：DDGI/SSGI/SSR 只依赖「trace(origin, dir) → hit」接口；
   以后可把 AABB BVH 换成 `VK_KHR_acceleration_structure` + ray query，而不改上层。
 - 硬件 RT 的额外工作：AS 构建/更新、BLAS/TLAS、descriptor、驱动门槛、降噪；`GI_PLAN §3-D` 已判远期。
+- 2026-11-03：`tests/cornellBox` 已用独立设备 + BLAS/TLAS + ray query 做完「同一套 Cornell 场景」的
+  硬件预览与 CPU 对拍（MAE=0.015），验证了管线与着色器；引擎侧接入仍需按上面的接口抽象推进。
 
 ### 3.9 成本与风险（GI）
 
@@ -418,7 +422,7 @@ bash ~/.dsh/skills/code-modularity/scripts/lintCodeModularity.sh docs --naming -
 ### 6.2 当前状态的复算锚点
 
 ```bash
-# 无硬件光追
+# 引擎渲染路径无硬件光追（测试程序 tests/cornellBox 已有 ray query 预览）
 grep -rniE 'ray_query|rayquery|accelerationstructure|raytracing' src
 
 # compute dispatch 已存在
