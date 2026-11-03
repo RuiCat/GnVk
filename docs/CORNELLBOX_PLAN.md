@@ -225,6 +225,7 @@ GN_VkDeferredLighting(viewProj, camera, lightUBO)  // 内部自动 composite
   的设备（引擎设备未开这些扩展）；`cornellRtAs.cpp` 把同一份几何三角化（球 16×32 段，共 2058 三角形）并建
   BLAS + 单实例 TLAS；`gn_cornell_rq.comp` 用 ray query 打主射线/阴影射线/反射，按 primitive 取材质并插值法线。
   与 `Y` 共用累积/回读/显示逻辑；初始化失败回退 `Y`（再失败回退 `T`）。
+  背面/掠射命中的数值退化按 miss 处理（避免金属球轮廓出现黑点污染累积）。
 - HUD 用引擎 2D 叠层（`GN_VkBegin2DPass` + 文本），不引入 ImGui。
 - 叠层显示：位姿、光照变体、IBL/SSAO/SSGI 状态、快捷键。
 
@@ -404,7 +405,7 @@ make unit
 | C2 PT 参考 | ✅ 代码级（CPU 本机实测） | `make cornellPt` / `make cornellCompare` exit 0；PNG 产出与红/绿渗色统计通过；引擎对拍待桌面截图 |
 | C2.5 CPU 软件光追预览 | ✅ 代码级 + CPU 实测 | `T` 切换；`make cornellRtProbe` mean≈(163,204,174)、nonBlack=100%；320×200≈30 ms |
 | C2.6 GPU compute 光追预览 | ✅ 真机实测 | `Y` 切换；`make cornellGpuRtProbe` PASS：与 CPU 同 seed 逐像素 MAE=0.000、累积 32 帧噪声降 5.72×；640×400 8/32/64/128 spp = 7.3/12.9/14.9/24.7 ms |
-| C2.7 硬件 ray-query 预览 | ✅ 真机实测 | `U` 切换；`make cornellHwRtProbe` PASS：与 CPU 同 seed MAE=0.015（maxDiff=9）、累积 32 帧噪声降 5.72×；640×400 8/32/64 spp = 8.8/17.9/30.4 ms（小场景 BVH 无速度优势，验证的是管线正确性） |
+| C2.7 硬件 ray-query 预览 | ✅ 真机实测 | `U` 切换；`make cornellHwRtProbe` PASS：与 CPU 同 seed MAE=0.015（maxDiff=9）、累积 32 帧噪声降 5.72×、长累积 0 黑点；640×400 8/32/64 spp = 8.8/17.9/30.4 ms（小场景 BVH 无速度优势，验证的是管线正确性） |
 | C3 DDGI | ⬜ 未开始 | 依赖 S2/S3 |
 | C4 盒内雾 | ⬜ 未开始 | 依赖 T1/T2 |
 
