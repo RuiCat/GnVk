@@ -74,7 +74,9 @@ struct sModelData {
 struct sConvertOptions {
     std::string aShowFilter; // 非空时只保留命中该列表的网格
     std::string aHideFilter; // 命中该列表的网格一律跳过
-    bool aForceOpaque;       // 调试：忽略 alpha，全部按 OPAQUE 画（区分"纹理黑"与"镂空")
+    bool aForceOpaque;       // 调试：忽略 alpha，全部按 OPAQUE 画（区分"纹理黑"与"镂空"）
+    bool aRecenter;          // true = 脚底 y=0、水平 xz 居中（单角色）；房间等世界坐标组装要关
+    bool aClassifyAlpha;     // true = 不信 glTF alphaMode，按贴图 alpha 统计重判（静态场景）
 
     sConvertOptions();
     // 说明见字段注释。

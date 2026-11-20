@@ -290,6 +290,29 @@ imoSceneAsset:
 		"$(IMO_SCENE_FBX)" "$(IMO_SCENE_ASSET)"
 	@echo "$(GREEN)✅ 资产: $(IMO_SCENE_ASSET)$(RESET)"
 
+# 场景（房间背景）：从游戏数据里把 level1 的可见静态网格按材质合并成 GLB。
+# 依赖外部提取管线（UnityPy venv + Blender），数据在提取资源盘、产物仍落 .local/。
+IMO_UNITY_EXTRACT ?= /run/media/ruicat/9294E1A394E18A55/游戏/.unity-extract
+IMO_ROOM_DATA     ?= /run/media/ruicat/9294E1A394E18A55/游戏/新生活は妹ちゃんと!ver1.8/新生活は妹ちゃんと!_Data
+IMO_ROOM_PAYLOAD  ?= .local/imoScene/room
+IMO_ROOM_ASSET    ?= .local/imoScene/room.glb
+
+.PHONY: imoRoomAsset
+imoRoomAsset:
+	@command -v blender >/dev/null 2>&1 || (echo "$(YELLOW)缺少 Blender，无法装配场景 GLB$(RESET)"; exit 1)
+	@test -x "$(IMO_UNITY_EXTRACT)/venv/bin/python" || (echo "$(YELLOW)缺少提取管线 venv: $(IMO_UNITY_EXTRACT)/venv$(RESET)"; exit 1)
+	@echo "$(YELLOW)🧩 场景 → 中间产物: $(IMO_ROOM_DATA)$(RESET)"
+	"$(IMO_UNITY_EXTRACT)/venv/bin/python" "$(IMO_UNITY_EXTRACT)/pipeline/sceneExport.py" \
+		"$(IMO_ROOM_DATA)" "$(IMO_ROOM_PAYLOAD)"
+	@echo "$(YELLOW)🧩 中间产物 → GLB$(RESET)"
+	blender -b --factory-startup --python "$(IMO_UNITY_EXTRACT)/pipeline/sceneBlender.py" -- \
+		"$(IMO_ROOM_PAYLOAD)" "$(IMO_ROOM_ASSET)"
+	@echo "$(GREEN)✅ 场景资产: $(IMO_ROOM_ASSET)$(RESET)"
+
+# 一次生成两份资产（角色 + 房间）。
+.PHONY: imoSceneAssets
+imoSceneAssets: imoSceneAsset imoRoomAsset
+
 # ── Cornell Box 测试程序（独立场景/相机；编译不依赖 GPU）──────────
 CORNELL_SRC   := tests/cornellBox/main.cpp tests/cornellBox/cornellScene.cpp \
                  tests/cornellBox/cornellCamera.cpp tests/cornellBox/cornellHud.cpp \

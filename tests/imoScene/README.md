@@ -1,21 +1,25 @@
 # imoScene — 新生活は妹ちゃんと! / imo_chan 单角色场景
 
-从 Unity 提取资源（`models/imo_chan/imo_chan.fbx`）建立的一个 GnVk 场景程序：
-一个角色（导入姿势）+ 地面 + 天空盒 + 方向光/补光 + 轨道相机。
+从 Unity 提取资源建立的一个 GnVk 场景程序：一个角色（导入姿势）站在游戏原场景的房间里
+（`room.glb`：level1 的可见静态网格，按材质合并）+ 天空盒 + 方向光/吸顶灯补光 + 轨道相机。
+房间缺失时自动降级为“角色 + 虚拟地面”。
 
 ## 构建与运行
 
 ```bash
-# 1. 资产：FBX → GLB（需要 Blender；输出落在 .local/，不入库）
-make imoSceneAsset
+# 1. 资产（需要 Blender；输出落在 .local/，不入库）
+make imoSceneAsset   # 角色：FBX → GLB
+make imoRoomAsset    # 房间：游戏数据 level1 → GLB（走外部提取管线的 UnityPy venv）
+make imoSceneAssets  # 一次生成两份
 
 # 2. 编译场景程序（依赖 libGN_mini.so）
 make imoScene
 
 # 3. 运行（需要 Vulkan 设备与窗口；本仓库开发机可能没有 /dev/dri）
 LD_LIBRARY_PATH=. ./build/imoScene
-# 换模型：
+# 换模型 / 换房间 / 不要房间：
 IMO_SCENE_MODEL=/path/to/other.glb LD_LIBRARY_PATH=. ./build/imoScene
+IMO_SCENE_ROOM=/path/to/room.glb IMO_SCENE_NO_ROOM=1 LD_LIBRARY_PATH=. ./build/imoScene
 ```
 
 `make imoSceneAsset` 的默认输入/输出可用变量覆盖：
@@ -24,7 +28,26 @@ IMO_SCENE_MODEL=/path/to/other.glb LD_LIBRARY_PATH=. ./build/imoScene
 make imoSceneAsset \
   IMO_SCENE_FBX="/path/to/imo_chan.fbx" \
   IMO_SCENE_ASSET=".local/imoScene/imo_chan.glb"
+
+# 房间导出：数据目录 / 管线位置 / 中间产物 / 产物都可覆盖
+make imoRoomAsset \
+  IMO_UNITY_EXTRACT="/path/to/.unity-extract" \
+  IMO_ROOM_DATA="/path/to/<游戏>_Data" \
+  IMO_ROOM_PAYLOAD=".local/imoScene/room" \
+  IMO_ROOM_ASSET=".local/imoScene/room.glb"
 ```
+
+## 环境变量
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `IMO_SCENE_MODEL` | `.local/imoScene/clothes_imo_chan.glb` | 角色 GLB |
+| `IMO_SCENE_ROOM` | `.local/imoScene/room.glb` | 房间 GLB（游戏场景静态网格） |
+| `IMO_SCENE_NO_ROOM` | 未设 | `=1` 关闭房间，退回“角色 + 虚拟地面” |
+| `IMO_SCENE_INSPECT` | 未设 | `=1` 只自检角色；`=room` 只自检房间（不建窗口/不初始化 Vulkan） |
+| `IMO_SCENE_HIDE` / `IMO_SCENE_SHOW` | `Kemo_Body,Jirai` / 空 | 网格名子串过滤（只作用于角色） |
+| `IMO_SCENE_NO_TEXTURES` / `IMO_SCENE_MAX_MESHES` | 关 / 0 | 贴图与网格数的最小化二分开关 |
+| `IMO_SCENE_FORCE_OPAQUE` / `IMO_SCENE_ALBEDO` / `IMO_SCENE_EV` | 关 / 关 / -0.5 | 材质与光照诊断 |
 
 ## 操作
 
@@ -74,13 +97,16 @@ free -h; lspci -nn | grep -i vga                   # 内存与 GPU
 ## 管线与模块
 
 ```text
-imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoScene/imo_chan.glb
+imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoScene/clothes_imo_chan.glb
         │
-        ├─ imoSceneConvert   glTF 导入 → 蒙皮 CPU 烘焙 → 重定心（脚底 y=0、xz 居中）
+游戏数据 level1 ──(.unity-extract/pipeline/sceneExport.py → sceneBlender.py)──▶ .local/imoScene/room.glb
+        │
+        ├─ imoSceneConvert   glTF 导入 → 蒙皮 CPU 烘焙 → 重定心（角色；房间不重定心）
         │                    贴图 alpha 统计 → 材质 OPAQUE / MASK / BLEND
         ├─ imoSceneUpload    sModelData → cMODEL / sIMAGE（ImageLoadFromMem，需引擎已初始化）
+        ├─ imoSceneRoom      房间的路径配置 / 转换 / 上传（可缺省）
         ├─ imoSceneCamera    轨道相机与输入
-        └─ imoSceneMain      引擎回调、光照、地面、3D pass 主循环
+        └─ imoSceneMain      引擎回调、光照、地面、3D pass 主循环（房间先画、角色后画）
 ```
 
 | 文件 | 一句话职责 |
@@ -88,8 +114,11 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
 | `imoSceneConvert.h/.cpp` | glTF → 烘焙网格/材质/贴图（CPU，无 Vulkan） |
 | `imoSceneUpload.h/.cpp` | CPU 数据 → 引擎对象与贴图上传 |
 | `imoSceneCamera.h/.cpp` | 轨道相机与输入映射 |
-| `imoSceneMain.cpp` | 入口、光照、地面、绘制 |
+| `imoSceneRoom.h/.cpp` | 房间背景：路径配置、转换选项、加载上传 |
+| `imoSceneMain.cpp` | 入口、光照、地面、绘制（房间 → 角色） |
 | `tools/assetconvert/fbx2glb.py` | Blender 无头 FBX → GLB（保留 skin/贴图，不导动画） |
+| `.unity-extract/pipeline/sceneExport.py` | Unity 场景静态网格 → 按材质合并的 npz + 贴图（仓库外） |
+| `.unity-extract/pipeline/sceneBlender.py` | 中间产物 → `room.glb`（仓库外） |
 
 ## 关键决策
 
@@ -120,11 +149,31 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
 `textures/ImoBody_NL_*.png`（人体皮肤图集）；用 Body_SKIN 网格的 UV 采样该图，alpha 覆盖率 100%、
 RGB 为正常肤色，确认是正确的贴图。转换日志会打印 `FBX2GLB remap: Body_00_SKIN -> ...`。
 
+## 房间背景（游戏场景 level1）
+
+`make imoRoomAsset` 从游戏数据里取 level1 场景的**可见**静态网格（MeshRenderer + MeshFilter）：
+
+- 680 个 MeshRenderer → 509 个 `m_IsActive`，再排除父链未激活（302）、`m_Enabled=false`（165）、
+  无 MeshFilter（2）与角色子树（1）后，实际导出 **211 个渲染器**；
+- 按材质合并成 **66 个网格 / 45,595 顶点 / 47,602 三角形 / 64 材质 / 59 贴图**，`room.glb` 约 10 MB；
+- 坐标：Unity 世界坐标（`matrixFromTrs` 累积到场景根）→ `(x, -z, y)` 转 Blender → **减去角色根世界位置**
+  （`imo_chan` ≈ `(0.006, 0, 1.512)`），于是角色根就是原点、角色与房间天然对齐；
+- **两处坐标陷阱**（都在导出脚本里处理）：
+  1. 静态合并网格（名字 `Combined Mesh (root: scene) N`）的顶点已经烘进场景根世界坐标，
+     渲染器自身却挂着建库时的单位换算节点（scale 80–120）——必须按单位矩阵处理，否则整栋房子放大百倍；
+  2. 房间与角色共用世界坐标，因此房间转换时 `aRecenter=false`；角色仍按 AABB 重定心（脚底 y=0）。
+- alpha：Blender 导出的场景材质全是 `OPAQUE`，玻璃/窗纱/软垫的透明从贴图 alpha 反推
+  （`aClassifyAlpha=true`，沿用角色那套规则），本场景实际分布 `OPAQUE=43 / MASK=15 / BLEND=6`；
+- 房间在 3D pass 里先画、角色后画；房间加载成功时**不再画**那块 60×60 虚拟地面（会与木地板 z-fighting）；
+  光照额外加两盏吸顶灯点光，方向光保留。
+
+Blender CPU 预览（引擎默认取景近似）：`.local/imoScene/render_room_default2.png`。
+
 ## 边界
 
 - 不做动画播放：humanoid muscle-clip 没有离线关键帧（见提取报告），本场景是静态导入姿势；
 - 不做阴影、后处理调节、HUD 叠层；
-- 只用于单角色验证，未接入场景文件格式/多模型摆放；
+- 只有“角色 + 房间”两份 GLB 的手工装配，未接入场景文件格式；房间只含可见静态网格（无动态物体）；
 - 本次开发机无 Vulkan 设备（`/dev/dri` 缺失），已完成的验证是：`make imoScene` 编译通过 +
   CPU 探针（`buildModelFromGltf` 的真实代码路径）统计；**画面效果需在有 GPU 的机器上运行确认**。
 
@@ -132,7 +181,11 @@ RGB 为正常肤色，确认是正确的贴图。转换日志会打印 `FBX2GLB 
 
 ```text
 make imoScene                                     # 编译通过（0 error）
-probeConvert .local/imoScene/imo_chan.glb         # meshes=60 verts=129951 tris=193318
-                                                  # height=1.851 zeroWeight=0 badIndex=0 nanVertex=0
-lintCodeModularity tests/imoScene tools/assetconvert --naming --comments   # 0 违规 / 0 告警
+make imoRoomAsset                                 # SCENE level1 renderers 211 groups 66 verts 45595 tris 47602
+                                                  # SCENEBLENDER objects=66 verts=45595 tris=47602 bytes=10147660
+IMO_SCENE_INSPECT=1    ./build/imoScene           # 角色 meshes=43 verts=95085 height=1.624 alpha OPAQUE=22 MASK=10
+IMO_SCENE_INSPECT=room ./build/imoScene           # 房间 meshes=66 verts=76694 tris=47586 textures=59
+                                                  # AABB x=[-13.06,8.37] y=[-2.17,3.35] z=[-8.49,5.62]
+                                                  # alpha OPAQUE=43 MASK=15 BLEND=6
+lintCodeModularity tests/imoScene --naming --comments   # 0 违规 / 0 告警
 ```

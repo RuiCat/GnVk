@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-20 — imoScene 接入游戏场景房间背景（room.glb）
+
+- 新增场景导出：`.unity-extract/pipeline/sceneExport.py` 从游戏数据 level1 取可见静态网格
+  （211 个渲染器：排除父链未激活 302 / `m_Enabled=false` 165 / 无 MeshFilter 2 / 角色子树 1），
+  烘世界坐标并按材质合并 → 66 网格 / 45,595 顶点 / 47,602 三角形 / 64 材质 / 59 贴图；
+  `sceneBlender.py` 装配成 `.local/imoScene/room.glb`（10.1 MB）。
+- 两处坐标修正：静态合并网格 `Combined Mesh (root: scene) N` 的顶点已烘进场景根世界坐标，
+  渲染器自带的单位换算节点（scale 80–120）必须忽略；房间不重定心（`aRecenter=false`），
+  顶点整体平移到角色根（`imo_chan` ≈ (0.006, 0, 1.512)）为原点，角色与房间天然对齐。
+- `imoSceneConvert` 增加 `aRecenter` / `aClassifyAlpha`：场景材质 glTF 全是 OPAQUE，
+  玻璃/软垫只能按贴图 alpha 统计重判（实际 OPAQUE=43 / MASK=15 / BLEND=6）；
+  不重定心的模型也汇总 AABB（此前 `aMin/aMax` 只在重定心时填写）。
+- 新增 `imoSceneRoom`（房间配置/转换/上传）与 `IMO_SCENE_ROOM` / `IMO_SCENE_NO_ROOM` 环境变量；
+  3D pass 里房间先画、角色后画；房间存在时不画 60×60 虚拟地面（否则与木地板 z-fighting），
+  光照补两盏吸顶灯点光。
+- Makefile 新增 `imoRoomAsset` / `imoSceneAssets`（外部 UnityPy 管线路径可覆盖）。
+- 验证：`make imoScene` 0 error；`IMO_SCENE_INSPECT=room` → 66 网格 / 76,694 顶点 / 47,586 三角形 / 59 贴图；
+  Blender CPU 预览 `.local/imoScene/render_room_default2.png`；真机画面待有 GPU 的机器确认。
+
 ## 2026-11-20 — imo_chan 单角色场景程序（glTF 资产 + CPU 蒙皮烘焙）
 
 新增 `tests/imoScene/`：从 Unity 提取资源 `models/imo_chan/imo_chan.fbx` 建立可运行场景

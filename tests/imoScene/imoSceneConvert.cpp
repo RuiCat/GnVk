@@ -306,14 +306,18 @@ void bakeMaterials(const GN3d::sASSET &asset, const sConvertOptions &options,
         material.aAlphaCutoff = ALPHA_CUTOFF;
         const bool hasTexture = source.aAlbedoTexture >= 0 &&
                                 static_cast<size_t>(source.aAlbedoTexture) < out.aTextures.size();
+        // 静态场景的 glTF 材质全是 OPAQUE（Blender 导出未标混合），玻璃/窗纱/软垫的透明
+        // 只能从贴图 alpha 反推；resolveAlphaMode 以 BLEND 为输入时才会走那套重判规则。
+        const GN3d::eALPHA_MODE sourceMode =
+            options.aClassifyAlpha ? GN3d::eALPHA_BLEND : source.aAlphaMode;
         if (options.aForceOpaque) {
             material.aAlphaMode = GN3d::eALPHA_OPAQUE;
         } else if (hasTexture) {
             material.aAlphaMode =
                 resolveAlphaMode(out.aTextures[static_cast<size_t>(source.aAlbedoTexture)],
-                                 source.aAlphaMode);
+                                 sourceMode);
         } else {
-            material.aAlphaMode = source.aAlphaMode;
+            material.aAlphaMode = sourceMode;
         }
     }
     if (out.aMaterials.empty()) {
@@ -321,6 +325,29 @@ void bakeMaterials(const GN3d::sASSET &asset, const sConvertOptions &options,
         fallback.aName = "fallback";
         out.aMaterials.push_back(fallback);
     }
+}
+
+// 只汇总 AABB（不重定心）：房间这类保持世界坐标的模型也要有可打印的包围盒。
+void updateModelBounds(sModelData &out) {
+    GNg::sVEC3 minimum = {1.0e30f, 1.0e30f, 1.0e30f};
+    GNg::sVEC3 maximum = {-1.0e30f, -1.0e30f, -1.0e30f};
+    for (size_t meshIndex = 0; meshIndex < out.aMeshes.size(); ++meshIndex) {
+        const sMeshData &mesh = out.aMeshes[meshIndex];
+        if (mesh.aVertices.empty()) {
+            continue;
+        }
+        if (mesh.aMin.x < minimum.x) minimum.x = mesh.aMin.x;
+        if (mesh.aMin.y < minimum.y) minimum.y = mesh.aMin.y;
+        if (mesh.aMin.z < minimum.z) minimum.z = mesh.aMin.z;
+        if (mesh.aMax.x > maximum.x) maximum.x = mesh.aMax.x;
+        if (mesh.aMax.y > maximum.y) maximum.y = mesh.aMax.y;
+        if (mesh.aMax.z > maximum.z) maximum.z = mesh.aMax.z;
+    }
+    if (minimum.x > maximum.x) {
+        return;
+    }
+    out.aMin = minimum;
+    out.aMax = maximum;
 }
 
 // 重定心：脚底 y=0、水平中心 xz=0；同步平移每个网格顶点与 AABB。
@@ -368,7 +395,8 @@ void recenterModel(sModelData &out) {
 
 } // namespace
 
-sConvertOptions::sConvertOptions() : aForceOpaque(false) {}
+sConvertOptions::sConvertOptions()
+    : aForceOpaque(false), aRecenter(true), aClassifyAlpha(false) {}
 
 sMeshData::sMeshData() : aMaterial(-1) {
     aMin.x = aMin.y = aMin.z = 0.0f;
@@ -445,7 +473,11 @@ bool buildModelFromGltf(const char *path, sModelData &out, std::string &error,
             mesh.aMaterial = -1;
         }
     }
-    recenterModel(out);
+    if (options.aRecenter) {
+        recenterModel(out);
+    } else {
+        updateModelBounds(out);
+    }
     return true;
 }
 

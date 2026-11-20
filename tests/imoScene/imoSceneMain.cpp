@@ -7,6 +7,7 @@
 // 边界：只显示导入姿势（蒙皮已 CPU 烘焙），不做动画播放、阴影与后处理参数调节。
 
 #include "imoSceneCamera.h"
+#include "imoSceneRoom.h"
 #include "imoSceneUpload.h"
 
 #include "GN_3Dlight.h"
@@ -29,9 +30,11 @@ const float GROUND_Y = -0.002f;
 // 主循环 dt 上限：窗口拖拽/断点会给出异常大的 nTime 差值。
 const float MAX_FRAME_SECONDS = 0.1f;
 
-imoScene::sSceneModel gScene;
+imoScene::sSceneModel gScene;   // 角色
+imoScene::sSceneModel gRoom;    // 房间背景（游戏场景静态网格，可选）
 GN3d::cLIGHT *gLight = 0;
 bool gLoaded = false;
+bool gRoomLoaded = false;
 unsigned int gLastTick = 0;
 
 // 一块 60×60 m 的地面（PBR 管线；法线 +Y、UV 铺满一块）。
@@ -76,6 +79,14 @@ void initLights() {
     const GNg::sVEC3 sunDirection = {-0.35f, -0.85f, 0.4f};
     const GNg::sVEC3 sunColor = {1.0f, 0.97f, 0.92f};
     gLight->AddDirectional(sunDirection, sunColor, 0.8f, false);
+    // 室内是吸顶灯照明：方向光没有阴影，加点光补房间的暖色近距离照明（吊顶高度 2.6 m）。
+    if (gRoomLoaded) {
+        const GNg::sVEC3 lampColor = {1.0f, 0.92f, 0.82f};
+        const GNg::sVEC3 lampAboveChar = {0.0f, 2.3f, 0.3f};
+        const GNg::sVEC3 lampAboveKitchen = {2.5f, 2.3f, -3.2f};
+        gLight->AddPoint(lampAboveChar, 8.0f, lampColor, 2.0f);
+        gLight->AddPoint(lampAboveKitchen, 8.0f, lampColor, 1.4f);
+    }
 }
 
 // 环境变量 → 转换选项（IMO_SCENE_SHOW / IMO_SCENE_HIDE，逗号分隔的子串）。
@@ -113,12 +124,22 @@ int runInspectIfRequested() {
     if (mode == 0 || mode[0] == '\0' || mode[0] == '0') {
         return -1;
     }
-    const char *fromEnv = std::getenv("IMO_SCENE_MODEL");
-    const char *path = (fromEnv != 0 && fromEnv[0] != '\0') ? fromEnv : DEFAULT_MODEL_PATH;
-    std::printf("[imoScene] inspect 模型: %s\n", path);
+    const bool roomMode = std::strncmp(mode, "room", 4) == 0;
+    const char *fromEnv = std::getenv(roomMode ? "IMO_SCENE_ROOM" : "IMO_SCENE_MODEL");
+    // 默认房间路径是临时 std::string 的成员，先落到本地再取指针，避免悬垂。
+    const std::string roomDefault = roomMode ? imoScene::roomOptionsFromEnv().aPath : std::string();
+    const char *path = DEFAULT_MODEL_PATH;
+    if (fromEnv != 0 && fromEnv[0] != '\0') {
+        path = fromEnv;
+    } else if (roomMode) {
+        path = roomDefault.c_str();
+    }
+    std::printf("[imoScene] inspect %s: %s\n", roomMode ? "房间" : "模型", path);
     imoScene::sModelData data;
     std::string error;
-    if (!imoScene::buildModelFromGltf(path, data, error, convertOptionsFromEnv())) {
+    const imoScene::sConvertOptions options =
+        roomMode ? imoScene::roomConvertOptions() : convertOptionsFromEnv();
+    if (!imoScene::buildModelFromGltf(path, data, error, options)) {
         std::fprintf(stderr, "[imoScene] inspect 失败: %s\n", error.c_str());
         return 2;
     }
@@ -128,6 +149,23 @@ int runInspectIfRequested() {
     std::printf("[imoScene] inspect height=%.3f zeroWeight=%u skipped=%u filtered=%u\n",
                 data.aMax.y - data.aMin.y, data.aZeroWeightVertices, data.aSkippedPrimitives,
                 data.aFilteredMeshes);
+    std::printf("[imoScene] inspect AABB x=[%.2f, %.2f] y=[%.2f, %.2f] z=[%.2f, %.2f]\n",
+                data.aMin.x, data.aMax.x, data.aMin.y, data.aMax.y, data.aMin.z, data.aMax.z);
+    // 场景 alpha 全靠重判：打印三种模式的实际分布，验证玻璃/软垫没有被误判成 OPAQUE。
+    uint32_t opaque = 0;
+    uint32_t mask = 0;
+    uint32_t blend = 0;
+    for (size_t index = 0; index < data.aMaterials.size(); ++index) {
+        const GN3d::eALPHA_MODE alphaMode = data.aMaterials[index].aAlphaMode;
+        if (alphaMode == GN3d::eALPHA_MASK) {
+            ++mask;
+        } else if (alphaMode == GN3d::eALPHA_BLEND) {
+            ++blend;
+        } else {
+            ++opaque;
+        }
+    }
+    std::printf("[imoScene] inspect alpha OPAQUE=%u MASK=%u BLEND=%u\n", opaque, mask, blend);
     printMeshListIfRequested(data);
     return 0;
 }
@@ -180,6 +218,20 @@ bool loadScene() {
     }
     const GNg::sVEC3 focus = {0.0f, height * 0.55f, 0.0f};
     imoScene::cameraInit(focus, height);
+
+    // 房间是可选的第二份模型：缺资产/加载失败只告警，仍然显示角色（不整体失败）。
+    const imoScene::sRoomOptions roomOptions = imoScene::roomOptionsFromEnv();
+    if (roomOptions.aEnabled) {
+        std::fprintf(stderr, "[imoScene] AppInit: 加载房间 %s\n", roomOptions.aPath.c_str());
+        if (imoScene::loadRoomModel(roomOptions, gRoom, error)) {
+            gRoomLoaded = true;
+            std::printf("[imoScene] 房间: %u 网格，%zu 贴图，AABB y=[%.2f, %.2f]\n",
+                        gRoom.aModel.aMeshCount, gRoom.aTextures.size(), gRoom.aMin.y,
+                        gRoom.aMax.y);
+        } else {
+            std::fprintf(stderr, "[imoScene] 房间加载失败（只显示角色）: %s\n", error.c_str());
+        }
+    }
     std::printf("[imoScene] 操作: 左/右键拖动旋转, 滚轮缩放, 中键平移, R 重置视角, Esc 退出\n");
     return true;
 }
@@ -203,10 +255,12 @@ GN_CALL void AppInit() {
 }
 
 GN_CALL void AppUnInit() {
+    gRoom.release();
     gScene.release();
     delete gLight;
     gLight = 0;
     gLoaded = false;
+    gRoomLoaded = false;
 }
 
 GN_CALL void AppDisplay2D(unsigned int nTime) {
@@ -232,7 +286,13 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     const GNg::sVEC3 eye = imoScene::cameraPosition();
     GNg::GN_VkBegin3DPass(&viewProjection, &eye, gLight->GetUBO(), sizeof(GN3d::sLIGHT_UBO));
     GNg::GN_VkDrawSkybox(&viewProjection);
-    drawGround();
+    // 房间自带地板与家具：再画一块 60×60 的虚拟地面会与木地板 z-fighting 并盖住房间。
+    if (!gRoomLoaded) {
+        drawGround();
+    }
+    if (gRoomLoaded) {
+        gRoom.aModel.DrawPBRSorted(eye); // 房间先画（静态背景），角色再叠上去
+    }
     gScene.aModel.DrawPBRSorted(eye); // OPAQUE/MASK 先画，BLEND 按网格距离由远到近
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkBegin2DPass(); // 交还给 2D 叠层通道（保持 LOAD，不清屏）
