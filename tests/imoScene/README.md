@@ -37,6 +37,40 @@ make imoSceneAsset \
 | R | 回到初始取景 |
 | Esc | 退出（引擎默认） |
 
+## 安全诊断（真机首次运行前）
+
+本程序会创建 Vulkan 窗口与 3D 管线；**在确认稳定前，不要在正使用的桌面会话里直接跑**。
+先用不碰 GPU 的自检，再从最小负载往上加：
+
+```bash
+# 1) 只做 CPU 转换与统计：不建窗口、不初始化 Vulkan
+IMO_SCENE_INSPECT=1 LD_LIBRARY_PATH=. ./build/imoScene
+
+# 2) 保守运行（建议在 TTY 里、用 timeout 兜底；先跑已知可用的 mmdViewer 对照）
+GN_VSYNC=1 IMO_SCENE_NO_TEXTURES=1 IMO_SCENE_MAX_MESHES=1 \
+  timeout 20 env LD_LIBRARY_PATH=. ./build/imoScene 2> /tmp/imoScene.log
+
+# 3) 逐步放开：MAX_MESHES=1 → 4 → 全部；再去掉 NO_TEXTURES
+```
+
+启动进度全部打到 stderr（无缓冲）并同步 stdout，卡住时看 `/tmp/imoScene.log` 停在哪一行：
+
+| 日志 | 含义 |
+|---|---|
+| `AppInit: 开始读取/转换 glTF` | 进入 CPU 转换（此前是引擎窗口/交换链初始化） |
+| `AppInit: 开始 GPU 上传` | `ImageLoadFromMem` 每张 PNG 一次上传 |
+| `首帧: 开始 3D pass` | 第一次录制绘制命令 |
+| `首帧: 录制完成（此后卡住 = present/swapchain）` | 命令已录完，问题在提交/呈现 |
+
+若出现整机死机/桌面退出，请保留（只读命令，不需要再启动本程序）：
+
+```bash
+journalctl -b -1 -p err --no-pager | tail -50     # 上一次启动的错误
+dmesg | grep -iE "amdgpu|gpu reset|ring|hang|oom" # 驱动/显存/OOM
+coredumpctl list | tail                            # 崩溃转储
+free -h; lspci -nn | grep -i vga                   # 内存与 GPU
+```
+
 ## 管线与模块
 
 ```text

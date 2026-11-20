@@ -25,8 +25,17 @@ struct sSceneModel {
     void release();
 };
 
+// 上传开关：用于在疑似驱动/显存问题上做最小化二分（默认全开）。
+struct sUploadOptions {
+    bool aLoadTextures; // false = 跳过全部贴图解码/上传（材质退化为纯色）
+    uint32_t aMaxMeshes; // 0 = 全部；>0 只上传前 N 个网格
+
+    sUploadOptions();
+};
+
 // 把 CPU 数据装进引擎对象并上传纹理；失败时 out 清空并写 error。
-bool uploadSceneModel(const sModelData &data, sSceneModel &out, std::string &error);
+bool uploadSceneModel(const sModelData &data, sSceneModel &out, std::string &error,
+                      const sUploadOptions &options = sUploadOptions());
 
 } // namespace imoScene
 #endif // GN_IMOSCENE_UPLOAD_H

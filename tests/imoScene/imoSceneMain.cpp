@@ -70,11 +70,36 @@ void initLights() {
     gLight->AddPoint(fillPosition, 12.0f, fillColor, 0.7f);
 }
 
+// 只读自检：IMO_SCENE_INSPECT=1 时只走 CPU 转换并退出，不创建窗口、不初始化 Vulkan。
+// 返回 -1 = 未请求自检；>=0 = 自检退出码（0 成功 / 2 失败）。
+int runInspectIfRequested() {
+    const char *mode = std::getenv("IMO_SCENE_INSPECT");
+    if (mode == 0 || mode[0] == '\0' || mode[0] == '0') {
+        return -1;
+    }
+    const char *fromEnv = std::getenv("IMO_SCENE_MODEL");
+    const char *path = (fromEnv != 0 && fromEnv[0] != '\0') ? fromEnv : DEFAULT_MODEL_PATH;
+    std::printf("[imoScene] inspect 模型: %s\n", path);
+    imoScene::sModelData data;
+    std::string error;
+    if (!imoScene::buildModelFromGltf(path, data, error)) {
+        std::fprintf(stderr, "[imoScene] inspect 失败: %s\n", error.c_str());
+        return 2;
+    }
+    std::printf("[imoScene] inspect meshes=%zu verts=%u tris=%u textures=%zu materials=%zu\n",
+                data.aMeshes.size(), data.aVertexCount, data.aTriangleCount, data.aTextures.size(),
+                data.aMaterials.size());
+    std::printf("[imoScene] inspect height=%.3f zeroWeight=%u skipped=%u\n",
+                data.aMax.y - data.aMin.y, data.aZeroWeightVertices, data.aSkippedPrimitives);
+    return 0;
+}
+
 // 加载 → 上传 → 取景。失败只报错不抛异常，主循环保持空白而非崩溃。
 bool loadScene() {
     const char *fromEnv = std::getenv("IMO_SCENE_MODEL");
     const char *path = (fromEnv != 0 && fromEnv[0] != '\0') ? fromEnv : DEFAULT_MODEL_PATH;
     std::printf("[imoScene] 加载模型: %s\n", path);
+    std::fprintf(stderr, "[imoScene] AppInit: 开始读取/转换 glTF\n");
 
     imoScene::sModelData data;
     std::string error;
@@ -83,10 +108,23 @@ bool loadScene() {
         std::fprintf(stderr, "[imoScene] 先生成资产: make imoSceneAsset（需要 Blender）\n");
         return false;
     }
-    if (!imoScene::uploadSceneModel(data, gScene, error)) {
+    std::fprintf(stderr, "[imoScene] AppInit: glTF 转换完成（%zu 网格），开始 GPU 上传\n",
+                 data.aMeshes.size());
+    imoScene::sUploadOptions options;
+    const char *noTextures = std::getenv("IMO_SCENE_NO_TEXTURES");
+    options.aLoadTextures = !(noTextures != 0 && noTextures[0] == '1');
+    const char *maxMeshes = std::getenv("IMO_SCENE_MAX_MESHES");
+    if (maxMeshes != 0) {
+        options.aMaxMeshes = static_cast<uint32_t>(std::atoi(maxMeshes));
+    }
+    std::fprintf(stderr, "[imoScene] AppInit: 上传选项 贴图=%s 网格上限=%u\n",
+                 options.aLoadTextures ? "开" : "关", options.aMaxMeshes);
+    if (!imoScene::uploadSceneModel(data, gScene, error, options)) {
         std::fprintf(stderr, "[imoScene] 上传失败: %s\n", error.c_str());
         return false;
     }
+    std::fprintf(stderr, "[imoScene] AppInit: GPU 上传完成（%u 网格），准备首帧\n",
+                 gScene.aModel.aMeshCount);
     const float height = data.aMax.y - data.aMin.y;
     std::printf("[imoScene] 网格 %zu 个，顶点 %u，三角形 %u，贴图 %zu 张，材质 %zu 个\n",
                 data.aMeshes.size(), data.aVertexCount, data.aTriangleCount, data.aTextures.size(),
@@ -137,6 +175,10 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     if (width <= 0 || height <= 0) {
         return;
     }
+    static bool firstFrame = true;
+    if (firstFrame) {
+        std::fprintf(stderr, "[imoScene] 首帧: 开始 3D pass（%dx%d）\n", width, height);
+    }
     GNg::sMAT44 viewProjection;
     if (!imoScene::cameraBuildViewProj(static_cast<float>(width) / static_cast<float>(height),
                                        viewProjection)) {
@@ -149,6 +191,10 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     gScene.aModel.DrawPBRSorted(eye); // OPAQUE/MASK 先画，BLEND 按网格距离由远到近
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkBegin2DPass(); // 交还给 2D 叠层通道（保持 LOAD，不清屏）
+    if (firstFrame) {
+        std::fprintf(stderr, "[imoScene] 首帧: 录制完成（此后卡住 = present/swapchain）\n");
+        firstFrame = false;
+    }
 }
 
 GN_CALL void AppDisplay3D(unsigned int nTime) {
@@ -167,6 +213,11 @@ GN_CALL void AppRun(unsigned int nTime) {
 } // extern "C"
 
 GN_MAIN;
+std::setvbuf(stdout, 0, _IONBF, 0); // 卡死/崩溃时保住已打印的进度行
+const int inspectCode = runInspectIfRequested();
+if (inspectCode >= 0) {
+    std::exit(inspectCode);
+}
 GN_InitLoadCallBackFunc(AppInit, AppUnInit);
 GN_InitLoopCallBackFunc(AppDisplay2D, AppDisplay3D, AppRun);
 GN_StartRun("imo_chan Scene (glTF)", 1280, 800, 0, false, true, true, 0, 0, 0, 0);

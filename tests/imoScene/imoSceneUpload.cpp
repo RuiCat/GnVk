@@ -55,6 +55,8 @@ void fillMesh(GN3d::sMESH &mesh, const sMeshData &data, GN3d::sMATERIAL *materia
 
 } // namespace
 
+sUploadOptions::sUploadOptions() : aLoadTextures(true), aMaxMeshes(0) {}
+
 sSceneModel::sSceneModel() {
     aMin.x = aMin.y = aMin.z = 0.0f;
     aMax.x = aMax.y = aMax.z = 0.0f;
@@ -74,7 +76,8 @@ void sSceneModel::release() {
     aMax.x = aMax.y = aMax.z = 0.0f;
 }
 
-bool uploadSceneModel(const sModelData &data, sSceneModel &out, std::string &error) {
+bool uploadSceneModel(const sModelData &data, sSceneModel &out, std::string &error,
+                      const sUploadOptions &options) {
     out.release();
     if (data.aMeshes.empty()) {
         error = "没有可上传的网格";
@@ -82,7 +85,7 @@ bool uploadSceneModel(const sModelData &data, sSceneModel &out, std::string &err
     }
 
     out.aTextures.assign(data.aTextures.size(), static_cast<GNg::sIMAGE *>(0));
-    for (size_t index = 0; index < data.aTextures.size(); ++index) {
+    for (size_t index = 0; options.aLoadTextures && index < data.aTextures.size(); ++index) {
         const sTextureData &source = data.aTextures[index];
         if (source.aBytes.empty()) {
             continue;
@@ -97,13 +100,17 @@ bool uploadSceneModel(const sModelData &data, sSceneModel &out, std::string &err
         out.aTextures[index] = image;
     }
 
-    out.aModel.aMeshes = new GN3d::sMESH[data.aMeshes.size()];
-    out.aModel.aMeshCount = static_cast<uint32_t>(data.aMeshes.size());
-    out.aModel.aMaterials = new GN3d::sMATERIAL[data.aMeshes.size()];
-    out.aModel.aMaterialCount = static_cast<uint32_t>(data.aMeshes.size());
+    size_t meshCount = data.aMeshes.size();
+    if (options.aMaxMeshes > 0 && meshCount > options.aMaxMeshes) {
+        meshCount = options.aMaxMeshes;
+    }
+    out.aModel.aMeshes = new GN3d::sMESH[meshCount];
+    out.aModel.aMeshCount = static_cast<uint32_t>(meshCount);
+    out.aModel.aMaterials = new GN3d::sMATERIAL[meshCount];
+    out.aModel.aMaterialCount = static_cast<uint32_t>(meshCount);
     std::snprintf(out.aModel.aName, sizeof(out.aModel.aName), "%s", "imo_chan");
 
-    for (size_t index = 0; index < data.aMeshes.size(); ++index) {
+    for (size_t index = 0; index < meshCount; ++index) {
         const sMeshData &meshData = data.aMeshes[index];
         GN3d::sMATERIAL &material = out.aModel.aMaterials[index];
         const sMaterialData *source = 0;
