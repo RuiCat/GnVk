@@ -6,6 +6,7 @@
 //       IMO_SCENE_MODEL=/path/to/model.glb 可覆盖默认模型路径。
 // 边界：只显示导入姿势（蒙皮已 CPU 烘焙），不做动画播放、阴影与后处理参数调节。
 
+#include "imoSceneBlobShadow.h"
 #include "imoSceneCamera.h"
 #include "imoSceneRoom.h"
 #include "imoSceneShadow.h"
@@ -36,9 +37,11 @@ imoScene::sSceneModel gRoom;    // 房间背景（游戏场景静态网格，可
 GN3d::cLIGHT *gLight = 0;
 bool gLoaded = false;
 bool gRoomLoaded = false;
+imoScene::sBlobShadow gBlobShadow;   // 贴地软阴影（假接触阴影）
 imoScene::sShadowOptions gShadowOptions;
 GN3d::sAABB gCasterBox;      // 角色世界 AABB（阴影拟合用）
 bool gShadowsReady = false;
+bool gBlobShadowReady = false;
 unsigned int gLastTick = 0;
 
 // 一块 60×60 m 的地面（PBR 管线；法线 +Y、UV 铺满一块）。
@@ -263,6 +266,11 @@ GN_CALL void AppInit() {
     gShadowOptions = imoScene::shadowOptionsFromEnv();
     initLights();
     if (gLoaded) {
+        // 贴地软阴影：CSM 默认关闭后的接地感替代（assets/imoScene/blob_shadow.png）。
+        gBlobShadowReady =
+            imoScene::blobShadowLoad(gBlobShadow, "assets/imoScene/blob_shadow.png");
+    }
+    if (gLoaded) {
         const bool albedoDebug = std::getenv("IMO_SCENE_ALBEDO") != 0;
         // 室内环境光（自定义 SH9）默认开；IMO_SCENE_INDOOR_GI=0 退回天空 IBL，
         // 用来把"画面变蓝/变亮"与"崩溃"分开定位。
@@ -292,6 +300,8 @@ GN_CALL void AppInit() {
 }
 
 GN_CALL void AppUnInit() {
+    imoScene::blobShadowRelease(gBlobShadow);
+    gBlobShadowReady = false;
     gRoom.release();
     gScene.release();
     delete gLight;
@@ -338,6 +348,9 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     }
     if (gRoomLoaded) {
         gRoom.aModel.DrawPBRSorted(eye); // 房间先画（静态背景），角色再叠上去
+    }
+    if (gBlobShadowReady) {
+        imoScene::blobShadowDraw(gBlobShadow, 0.0f, 0.0f); // 角色站在世界原点
     }
     gScene.aModel.DrawPBRSorted(eye); // OPAQUE/MASK 先画，BLEND 按网格距离由远到近
     GNg::GN_VkEnd3DPass();

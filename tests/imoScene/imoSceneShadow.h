@@ -39,5 +39,9 @@ bool shadowFit(GN3d::cLIGHT *light, const GNg::sMAT44 &cameraView, const GNg::sV
 // 画阴影深度图：每级一次 Begin/End，只画角色（房间不投影，否则封闭室内被墙挡死）。
 void shadowDrawCaster(const GN3d::cMODEL &caster);
 
+// 只读访问上次拟合成功的级联（诊断/CPU 探针用；越界返回单位阵）。
+GNg::sMAT44 shadowCascadeViewProj(uint32_t index);
+uint32_t shadowCascadeCount();
+
 } // namespace imoScene
 #endif // GN_IMOSCENE_SHADOW_H

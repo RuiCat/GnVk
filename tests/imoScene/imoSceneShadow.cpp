@@ -146,6 +146,19 @@ bool shadowFit(GN3d::cLIGHT *light, const GNg::sMAT44 &cameraView, const GNg::sV
     return gCascadeCount > 0;
 }
 
+GNg::sMAT44 shadowCascadeViewProj(uint32_t index) {
+    if (index >= GN3d::SHADOW_CASCADE_MAX) {
+        GNg::sMAT44 identity;
+        GNg::Mat44Identity(&identity);
+        return identity;
+    }
+    return gCascadeViewProj[index];
+}
+
+uint32_t shadowCascadeCount() {
+    return gCascadeCount;
+}
+
 void shadowDrawCaster(const GN3d::cMODEL &caster) {
     for (uint32_t index = 0; index < gCascadeCount; ++index) {
         GNg::GN_VkShadowPassBegin(&gCascadeViewProj[index], index);

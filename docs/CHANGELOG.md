@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-21 — imoScene 用贴地软阴影替代 CSM（真机崩溃后）
+
+- 真机复测确认：默认构建（无 CSM）稳定；`IMO_SCENE_SHADOWS=1` 首帧仍崩（`amdgpu [gfxhub] page fault`）。
+  CPU 探针验证 `shadowFit()` 在真机相机参数下 1–4 级拟合全部成功、矩阵有限 ⇒ 问题在阴影 pass 的 GPU 侧
+  （`GN_VkShadowPassBegin` 每级重置共享 3D 缓冲偏移），不在级联计算。
+- 新增 `imoSceneBlobShadow`：`assets/imoScene/blob_shadow.png`（128² 径向渐变，3,377 B）铺在脚下
+  （默认半径 0.46 m），走 PBR 混合管线只压暗地面；`IMO_SCENE_BLOB=0` 关闭、
+  `IMO_SCENE_BLOB_SHADOW`/`IMO_SCENE_BLOB_RADIUS` 可换贴图/改半径。
+- CSM 代码保留但默认关闭（`IMO_SCENE_SHADOWS=1` 才启用，且已知会崩），引擎侧待修：
+  给阴影 pass 独立顶点/索引缓冲，或按级追加偏移（`src/graphics/_Vulkan/vk3dPasses.cpp:26-31`）。
+- 验证：`make imoScene` 0 error；`IMO_SCENE_INSPECT=1/room` 回归不变。
+
 ## 2026-11-21 — imoScene 默认关闭阴影（真机 GPU 页错误），室内 GI 可回退
 
 - 真机两次启动均在首帧触发 `amdgpu [gfxhub] page fault`（Faulty UTCL2 client: TCP）→ `ring gfx_0.0.0 timeout`

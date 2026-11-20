@@ -48,7 +48,9 @@ make imoRoomAsset \
 | `IMO_SCENE_HIDE` / `IMO_SCENE_SHOW` | `Kemo_Body,Jirai` / 空 | 网格名子串过滤（只作用于角色） |
 | `IMO_SCENE_NO_TEXTURES` / `IMO_SCENE_MAX_MESHES` | 关 / 0 | 贴图与网格数的最小化二分开关 |
 | `IMO_SCENE_AMBIENT` | 0.35 | 房间模式的均匀环境辐亮度（0.2–0.6） |
-| `IMO_SCENE_SHADOWS` | 关 | 房间模式 `=1` 开启方向光阴影（只投角色）；默认关切因真机首帧 GPU 页错误 |
+| `IMO_SCENE_BLOB` | 开 | `=0` 关掉贴地软阴影（假接触阴影） |
+| `IMO_SCENE_BLOB_SHADOW` / `IMO_SCENE_BLOB_RADIUS` | `assets/imoScene/blob_shadow.png` / 0.46 | 贴地阴影贴图与半径（米） |
+| `IMO_SCENE_SHADOWS` | 关 | **实验**：`=1` 开启方向光 CSM（真机首帧会触发 GPU 页错误，勿在日常会话用） |
 | `IMO_SCENE_INDOOR_GI` | 开 | `=0` 退回天空 IBL（室内暖灰 SH9 的回退开关） |
 | `IMO_SCENE_SHADOW_INTENSITY` | 0.45 | 阴影方向光的强度 |
 | `IMO_SCENE_LAMPS` | 1.0 | 房间模式三盏吸顶点光的强度倍率 |
@@ -181,12 +183,14 @@ RGB 为正常肤色，确认是正确的贴图。转换日志会打印 `FBX2GLB 
 - **不加太阳**：方向光没有阴影时只会把室内照成一片平；改为三盏暖色吸顶点光
   （角色上方 2.6 / 厨房 1.8 / 玄关 1.1，`IMO_SCENE_LAMPS` 倍率），点光衰减给远处墙面自然明暗。
 - 角色模式（`IMO_SCENE_NO_ROOM=1`）保持原来的 GI/IBL + 方向光参数不变。
-- **阴影（CSM）**：`imoSceneShadow` 每帧按相机拟合 4 级级联（2048²、λ=0.5、拟合盒 = 角色 AABB 外扩 2.5 m，
-  far = max(盒对角, 相机到最远角 + 0.5)），在 3D pass 之前画深度图。**只让角色投影**：房间是封闭的，
-  墙面参与投影会把方向光挡死、室内全黑；因此阴影 pass 只画 `gScene`（角色）。
-  方向光强度 0.45（`IMO_SCENE_SHADOW_INTENSITY`），`IMO_SCENE_SHADOWS=0` 关闭。
-  已知边界：`cMODEL::DrawShadow` 只画 OPAQUE 网格（本角色 22/32 材质 OPAQUE、10 MASK），
-  MASK 部件（面罩/裙摆细节等）不参与投影，阴影轮廓可能略瘦。
+- **贴地软阴影（默认）**：`imoSceneBlobShadow` 把 `assets/imoScene/blob_shadow.png`（128² 径向渐变）
+  铺在脚下（半径 0.46 m，`IMO_SCENE_BLOB_RADIUS`），走 PBR 混合管线，只压暗脚下、不引入新光照。
+  这是 CSM 不可用时的接地感替代。
+- **CSM（实验、默认关闭）**：`imoSceneShadow` 每帧拟合 4 级级联（2048²、λ=0.5、拟合盒=角色 AABB 外扩 2.5 m），
+  3D pass 前画深度图、只投角色。**真机实测开启后首帧触发 `amdgpu page fault` → GPU reset → 合成器崩溃**
+  （见 CHANGELOG 2026-11-21），因此默认关闭，仅在独立 TTY/可恢复环境里用 `IMO_SCENE_SHADOWS=1` 复现。
+  已知边界：`cMODEL::DrawShadow` 只画 OPAQUE 网格（本角色 22/32 OPAQUE、10 MASK），
+  MASK 部件不投影，阴影轮廓偏瘦。
 
 Blender CPU 预览：`.local/imoScene/render_room_default2.png`（明亮版）与
 `.local/imoScene/render_room_engine_light.png`（近似室内布光）。
