@@ -40,14 +40,16 @@ GNg::sVEC3 normalizeDirection(const GNg::sVEC3 &direction) {
 } // namespace
 
 sShadowOptions::sShadowOptions()
-    : aEnabled(true), aIntensity(0.45f), aDirection{0.12f, -1.0f, 0.10f},
+    : aEnabled(false), aIntensity(0.45f), aDirection{0.12f, -1.0f, 0.10f},
       aCascadeCount(4), aMapSize(ENGINE_SHADOW_MAP_SIZE) {}
 
 sShadowOptions shadowOptionsFromEnv() {
     sShadowOptions options;
+    // 默认关闭：阴影 pass 在真机上曾触发 GPU 页错误（见 CHANGELOG 2026-11-21 回滚条目），
+    // 需要显式 IMO_SCENE_SHADOWS=1 才启用。
     const char *enabled = std::getenv("IMO_SCENE_SHADOWS");
-    if (enabled != 0 && enabled[0] == '0') {
-        options.aEnabled = false;
+    if (enabled != 0 && enabled[0] == '1') {
+        options.aEnabled = true;
     }
     const char *intensity = std::getenv("IMO_SCENE_SHADOW_INTENSITY");
     if (intensity != 0 && intensity[0] != '\0') {

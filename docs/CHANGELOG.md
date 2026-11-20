@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-21 — imoScene 默认关闭阴影（真机 GPU 页错误），室内 GI 可回退
+
+- 真机两次启动均在首帧触发 `amdgpu [gfxhub] page fault`（Faulty UTCL2 client: TCP）→ `ring gfx_0.0.0 timeout`
+  → GPU reset → 合成器重启（boot -1 pid 427785、boot 0 pid 19828）；两次运行都启用了本次新增的 CSM 阴影 pass。
+- 阴影改为默认关闭：只有 `IMO_SCENE_SHADOWS=1` 才启用；启动日志打印 `阴影: 开/关`，
+  默认构建回到「无阴影」路径，便于把崩溃与阴影分离定位。
+- 新增 `IMO_SCENE_INDOOR_GI=0`：退回天空 IBL（默认仍用室内暖灰 SH9 环境光），
+  用于区分「变蓝/变亮」与「崩溃」两类问题。
+- 待真机复测：默认构建是否稳定；稳定后再单独开 `IMO_SCENE_SHADOWS=1` 验证阴影。
+
 ## 2026-11-21 — imoScene 房间阴影（方向光 CSM，只投角色）
 
 - 新增 `tests/imoScene/imoSceneShadow.h/.cpp`：每帧按相机拟合 4 级 CSM（2048²、λ=0.5、texel snapping），

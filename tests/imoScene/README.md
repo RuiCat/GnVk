@@ -48,7 +48,8 @@ make imoRoomAsset \
 | `IMO_SCENE_HIDE` / `IMO_SCENE_SHOW` | `Kemo_Body,Jirai` / 空 | 网格名子串过滤（只作用于角色） |
 | `IMO_SCENE_NO_TEXTURES` / `IMO_SCENE_MAX_MESHES` | 关 / 0 | 贴图与网格数的最小化二分开关 |
 | `IMO_SCENE_AMBIENT` | 0.35 | 房间模式的均匀环境辐亮度（0.2–0.6） |
-| `IMO_SCENE_SHADOWS` | 开 | 房间模式 `=0` 关掉方向光阴影（只投角色） |
+| `IMO_SCENE_SHADOWS` | 关 | 房间模式 `=1` 开启方向光阴影（只投角色）；默认关切因真机首帧 GPU 页错误 |
+| `IMO_SCENE_INDOOR_GI` | 开 | `=0` 退回天空 IBL（室内暖灰 SH9 的回退开关） |
 | `IMO_SCENE_SHADOW_INTENSITY` | 0.45 | 阴影方向光的强度 |
 | `IMO_SCENE_LAMPS` | 1.0 | 房间模式三盏吸顶点光的强度倍率 |
 | `IMO_SCENE_EV` | -0.40（房间）/ -0.5（角色） | 合成曝光（EV） |

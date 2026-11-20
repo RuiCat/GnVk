@@ -92,7 +92,10 @@ void initLights() {
         gLight->AddPoint(lampAboveKitchen, 8.0f, lampColor, 1.8f * lampScale);
         gLight->AddPoint(lampEntrance, 7.0f, lampColor, 1.1f * lampScale);
         // 阴影方向光：近似吸顶灯方向，给角色在木地板上落一层接触阴影。
+        // 默认关闭（IMO_SCENE_SHADOWS=1 才启用）：阴影 pass 在真机上曾触发 GPU 页错误。
         gShadowsReady = imoScene::shadowAttachLight(gLight, gShadowOptions);
+        std::fprintf(stderr, "[imoScene] 阴影: %s（IMO_SCENE_SHADOWS=1 启用）\n",
+                     gShadowsReady ? "开" : "关");
         return;
     }
     // 真机截图偏白：环境光与太阳都收敛到“白衣服仍能分辨褶皱”的量级，不再加点光补亮。
@@ -261,8 +264,12 @@ GN_CALL void AppInit() {
     initLights();
     if (gLoaded) {
         const bool albedoDebug = std::getenv("IMO_SCENE_ALBEDO") != 0;
+        // 室内环境光（自定义 SH9）默认开；IMO_SCENE_INDOOR_GI=0 退回天空 IBL，
+        // 用来把"画面变蓝/变亮"与"崩溃"分开定位。
+        const char *indoorGiEnv = std::getenv("IMO_SCENE_INDOOR_GI");
+        const bool indoorGi = !(indoorGiEnv != 0 && indoorGiEnv[0] == '0');
         if (!albedoDebug) {
-            if (gRoomLoaded) {
+            if (gRoomLoaded && indoorGi) {
                 // 室内环境光：户外蓝天直接当 IBL 会把房间洗成淡蓝、没有明暗；
                 // 换成均匀暖灰 SH9（IMO_SCENE_AMBIENT 可调，默认 0.35）。
                 const char *ambientEnv = std::getenv("IMO_SCENE_AMBIENT");
