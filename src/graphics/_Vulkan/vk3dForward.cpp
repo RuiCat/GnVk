@@ -7,6 +7,106 @@
 
 namespace GNg {
 
+namespace {
+
+// PBR 描述符集按“albedo/normal 纹理组合”缓存。
+// 原因：GN_VkDraw3DPBR 若在单帧内反复改写同一个 descriptorSetPBR，GPU 在提交后读到的是
+// 最后一次写入的内容——多个不同贴图的网格会全部采样到同一张贴图（真机表现为整身衣物
+// 变成同一张黑白贴图的图案）。这里为每个纹理组合分配独立 set，并在每个 3D pass 开始时
+// 从规范 set 复制 12 个静态绑定（场景/光源/阴影/天空盒/雾/GI/LUT），再覆盖 binding 1/3。
+struct sPBR_TEXTURE_SET {
+    VkImageView aAlbedo;
+    VkSampler aAlbedoSampler;
+    VkImageView aNormal;
+    VkSampler aNormalSampler;
+    VkDescriptorSet aSet;
+};
+
+std::vector<sPBR_TEXTURE_SET> s_pbrTextureSets;
+
+// 定义在下方：把规范 set 的 12 个绑定同步到指定纹理 set，再覆盖 binding 1/3。
+void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry);
+
+VkDescriptorSet findOrCreatePBRSet(VkImageView albedo, VkSampler albedoSampler,
+                                   VkImageView normal, VkSampler normalSampler) {
+    for(size_t i = 0; i < s_pbrTextureSets.size(); ++i) {
+        const sPBR_TEXTURE_SET &entry = s_pbrTextureSets[i];
+        if(entry.aAlbedo == albedo && entry.aAlbedoSampler == albedoSampler &&
+           entry.aNormal == normal && entry.aNormalSampler == normalSampler) {
+            return entry.aSet;
+        }
+    }
+    if(GN_Vk.descriptorPool == VK_NULL_HANDLE || GN_Vk.descriptorLayoutPBR == VK_NULL_HANDLE) {
+        return GN_Vk.descriptorSetPBR;
+    }
+    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    dai.descriptorPool = GN_Vk.descriptorPool;
+    dai.descriptorSetCount = 1;
+    dai.pSetLayouts = &GN_Vk.descriptorLayoutPBR;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    if(vkAllocateDescriptorSets(GN_Vk.device, &dai, &set) != VK_SUCCESS) {
+        fprintf(stderr, "[GN_Vk] PBR 纹理描述符集分配失败（回退共享 set）\n");
+        return GN_Vk.descriptorSetPBR;
+    }
+    sPBR_TEXTURE_SET entry;
+    entry.aAlbedo = albedo;
+    entry.aAlbedoSampler = albedoSampler;
+    entry.aNormal = normal;
+    entry.aNormalSampler = normalSampler;
+    entry.aSet = set;
+    syncPBRTextureSet(entry); // 首次使用前先补齐 12 个绑定，避免首帧读到未初始化描述符
+    s_pbrTextureSets.push_back(entry);
+    return set;
+}
+
+// 同步单个纹理 set：从规范 set 复制 12 个绑定，再覆盖 binding 1/3 的纹理与采样器。
+void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry) {
+        VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
+        copy.srcSet = GN_Vk.descriptorSetPBR;
+        copy.srcBinding = 0;
+        copy.srcArrayElement = 0;
+        copy.dstSet = entry.aSet;
+        copy.dstBinding = 0;
+        copy.dstArrayElement = 0;
+        copy.descriptorCount = 12;
+        vkUpdateDescriptorSets(GN_Vk.device, 0, nullptr, 1, &copy); // 复制用 update 的 copies 参数（Vulkan 1.0 无独立 copy 入口）
+
+        VkDescriptorImageInfo albedoInfo = {};
+        albedoInfo.sampler = entry.aAlbedoSampler ? entry.aAlbedoSampler : GN_Vk.defaultSampler;
+        albedoInfo.imageView = entry.aAlbedo ? entry.aAlbedo : GN_Vk.defaultImageView;
+        albedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkDescriptorImageInfo normalInfo = {};
+        normalInfo.sampler = entry.aNormalSampler ? entry.aNormalSampler : GN_Vk.defaultSampler;
+        normalInfo.imageView = entry.aNormal ? entry.aNormal : GN_Vk.defaultImageView;
+        normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                          {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        writes[0].dstSet = entry.aSet;
+        writes[0].dstBinding = 1;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[0].descriptorCount = 1;
+        writes[0].pImageInfo = &albedoInfo;
+        writes[1].dstSet = entry.aSet;
+        writes[1].dstBinding = 3;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[1].descriptorCount = 1;
+        writes[1].pImageInfo = &normalInfo;
+        vkUpdateDescriptorSets(GN_Vk.device, 2, writes, 0, nullptr);
+}
+
+// 每个 3D pass 开始：把规范 set 的 12 个绑定同步到所有纹理 set。
+// 单 in-flight fence 保证上一帧已完成，这里改写不会撞上正在使用的 set。
+void refreshPBRTextureSets() {
+    if(GN_Vk.descriptorSetPBR == VK_NULL_HANDLE) {
+        return;
+    }
+    for(size_t i = 0; i < s_pbrTextureSets.size(); ++i) {
+        syncPBRTextureSet(s_pbrTextureSets[i]);
+    }
+}
+
+} // namespace
+
 // 定义在 vk3dShutdown.cpp：延迟释放扩容时退休的 3D 动态缓冲（避免同帧已录制命令引用已释放显存）。
 void ReleaseRetired3DBuffers();
 
@@ -25,6 +125,7 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     s_vtxOfs3D = 0;
     s_idxOfs3D = 0;
     ReleaseRetired3DBuffers(); // 上一帧已完成，回收扩容时退休的旧缓冲
+    refreshPBRTextureSets();   // 同步各纹理描述符集里的场景/光照/环境绑定
 
     // 刷新当前 2D 批次
     if(gVCnt > 0) {
@@ -225,7 +326,7 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
     if(!GN_Vk.initialized || !s_in3DPass || !vertices || vertexCount == 0) return;
     s_last3DIndexCount = (indices && indexCount > 0) ? indexCount : 0;
 
-    // ── 更新纹理描述符 (binding 1 = albedo, binding 3 = normal) ──
+    // ── 每个纹理组合一份独立描述符集（避免单帧内改写同一 set 导致所有网格采样同一贴图）──
     {
         VkImageView albedoView = (albedoTex && albedoTex->vkImageView)
                                      ? albedoTex->vkImageView
@@ -233,45 +334,16 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
         VkSampler albedoSamp = (albedoTex && albedoTex->vkSampler)
                                    ? albedoTex->vkSampler
                                    : GN_Vk.defaultSampler;
-
         VkImageView normalView = (normalTex && normalTex->vkImageView)
                                      ? normalTex->vkImageView
                                      : GN_Vk.defaultImageView;
         VkSampler normalSamp = (normalTex && normalTex->vkSampler)
                                    ? normalTex->vkSampler
                                    : GN_Vk.defaultSampler;
-
-        VkDescriptorImageInfo diiAlbedo = {};
-        diiAlbedo.sampler = albedoSamp;
-        diiAlbedo.imageView = albedoView;
-        diiAlbedo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkDescriptorImageInfo diiNormal = {};
-        diiNormal.sampler = normalSamp;
-        diiNormal.imageView = normalView;
-        diiNormal.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkWriteDescriptorSet w[2] = {
-            {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-            {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
-        w[0].dstSet = GN_Vk.descriptorSetPBR;
-        w[0].dstBinding = 1;
-        w[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        w[0].descriptorCount = 1;
-        w[0].pImageInfo = &diiAlbedo;
-
-        w[1].dstSet = GN_Vk.descriptorSetPBR;
-        w[1].dstBinding = 3;
-        w[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        w[1].descriptorCount = 1;
-        w[1].pImageInfo = &diiNormal;
-
-        vkUpdateDescriptorSets(GN_Vk.device, 2, w, 0, nullptr);
-
-        // 重新绑定描述符集
+        VkDescriptorSet pbrSet = findOrCreatePBRSet(albedoView, albedoSamp, normalView, normalSamp);
         vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame],
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                GN_Vk.pipelineLayoutPBR, 0, 1, &GN_Vk.descriptorSetPBR, 0, nullptr);
+                                GN_Vk.pipelineLayoutPBR, 0, 1, &pbrSet, 0, nullptr);
     }
 
     // Push model matrix + PBR material (albedo/roughness/metallic/ao)

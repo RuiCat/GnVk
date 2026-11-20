@@ -19,6 +19,16 @@
   **本会话无 GPU（/dev/dri 缺失），画面未运行验证**——需在含 Vulkan 设备的机器上跑
   `LD_LIBRARY_PATH=. ./build/imoScene` 确认。
 
+## 2026-11-20（续） — 修复：PBR 每 draw 改写同一描述符集，所有网格采样同一贴图
+
+- 现象：imoScene 真机画面整身呈现同一张黑白贴图图案；单独调光照/alpha 都无法解释。
+- 根因：`GN_VkDraw3DPBR` 单帧内对同一个 `GN_Vk.descriptorSetPBR` 反复 `vkUpdateDescriptorSets`（albedo/normal）
+  再 `vkCmdBindDescriptorSets`；command buffer 在提交后才执行，GPU 读到的是最后一次写入 ⇒ 所有网格都用最后一张贴图。
+- 修复（`src/graphics/_Vulkan/vk3dForward.cpp`）：按 (albedo, normal) 纹理组合缓存独立描述符集
+  （pool 分配、数量≈贴图数）；创建与每个 3D pass 开始时，用 `vkUpdateDescriptorSets` 的 descriptor copy
+  从规范 set 同步 12 个静态绑定（场景/光源/阴影/天空盒/雾/GI/LUT），再覆盖 binding 1/3；draw 时绑定对应 set。
+- 验证：`make -j4` 0 error；`make imoScene` 0 error；`IMO_SCENE_INSPECT=1` 通过。**真机画面待复验**。
+
 ## 2026-11-20（续） — imoScene：二值 alpha 走 MASK、光照收敛、网格过滤
 
 - 真机截图（第二次）显示角色像半透明鬼影、多层服装叠在一起：全 `BLEND` 路径深度写关 + 网格级排序，
