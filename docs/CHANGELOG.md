@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-21 — imoScene 房间室内布光（去天空 IBL / 吸顶点光）
+
+- 真机截图显示房间整体被户外天空 IBL 洗成淡蓝、没有明暗：新增 `applyRoomAmbient()`，
+  用自定义 GI UBO 把环境换成均匀暖灰 SH9（`sh00 = L·√(4π)`，其余系数清零），
+  天空镜面倍率压到 1/4；`IMO_SCENE_AMBIENT`（默认 0.35）/ `IMO_SCENE_EV`（默认 -0.40）可调。
+- 房间模式不再加方向光（无阴影的方向光只会把室内照成一片平），改为三盏暖色吸顶点光
+  （角色上方 2.6 / 厨房 1.8 / 玄关 1.1，`IMO_SCENE_LAMPS` 倍率）；角色模式布光保持不变。
+- 仍未实现阴影：需要 app 侧拟合 CSM + shadow pass（参考 `tests/mmdViewer`），列为后续项。
+- 验证：`make imoScene` 0 error；Blender CPU 近似布光预览 `.local/imoScene/render_room_engine_light.png`；
+  真机画面待用户确认。
+
 ## 2026-11-20 — imoScene 接入游戏场景房间背景（room.glb）
 
 - 新增场景导出：`.unity-extract/pipeline/sceneExport.py` 从游戏数据 level1 取可见静态网格

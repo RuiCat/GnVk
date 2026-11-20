@@ -29,5 +29,10 @@ sConvertOptions roomConvertOptions();
 // 失败时 out 清空并写 error；房间缺失属于可选依赖，由调用方决定是否降级。
 bool loadRoomModel(const sRoomOptions &options, sSceneModel &out, std::string &error);
 
+// 室内环境光：用自定义 SH9 覆盖天空 IBL。户外天空是亮蓝色，直接拿它当 IBL 会把
+// 室内所有材质洗成一片淡蓝、丢掉明暗；这里改成“均匀暖灰环境辐亮度 + 1/4 天空镜面”。
+// aAmbient = 环境辐亮度（0.2~0.6 观感合理），调用前需引擎已初始化（GI UBO 已建）。
+void applyRoomAmbient(float aAmbient);
+
 } // namespace imoScene
 #endif // GN_IMOSCENE_ROOM_H

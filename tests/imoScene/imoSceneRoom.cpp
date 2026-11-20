@@ -8,7 +8,10 @@
 
 #include "imoSceneRoom.h"
 
+#include <cmath>
 #include <cstdlib>
+
+#include "giParams.h"
 
 namespace imoScene {
 
@@ -58,6 +61,28 @@ bool loadRoomModel(const sRoomOptions &options, sSceneModel &out, std::string &e
         return false;
     }
     return true;
+}
+
+void applyRoomAmbient(float aAmbient) {
+    if (!(aAmbient > 0.0f)) {
+        aAmbient = 0.0f;
+    }
+    GN3d::sGI_UBO ubo = GN3d::makeDefaultGiUbo();
+    // 均匀环境辐亮度 L 的 SH00 = L·√(4π)；其余系数清零，避免默认 UBO 的
+    // sh[1]/sh[2] 把方向性（略带俯仰的偏色）带进来。
+    const float constant = aAmbient * std::sqrt(4.0f * 3.14159265358979f);
+    ubo.sh[0] = constant * 1.00f; // 暖灰：R 稍高、B 稍低
+    ubo.sh[1] = constant * 0.97f;
+    ubo.sh[2] = constant * 0.92f;
+    ubo.sh[3] = 0.0f;
+    for (int index = 4; index < GN3d::SH9_FLOAT_COUNT; ++index) {
+        ubo.sh[index] = 0.0f;
+    }
+    ubo.indirect[0] = 1.0f;  // 漫反射：用上面的 SH9（室内均匀环境）
+    ubo.indirect[1] = 0.25f; // 镜面：天空压到 1/4，避免蓝色反光/高光洗白
+    ubo.indirect[2] = 1.0f;  // AO 强度
+    ubo.indirect[3] = 0.0f;  // SSAO 关
+    GNg::GN_VkSetGI(ubo);
 }
 
 } // namespace imoScene

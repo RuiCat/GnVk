@@ -47,7 +47,10 @@ make imoRoomAsset \
 | `IMO_SCENE_INSPECT` | 未设 | `=1` 只自检角色；`=room` 只自检房间（不建窗口/不初始化 Vulkan） |
 | `IMO_SCENE_HIDE` / `IMO_SCENE_SHOW` | `Kemo_Body,Jirai` / 空 | 网格名子串过滤（只作用于角色） |
 | `IMO_SCENE_NO_TEXTURES` / `IMO_SCENE_MAX_MESHES` | 关 / 0 | 贴图与网格数的最小化二分开关 |
-| `IMO_SCENE_FORCE_OPAQUE` / `IMO_SCENE_ALBEDO` / `IMO_SCENE_EV` | 关 / 关 / -0.5 | 材质与光照诊断 |
+| `IMO_SCENE_AMBIENT` | 0.35 | 房间模式的均匀环境辐亮度（0.2–0.6） |
+| `IMO_SCENE_LAMPS` | 1.0 | 房间模式三盏吸顶点光的强度倍率 |
+| `IMO_SCENE_EV` | -0.40（房间）/ -0.5（角色） | 合成曝光（EV） |
+| `IMO_SCENE_FORCE_OPAQUE` / `IMO_SCENE_ALBEDO` | 关 / 关 | 材质与光照诊断 |
 
 ## 操作
 
@@ -167,7 +170,18 @@ RGB 为正常肤色，确认是正确的贴图。转换日志会打印 `FBX2GLB 
 - 房间在 3D pass 里先画、角色后画；房间加载成功时**不再画**那块 60×60 虚拟地面（会与木地板 z-fighting）；
   光照额外加两盏吸顶灯点光，方向光保留。
 
-Blender CPU 预览（引擎默认取景近似）：`.local/imoScene/render_room_default2.png`。
+室内布光（房间模式）：
+
+- **不用天空 IBL**：户外天空是亮蓝色，直接当环境光会把房间洗成一片淡蓝、丢掉明暗。
+  `applyRoomAmbient()` 用自定义 GI UBO 覆盖成**均匀暖灰 SH9**（`sh00 = L·√(4π)`，其余系数清零），
+  镜面天空压到 1/4；`IMO_SCENE_AMBIENT` 调亮度（默认 0.35），`IMO_SCENE_EV` 调曝光（默认 -0.40）。
+- **不加太阳**：方向光没有阴影时只会把室内照成一片平；改为三盏暖色吸顶点光
+  （角色上方 2.6 / 厨房 1.8 / 玄关 1.1，`IMO_SCENE_LAMPS` 倍率），点光衰减给远处墙面自然明暗。
+- 角色模式（`IMO_SCENE_NO_ROOM=1`）保持原来的 GI/IBL + 方向光参数不变。
+- 还没有阴影（需要 app 侧拟合 CSM + shadow pass，见 mmdViewer 的做法），室内明暗目前靠点光衰减。
+
+Blender CPU 预览：`.local/imoScene/render_room_default2.png`（明亮版）与
+`.local/imoScene/render_room_engine_light.png`（近似室内布光）。
 
 ## 边界
 

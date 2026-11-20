@@ -73,20 +73,28 @@ void initLights() {
         gLight->SetAmbient(white, 1.0f);
         return;
     }
+    // 房间模式走室内布光：无阴影的方向光只会把整个房间照成一片平，故不加太阳；
+    // 环境亮度由 applyRoomAmbient() 的 SH9 统一给（见 AppInit），这里只放暖色吸顶灯。
+    if (gRoomLoaded) {
+        const GNg::sVEC3 indoorAmbient = {0.30f, 0.28f, 0.25f};
+        gLight->SetAmbient(indoorAmbient, 1.0f);
+        const char *lampEnv = std::getenv("IMO_SCENE_LAMPS");
+        const float lampScale = (lampEnv != 0) ? static_cast<float>(std::atof(lampEnv)) : 1.0f;
+        const GNg::sVEC3 lampColor = {1.0f, 0.90f, 0.78f};
+        const GNg::sVEC3 lampAboveChar = {0.0f, 2.3f, 0.3f};
+        const GNg::sVEC3 lampAboveKitchen = {2.5f, 2.3f, -3.2f};
+        const GNg::sVEC3 lampEntrance = {4.6f, 2.2f, 0.4f};
+        gLight->AddPoint(lampAboveChar, 8.0f, lampColor, 2.6f * lampScale);
+        gLight->AddPoint(lampAboveKitchen, 8.0f, lampColor, 1.8f * lampScale);
+        gLight->AddPoint(lampEntrance, 7.0f, lampColor, 1.1f * lampScale);
+        return;
+    }
     // 真机截图偏白：环境光与太阳都收敛到“白衣服仍能分辨褶皱”的量级，不再加点光补亮。
     const GNg::sVEC3 ambient = {0.30f, 0.32f, 0.36f};
     gLight->SetAmbient(ambient, 1.0f);
     const GNg::sVEC3 sunDirection = {-0.35f, -0.85f, 0.4f};
     const GNg::sVEC3 sunColor = {1.0f, 0.97f, 0.92f};
     gLight->AddDirectional(sunDirection, sunColor, 0.8f, false);
-    // 室内是吸顶灯照明：方向光没有阴影，加点光补房间的暖色近距离照明（吊顶高度 2.6 m）。
-    if (gRoomLoaded) {
-        const GNg::sVEC3 lampColor = {1.0f, 0.92f, 0.82f};
-        const GNg::sVEC3 lampAboveChar = {0.0f, 2.3f, 0.3f};
-        const GNg::sVEC3 lampAboveKitchen = {2.5f, 2.3f, -3.2f};
-        gLight->AddPoint(lampAboveChar, 8.0f, lampColor, 2.0f);
-        gLight->AddPoint(lampAboveKitchen, 8.0f, lampColor, 1.4f);
-    }
 }
 
 // 环境变量 → 转换选项（IMO_SCENE_SHOW / IMO_SCENE_HIDE，逗号分隔的子串）。
@@ -244,12 +252,26 @@ GN_CALL void AppInit() {
     gLoaded = loadScene();
     initLights();
     if (gLoaded) {
-        // 前向 PBR 走 GI/IBL 环境光（引擎初始化已完成，GI UBO 已建好）；
-        // 诊断模式下关掉 GI，避免天空 IBL 把贴图颜色冲白。
-        GNg::GN_VkEnableGI(std::getenv("IMO_SCENE_ALBEDO") == 0);
-        // 曝光：真机发白说明合成阶段整体偏亮，默认收 -0.5 EV；IMO_SCENE_EV 可覆盖。
+        const bool albedoDebug = std::getenv("IMO_SCENE_ALBEDO") != 0;
+        if (!albedoDebug) {
+            if (gRoomLoaded) {
+                // 室内环境光：户外蓝天直接当 IBL 会把房间洗成淡蓝、没有明暗；
+                // 换成均匀暖灰 SH9（IMO_SCENE_AMBIENT 可调，默认 0.35）。
+                const char *ambientEnv = std::getenv("IMO_SCENE_AMBIENT");
+                const float ambient =
+                    (ambientEnv != 0) ? static_cast<float>(std::atof(ambientEnv)) : 0.35f;
+                imoScene::applyRoomAmbient(ambient);
+            } else {
+                // 角色模式：保留原先的 GI/IBL 取景。
+                GNg::GN_VkEnableGI(true);
+            }
+        } else {
+            GNg::GN_VkEnableGI(false);
+        }
+        // 曝光：真机发白说明合成阶段整体偏亮，默认收 -0.5 EV；室内再收一点避免死白。
         const char *evEnv = std::getenv("IMO_SCENE_EV");
-        const float ev = (evEnv != 0) ? static_cast<float>(std::atof(evEnv)) : -0.5f;
+        const float ev = (evEnv != 0) ? static_cast<float>(std::atof(evEnv))
+                                      : (gRoomLoaded ? -0.40f : -0.5f);
         GNg::GN_VkSetExposure(ev);
     }
 }
