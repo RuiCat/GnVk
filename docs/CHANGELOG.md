@@ -19,6 +19,18 @@
   **本会话无 GPU（/dev/dri 缺失），画面未运行验证**——需在含 Vulkan 设备的机器上跑
   `LD_LIBRARY_PATH=. ./build/imoScene` 确认。
 
+## 2026-11-20（续） — imoScene：二值 alpha 走 MASK、光照收敛、网格过滤
+
+- 真机截图（第二次）显示角色像半透明鬼影、多层服装叠在一起：全 `BLEND` 路径深度写关 + 网格级排序，
+  内层衣物会透过外层；同时太阳 1.4 + 环境光 + 补光过曝。
+- alpha：按贴图统计分流——无 alpha → 源模式（`OPAQUE`）、半透明占比 >30%（`Toumei`）→ `BLEND`、
+  其余（二值镂空）→ `MASK 0.5`。Blender `CLIP` 与 `BLEND` 渲染同一 GLB 结果一致（`render_clip.png`）。
+- 光照：环境光 0.32→0.12、太阳 1.4→0.9、去掉补光点光源。
+- 新增 `IMO_SCENE_HIDE` / `IMO_SCENE_SHOW`（网格名子串）与 `IMO_SCENE_LIST=1` 清单，用于隐藏特效网格
+  （如 `tama` 魔法球）或重复服装。
+- 验证：`make imoScene` 0 error；`IMO_SCENE_INSPECT=1` 60 网格；`IMO_SCENE_HIDE=tama,PleatedMask.001`
+  过滤后 41 网格；lint 0 违规 0 告警。真机画面待复验。
+
 ## 2026-11-20（续） — imoScene 材质 alpha 改为跟随 glTF（修角色只剩头发/帽子）
 
 - 现象：真机运行场景不再死机（上一条缓冲延迟释放修复生效），但角色躯干/衣服被裁掉，只剩头发、帽子和靴子。

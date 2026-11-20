@@ -64,13 +64,23 @@ struct sModelData {
     uint32_t aTriangleCount;
     uint32_t aZeroWeightVertices; // 四个权重全为 0 的顶点数（烘焙时保留原位置）
     uint32_t aSkippedPrimitives;  // 缺 POSITION 等不可用 primitive 数
+    uint32_t aFilteredMeshes;     // 被 show/hide 过滤掉的网格数
 
     sModelData();
     void clear();
 };
 
+// 转换选项：网格名过滤（逗号分隔的**子串**，大小写不敏感），用于隐藏重复服装/特效网格。
+struct sConvertOptions {
+    std::string aShowFilter; // 非空时只保留命中该列表的网格
+    std::string aHideFilter; // 命中该列表的网格一律跳过
+
+    sConvertOptions();
+};
+
 // 读取 glTF/GLB 并烘焙成 sModelData；失败时 out 清空、error 写明原因。
-bool buildModelFromGltf(const char *path, sModelData &out, std::string &error);
+bool buildModelFromGltf(const char *path, sModelData &out, std::string &error,
+                        const sConvertOptions &options = sConvertOptions());
 
 // alpha 模式的可读名（日志/诊断用）。
 const char *alphaModeName(GN3d::eALPHA_MODE mode);

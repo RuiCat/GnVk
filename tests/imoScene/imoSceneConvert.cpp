@@ -11,6 +11,7 @@
 #include "GN_3Dtexture.h"
 
 #include <cmath>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -22,6 +23,8 @@ namespace {
 const size_t VERTEX_FLOATS = 11;
 // alpha test 阈值：与 glTF 默认一致，头发/镂空衣物按硬边裁剪。
 const float ALPHA_CUTOFF = 0.5f;
+// 半透明像素占比超过该值才走 BLEND；其余 alpha 视为二值镂空 → MASK。
+const float PARTIAL_ALPHA_BLEND_THRESHOLD = 0.30f;
 // 权重和下限：低于该值的顶点视为未绑定，保留原始位置。
 const float MIN_WEIGHT_SUM = 1.0e-6f;
 
@@ -45,6 +48,49 @@ GNg::sVEC3 transformDirection(const GNg::sMAT44 &mat, const GNg::sVEC3 &v) {
 
 bool isFiniteVec(const GNg::sVEC3 &v) {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+// 逗号分隔的子串匹配（大小写不敏感）：空列表返回 true。
+bool matchesNameFilter(const std::string &name, const std::string &filter) {
+    if (filter.empty()) {
+        return true;
+    }
+    std::string lowerName = name;
+    for (size_t i = 0; i < lowerName.size(); ++i) {
+        lowerName[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(lowerName[i])));
+    }
+    size_t start = 0;
+    while (start <= filter.size()) {
+        const size_t comma = filter.find(',', start);
+        const size_t end = (comma == std::string::npos) ? filter.size() : comma;
+        std::string token = filter.substr(start, end - start);
+        for (size_t i = 0; i < token.size(); ++i) {
+            token[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[i])));
+        }
+        if (!token.empty() && lowerName.find(token) != std::string::npos) {
+            return true;
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return false;
+}
+
+// 贴图 alpha 分布 → 引擎 alpha 模式：
+//   * 无 alpha 像素 → 源模式（本资产为 OPAQUE）；
+//   * 半透明像素占比 > 30%（Toumei 这类玻璃/薄纱）→ BLEND；
+//   * 其余是二值镂空（衣料外侧 alpha=0、本体 1）→ MASK（Blender CLIP 渲染与 BLEND 结果一致，
+//     比 BLEND 少一次透明排序、且能写深度）。
+GN3d::eALPHA_MODE resolveAlphaMode(const sTextureData &texture, GN3d::eALPHA_MODE source) {
+    if (!texture.aHasAlpha || source == GN3d::eALPHA_OPAQUE) {
+        return source;
+    }
+    if (texture.aPartialAlphaRatio > PARTIAL_ALPHA_BLEND_THRESHOLD) {
+        return GN3d::eALPHA_BLEND;
+    }
+    return GN3d::eALPHA_MASK;
 }
 
 // 解出贴图的 alpha 统计；无法解码时按无 alpha 处理（仍然把原始字节留给上传层）。
@@ -169,7 +215,8 @@ bool bakePrimitive(const GN3d::sASSET &asset, const GN3d::sASSET_PRIMITIVE &prim
 }
 
 // 逐节点烘焙：蒙皮节点用调色板，静态节点用节点世界矩阵（glTF 规范：蒙皮忽略节点变换）。
-void bakeNodes(const GN3d::sASSET &asset, const std::vector<GNg::sMAT44> &world, sModelData &out) {
+void bakeNodes(const GN3d::sASSET &asset, const std::vector<GNg::sMAT44> &world,
+               const sConvertOptions &options, sModelData &out) {
     std::vector<std::vector<GNg::sMAT44>> palettes(asset.aSkins.size());
     std::vector<bool> paletteReady(asset.aSkins.size(), false);
     std::vector<GN3d::sANIM_TRANSFORM> localPose;
@@ -207,6 +254,14 @@ void bakeNodes(const GN3d::sASSET &asset, const std::vector<GNg::sMAT44> &world,
                 std::snprintf(suffix, sizeof(suffix), "#%zu", primitiveIndex);
                 meshName += suffix;
             }
+            const bool shown = options.aShowFilter.empty() ||
+                               matchesNameFilter(meshName, options.aShowFilter);
+            const bool hidden = !options.aHideFilter.empty() &&
+                                matchesNameFilter(meshName, options.aHideFilter);
+            if (!shown || hidden) {
+                ++out.aFilteredMeshes;
+                continue;
+            }
             if (!bakePrimitive(asset, mesh.aPrimitives[primitiveIndex], skinned, palette,
                                world[nodeIndex], out, meshName)) {
                 ++out.aSkippedPrimitives;
@@ -242,10 +297,15 @@ void bakeMaterials(const GN3d::sASSET &asset, sModelData &out) {
         material.aAlbedoTexture = source.aAlbedoTexture;
         material.aNormalTexture = source.aNormalTexture;
         material.aAlphaCutoff = ALPHA_CUTOFF;
-        // 直接采用 glTF 的 alphaMode：Blender 用同一份 GLB 以 BLEND 渲出完整角色，
-        // 说明本资产的贴图 alpha 就是镂空/透明的正确来源；按贴图统计重判为 MASK
-        // 会把外套/身体整片裁掉（实测只剩头发、帽子和靴子）。
-        material.aAlphaMode = source.aAlphaMode;
+        const bool hasTexture = source.aAlbedoTexture >= 0 &&
+                                static_cast<size_t>(source.aAlbedoTexture) < out.aTextures.size();
+        if (hasTexture) {
+            material.aAlphaMode =
+                resolveAlphaMode(out.aTextures[static_cast<size_t>(source.aAlbedoTexture)],
+                                 source.aAlphaMode);
+        } else {
+            material.aAlphaMode = source.aAlphaMode;
+        }
     }
     if (out.aMaterials.empty()) {
         sMaterialData fallback;
@@ -299,6 +359,8 @@ void recenterModel(sModelData &out) {
 
 } // namespace
 
+sConvertOptions::sConvertOptions() {}
+
 sMeshData::sMeshData() : aMaterial(-1) {
     aMin.x = aMin.y = aMin.z = 0.0f;
     aMax.x = aMax.y = aMax.z = 0.0f;
@@ -313,7 +375,8 @@ sMaterialData::sMaterialData()
 sTextureData::sTextureData() : aHasAlpha(false), aPartialAlphaRatio(0.0f) {}
 
 sModelData::sModelData()
-    : aVertexCount(0), aTriangleCount(0), aZeroWeightVertices(0), aSkippedPrimitives(0) {
+    : aVertexCount(0), aTriangleCount(0), aZeroWeightVertices(0), aSkippedPrimitives(0),
+      aFilteredMeshes(0) {
     aMin.x = aMin.y = aMin.z = 0.0f;
     aMax.x = aMax.y = aMax.z = 0.0f;
 }
@@ -326,6 +389,7 @@ void sModelData::clear() {
     aTriangleCount = 0;
     aZeroWeightVertices = 0;
     aSkippedPrimitives = 0;
+    aFilteredMeshes = 0;
     aMin.x = aMin.y = aMin.z = 0.0f;
     aMax.x = aMax.y = aMax.z = 0.0f;
 }
@@ -341,7 +405,8 @@ const char *alphaModeName(GN3d::eALPHA_MODE mode) {
     }
 }
 
-bool buildModelFromGltf(const char *path, sModelData &out, std::string &error) {
+bool buildModelFromGltf(const char *path, sModelData &out, std::string &error,
+                        const sConvertOptions &options) {
     out.clear();
     if (path == 0 || path[0] == '\0') {
         error = "模型路径为空";
@@ -359,7 +424,7 @@ bool buildModelFromGltf(const char *path, sModelData &out, std::string &error) {
     }
     bakeTextures(asset, out);
     bakeMaterials(asset, out);
-    bakeNodes(asset, world, out);
+    bakeNodes(asset, world, options, out);
     if (out.aMeshes.empty()) {
         out.clear();
         error = "glTF 中没有可用网格";

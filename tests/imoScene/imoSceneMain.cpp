@@ -60,14 +60,41 @@ void drawGround() {
 // 太阳 + 冷色补光；不启用阴影（本场景只验证几何/材质/相机链路）。
 void initLights() {
     gLight = new GN3d::cLIGHT();
-    const GNg::sVEC3 ambient = {0.32f, 0.33f, 0.38f};
+    // 真机截图偏白：环境光与太阳都收敛到“白衣服仍能分辨褶皱”的量级，不再加点光补亮。
+    const GNg::sVEC3 ambient = {0.12f, 0.13f, 0.16f};
     gLight->SetAmbient(ambient, 1.0f);
     const GNg::sVEC3 sunDirection = {-0.35f, -0.85f, 0.4f};
     const GNg::sVEC3 sunColor = {1.0f, 0.97f, 0.92f};
-    gLight->AddDirectional(sunDirection, sunColor, 1.4f, false);
-    const GNg::sVEC3 fillPosition = {2.5f, 2.0f, 3.0f};
-    const GNg::sVEC3 fillColor = {0.5f, 0.55f, 0.65f};
-    gLight->AddPoint(fillPosition, 12.0f, fillColor, 0.7f);
+    gLight->AddDirectional(sunDirection, sunColor, 0.9f, false);
+}
+
+// 环境变量 → 转换选项（IMO_SCENE_SHOW / IMO_SCENE_HIDE，逗号分隔的子串）。
+imoScene::sConvertOptions convertOptionsFromEnv() {
+    imoScene::sConvertOptions options;
+    const char *showFilter = std::getenv("IMO_SCENE_SHOW");
+    if (showFilter != 0) {
+        options.aShowFilter = showFilter;
+    }
+    const char *hideFilter = std::getenv("IMO_SCENE_HIDE");
+    if (hideFilter != 0) {
+        options.aHideFilter = hideFilter;
+    }
+    return options;
+}
+
+// IMO_SCENE_LIST=1 时打印网格→材质清单，便于用 IMO_SCENE_HIDE/SHOW 选择服装。
+void printMeshListIfRequested(const imoScene::sModelData &data) {
+    if (std::getenv("IMO_SCENE_LIST") == 0) {
+        return;
+    }
+    for (size_t index = 0; index < data.aMeshes.size(); ++index) {
+        const imoScene::sMeshData &mesh = data.aMeshes[index];
+        const char *material = (mesh.aMaterial >= 0 &&
+                                static_cast<size_t>(mesh.aMaterial) < data.aMaterials.size())
+                                   ? data.aMaterials[static_cast<size_t>(mesh.aMaterial)].aName.c_str()
+                                   : "-";
+        std::printf("[imoScene] mesh %2zu %-34s mat=%s\n", index, mesh.aName.c_str(), material);
+    }
 }
 
 // 只读自检：IMO_SCENE_INSPECT=1 时只走 CPU 转换并退出，不创建窗口、不初始化 Vulkan。
@@ -82,15 +109,17 @@ int runInspectIfRequested() {
     std::printf("[imoScene] inspect 模型: %s\n", path);
     imoScene::sModelData data;
     std::string error;
-    if (!imoScene::buildModelFromGltf(path, data, error)) {
+    if (!imoScene::buildModelFromGltf(path, data, error, convertOptionsFromEnv())) {
         std::fprintf(stderr, "[imoScene] inspect 失败: %s\n", error.c_str());
         return 2;
     }
     std::printf("[imoScene] inspect meshes=%zu verts=%u tris=%u textures=%zu materials=%zu\n",
                 data.aMeshes.size(), data.aVertexCount, data.aTriangleCount, data.aTextures.size(),
                 data.aMaterials.size());
-    std::printf("[imoScene] inspect height=%.3f zeroWeight=%u skipped=%u\n",
-                data.aMax.y - data.aMin.y, data.aZeroWeightVertices, data.aSkippedPrimitives);
+    std::printf("[imoScene] inspect height=%.3f zeroWeight=%u skipped=%u filtered=%u\n",
+                data.aMax.y - data.aMin.y, data.aZeroWeightVertices, data.aSkippedPrimitives,
+                data.aFilteredMeshes);
+    printMeshListIfRequested(data);
     return 0;
 }
 
@@ -103,7 +132,7 @@ bool loadScene() {
 
     imoScene::sModelData data;
     std::string error;
-    if (!imoScene::buildModelFromGltf(path, data, error)) {
+    if (!imoScene::buildModelFromGltf(path, data, error, convertOptionsFromEnv())) {
         std::fprintf(stderr, "[imoScene] 加载失败: %s\n", error.c_str());
         std::fprintf(stderr, "[imoScene] 先生成资产: make imoSceneAsset（需要 Blender）\n");
         return false;
@@ -129,9 +158,11 @@ bool loadScene() {
     std::printf("[imoScene] 网格 %zu 个，顶点 %u，三角形 %u，贴图 %zu 张，材质 %zu 个\n",
                 data.aMeshes.size(), data.aVertexCount, data.aTriangleCount, data.aTextures.size(),
                 data.aMaterials.size());
-    std::printf("[imoScene] AABB y=[%.3f, %.3f] 高度 %.3f m；零权重顶点 %u，跳过 primitive %u\n",
+    std::printf("[imoScene] AABB y=[%.3f, %.3f] 高度 %.3f m；零权重顶点 %u，跳过 primitive %u，"
+                "过滤网格 %u\n",
                 data.aMin.y, data.aMax.y, height, data.aZeroWeightVertices,
-                data.aSkippedPrimitives);
+                data.aSkippedPrimitives, data.aFilteredMeshes);
+    printMeshListIfRequested(data);
     for (size_t index = 0; index < data.aMaterials.size(); ++index) {
         const imoScene::sMaterialData &material = data.aMaterials[index];
         std::printf("[imoScene] 材质 %2zu %-40s alpha=%s tex=%d\n", index,
