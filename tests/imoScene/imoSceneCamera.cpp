@@ -120,13 +120,23 @@ void cameraUpdate(float deltaSeconds) {
     }
 }
 
-bool cameraBuildViewProj(float aspect, GNg::sMAT44 &viewProjection) {
+bool cameraBuildViewProj(float aspect, GNg::sMAT44 &viewProjection, GNg::sMAT44 *viewOut) {
     if (!(aspect > 0.0f) || !std::isfinite(aspect)) {
         return false;
     }
     GNg::sMAT44 view;
     GNg::sMAT44 projection;
-    return gCamera.BuildViewProj(aspect, &view, &projection, &viewProjection);
+    if (!gCamera.BuildViewProj(aspect, &view, &projection, &viewProjection)) {
+        return false;
+    }
+    if (viewOut != 0) {
+        *viewOut = view;
+    }
+    return true;
+}
+
+float cameraFovYRadians() {
+    return gCamera.aFovY * GN3d::CAMERA_DEG_TO_RAD;
 }
 
 GNg::sVEC3 cameraPosition() {

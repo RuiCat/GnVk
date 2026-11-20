@@ -8,6 +8,7 @@
 
 #include "imoSceneCamera.h"
 #include "imoSceneRoom.h"
+#include "imoSceneShadow.h"
 #include "imoSceneUpload.h"
 
 #include "GN_3Dlight.h"
@@ -35,6 +36,9 @@ imoScene::sSceneModel gRoom;    // 房间背景（游戏场景静态网格，可
 GN3d::cLIGHT *gLight = 0;
 bool gLoaded = false;
 bool gRoomLoaded = false;
+imoScene::sShadowOptions gShadowOptions;
+GN3d::sAABB gCasterBox;      // 角色世界 AABB（阴影拟合用）
+bool gShadowsReady = false;
 unsigned int gLastTick = 0;
 
 // 一块 60×60 m 的地面（PBR 管线；法线 +Y、UV 铺满一块）。
@@ -87,6 +91,8 @@ void initLights() {
         gLight->AddPoint(lampAboveChar, 8.0f, lampColor, 2.6f * lampScale);
         gLight->AddPoint(lampAboveKitchen, 8.0f, lampColor, 1.8f * lampScale);
         gLight->AddPoint(lampEntrance, 7.0f, lampColor, 1.1f * lampScale);
+        // 阴影方向光：近似吸顶灯方向，给角色在木地板上落一层接触阴影。
+        gShadowsReady = imoScene::shadowAttachLight(gLight, gShadowOptions);
         return;
     }
     // 真机截图偏白：环境光与太阳都收敛到“白衣服仍能分辨褶皱”的量级，不再加点光补亮。
@@ -224,6 +230,7 @@ bool loadScene() {
                     material.aName.c_str(), imoScene::alphaModeName(material.aAlphaMode),
                     material.aAlbedoTexture);
     }
+    gCasterBox = GN3d::sAABB(gScene.aMin, gScene.aMax);
     const GNg::sVEC3 focus = {0.0f, height * 0.55f, 0.0f};
     imoScene::cameraInit(focus, height);
 
@@ -250,6 +257,7 @@ extern "C" {
 
 GN_CALL void AppInit() {
     gLoaded = loadScene();
+    gShadowOptions = imoScene::shadowOptionsFromEnv();
     initLights();
     if (gLoaded) {
         const bool albedoDebug = std::getenv("IMO_SCENE_ALBEDO") != 0;
@@ -283,6 +291,7 @@ GN_CALL void AppUnInit() {
     gLight = 0;
     gLoaded = false;
     gRoomLoaded = false;
+    gShadowsReady = false;
 }
 
 GN_CALL void AppDisplay2D(unsigned int nTime) {
@@ -300,12 +309,20 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     if (firstFrame) {
         std::fprintf(stderr, "[imoScene] 首帧: 开始 3D pass（%dx%d）\n", width, height);
     }
+    const float aspect = static_cast<float>(width) / static_cast<float>(height);
+    GNg::sMAT44 view;
     GNg::sMAT44 viewProjection;
-    if (!imoScene::cameraBuildViewProj(static_cast<float>(width) / static_cast<float>(height),
-                                       viewProjection)) {
+    if (!imoScene::cameraBuildViewProj(aspect, viewProjection, &view)) {
         return;
     }
     const GNg::sVEC3 eye = imoScene::cameraPosition();
+    // 阴影深度图必须在 3D pass 之前画；只投角色（房间封闭，自己挡自己会让室内全黑）。
+    if (gShadowsReady && gLoaded) {
+        if (imoScene::shadowFit(gLight, view, eye, imoScene::cameraFovYRadians(), aspect,
+                                gCasterBox, gShadowOptions)) {
+            imoScene::shadowDrawCaster(gScene.aModel);
+        }
+    }
     GNg::GN_VkBegin3DPass(&viewProjection, &eye, gLight->GetUBO(), sizeof(GN3d::sLIGHT_UBO));
     GNg::GN_VkDrawSkybox(&viewProjection);
     // 房间自带地板与家具：再画一块 60×60 的虚拟地面会与木地板 z-fighting 并盖住房间。

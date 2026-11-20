@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-21 — imoScene 房间阴影（方向光 CSM，只投角色）
+
+- 新增 `tests/imoScene/imoSceneShadow.h/.cpp`：每帧按相机拟合 4 级 CSM（2048²、λ=0.5、texel snapping），
+  拟合盒 = 角色 AABB 外扩 2.5 m，far = max(盒对角, 相机到最远角 + 0.5)（与 mmdViewer 同口径）；
+  在 3D pass 之前逐级 `GN_VkShadowPassBegin/End` + `cMODEL::DrawShadow`。
+- **只让角色投影**：房间封闭，墙面参与投影会把方向光挡死（室内全黑），因此阴影 pass 不画房间；
+  房间照明仍由 SH9 环境 + 三盏吸顶点光负责。
+- 房间模式额外加一盏向下的阴影方向光（0.45 强度，`IMO_SCENE_SHADOW_INTENSITY` 可调），
+  角色在木地板上得到接触阴影；`IMO_SCENE_SHADOWS=0` 关闭，角色模式布光不变。
+- `imoSceneCamera` 增加 `cameraBuildViewProj(..., viewOut)` 与 `cameraFovYRadians()` 供级联拟合使用。
+- 已知边界：`cMODEL::DrawShadow` 跳过非 OPAQUE 网格（角色 22/32 OPAQUE、10 MASK），MASK 部件不投影。
+- 验证：`make imoScene` 0 error；`IMO_SCENE_INSPECT=1/room` 回归不变；本机无 Vulkan 设备，
+  **阴影画面待真机确认**。
+
 ## 2026-11-21 — imoScene 直接运行（rpath 指向仓库根）
 
 - `./build/imoScene` 报 `error while loading shared libraries: libGN_mini.so`：链接时加

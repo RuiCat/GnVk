@@ -19,7 +19,11 @@ void cameraReset();
 void cameraUpdate(float deltaSeconds);
 
 // 取本帧 view-projection（aspect 非法或矩阵退化返回 false，调用方跳过本帧）。
-bool cameraBuildViewProj(float aspect, GNg::sMAT44 &viewProjection);
+// viewOut 非空时同时输出视图矩阵（阴影级联拟合要用）。
+bool cameraBuildViewProj(float aspect, GNg::sMAT44 &viewProjection, GNg::sMAT44 *viewOut = 0);
+
+// 垂直视场角（弧度）：阴影拟合需要与相机一致的投影参数。
+float cameraFovYRadians();
 
 // 相机世界位置（绘制/排序用）。
 GNg::sVEC3 cameraPosition();
