@@ -110,8 +110,8 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
 
 - 默认模型：`.local/imoScene/clothes_imo_chan.glb`（`make imoSceneAsset` 生成，源 FBX 指向 `models/Clothes_imo_chan`）；
 - 默认过滤：`Kemo_Body,Jirai`（游戏里同为 inactive 的裸体/镜片变体），可用 `IMO_SCENE_HIDE=` 覆盖；
-- 想回看 `imo_chan` 那套（短裤+白上衣）：
-  `IMO_SCENE_MODEL=.local/imoScene/imo_chan.glb IMO_SCENE_HIDE=Kemo_Body LD_LIBRARY_PATH=. ./build/imoScene`。
+- **`imo_chan` 根导出的 GLB 已废弃（不要再用）**：那套资源里的身体是 inactive 的 kemo 变体，
+  衣物与身体不匹配（胸穿模、缺腿），属于提取源本身的问题；真机验证 `clothes_imo_chan` 才是正确显示。
 
 ## 资产修正（提取管线的贴图错绑）
 

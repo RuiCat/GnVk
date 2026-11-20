@@ -19,6 +19,13 @@
   **本会话无 GPU（/dev/dri 缺失），画面未运行验证**——需在含 Vulkan 设备的机器上跑
   `LD_LIBRARY_PATH=. ./build/imoScene` 确认。
 
+## 2026-11-20（续·收口） — imoScene 定稿：Clothes_imo_chan 为唯一正确模型
+
+- 真机确认：`clothes_imo_chan` 显示正确；`imo_chan` 根导出的 GLB 错误（身体是 inactive 的 kemo 变体，
+  衣物与身体不匹配：胸穿模、缺腿），已从本机资产目录删除，README 标注废弃。
+- 默认模型/默认隐藏/`make imoSceneAsset` 全部指向 `models/Clothes_imo_chan`；
+  本任务场景侧收口。重建资产命令：`make imoSceneAsset && make imoScene`。
+
 ## 2026-11-20（续） — imoScene：改用 Clothes_imo_chan + 默认隐藏 inactive 变体
 
 - 取证：游戏 `_Data` 里 `imo_chan`/`Clothes_imo_chan` 两个根的 `kemo_Body` 都是 `m_IsActive=False`
