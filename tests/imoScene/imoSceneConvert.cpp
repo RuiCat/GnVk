@@ -283,7 +283,8 @@ void bakeTextures(const GN3d::sASSET &asset, sModelData &out) {
 }
 
 // 材质：贴图 alpha 决定 OPAQUE/MASK/BLEND；无贴图时保留 glTF 原声明（玻璃类仍可 BLEND）。
-void bakeMaterials(const GN3d::sASSET &asset, sModelData &out) {
+void bakeMaterials(const GN3d::sASSET &asset, const sConvertOptions &options,
+                   sModelData &out) {
     out.aMaterials.resize(asset.aMaterials.size());
     for (size_t index = 0; index < asset.aMaterials.size(); ++index) {
         const GN3d::sASSET_MATERIAL &source = asset.aMaterials[index];
@@ -299,7 +300,9 @@ void bakeMaterials(const GN3d::sASSET &asset, sModelData &out) {
         material.aAlphaCutoff = ALPHA_CUTOFF;
         const bool hasTexture = source.aAlbedoTexture >= 0 &&
                                 static_cast<size_t>(source.aAlbedoTexture) < out.aTextures.size();
-        if (hasTexture) {
+        if (options.aForceOpaque) {
+            material.aAlphaMode = GN3d::eALPHA_OPAQUE;
+        } else if (hasTexture) {
             material.aAlphaMode =
                 resolveAlphaMode(out.aTextures[static_cast<size_t>(source.aAlbedoTexture)],
                                  source.aAlphaMode);
@@ -359,7 +362,7 @@ void recenterModel(sModelData &out) {
 
 } // namespace
 
-sConvertOptions::sConvertOptions() {}
+sConvertOptions::sConvertOptions() : aForceOpaque(false) {}
 
 sMeshData::sMeshData() : aMaterial(-1) {
     aMin.x = aMin.y = aMin.z = 0.0f;
@@ -423,7 +426,7 @@ bool buildModelFromGltf(const char *path, sModelData &out, std::string &error,
         return false;
     }
     bakeTextures(asset, out);
-    bakeMaterials(asset, out);
+    bakeMaterials(asset, options, out);
     bakeNodes(asset, world, options, out);
     if (out.aMeshes.empty()) {
         out.clear();

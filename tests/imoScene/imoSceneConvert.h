@@ -74,8 +74,10 @@ struct sModelData {
 struct sConvertOptions {
     std::string aShowFilter; // 非空时只保留命中该列表的网格
     std::string aHideFilter; // 命中该列表的网格一律跳过
+    bool aForceOpaque;       // 调试：忽略 alpha，全部按 OPAQUE 画（区分"纹理黑"与"镂空")
 
     sConvertOptions();
+    // 说明见字段注释。
 };
 
 // 读取 glTF/GLB 并烘焙成 sModelData；失败时 out 清空、error 写明原因。

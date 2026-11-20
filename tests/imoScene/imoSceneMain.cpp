@@ -60,12 +60,19 @@ void drawGround() {
 // 太阳 + 冷色补光；不启用阴影（本场景只验证几何/材质/相机链路）。
 void initLights() {
     gLight = new GN3d::cLIGHT();
+    if (std::getenv("IMO_SCENE_ALBEDO") != 0) {
+        // 诊断：关 GI、去掉方向光，只用白色环境光 ×1 ⇒ 画面上是“贴图原色”，用来区分
+        // 「纹理没绑上/曝光过亮」和「alpha 镂空」两类问题。
+        const GNg::sVEC3 white = {1.0f, 1.0f, 1.0f};
+        gLight->SetAmbient(white, 1.0f);
+        return;
+    }
     // 真机截图偏白：环境光与太阳都收敛到“白衣服仍能分辨褶皱”的量级，不再加点光补亮。
-    const GNg::sVEC3 ambient = {0.12f, 0.13f, 0.16f};
+    const GNg::sVEC3 ambient = {0.30f, 0.32f, 0.36f};
     gLight->SetAmbient(ambient, 1.0f);
     const GNg::sVEC3 sunDirection = {-0.35f, -0.85f, 0.4f};
     const GNg::sVEC3 sunColor = {1.0f, 0.97f, 0.92f};
-    gLight->AddDirectional(sunDirection, sunColor, 0.9f, false);
+    gLight->AddDirectional(sunDirection, sunColor, 0.8f, false);
 }
 
 // 环境变量 → 转换选项（IMO_SCENE_SHOW / IMO_SCENE_HIDE，逗号分隔的子串）。
@@ -79,6 +86,7 @@ imoScene::sConvertOptions convertOptionsFromEnv() {
     if (hideFilter != 0) {
         options.aHideFilter = hideFilter;
     }
+    options.aForceOpaque = std::getenv("IMO_SCENE_FORCE_OPAQUE") != 0;
     return options;
 }
 
@@ -183,8 +191,13 @@ GN_CALL void AppInit() {
     gLoaded = loadScene();
     initLights();
     if (gLoaded) {
-        // 前向 PBR 走 GI/IBL 环境光（引擎初始化已完成，GI UBO 已建好）。
-        GNg::GN_VkEnableGI(true);
+        // 前向 PBR 走 GI/IBL 环境光（引擎初始化已完成，GI UBO 已建好）；
+        // 诊断模式下关掉 GI，避免天空 IBL 把贴图颜色冲白。
+        GNg::GN_VkEnableGI(std::getenv("IMO_SCENE_ALBEDO") == 0);
+        // 曝光：真机发白说明合成阶段整体偏亮，默认收 -0.5 EV；IMO_SCENE_EV 可覆盖。
+        const char *evEnv = std::getenv("IMO_SCENE_EV");
+        const float ev = (evEnv != 0) ? static_cast<float>(std::atof(evEnv)) : -0.5f;
+        GNg::GN_VkSetExposure(ev);
     }
 }
 
