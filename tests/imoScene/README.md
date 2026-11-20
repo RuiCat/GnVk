@@ -102,6 +102,13 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
   其余 → `MASK 0.5`。Blender 用 `CLIP` 渲染同一份 GLB 与 `BLEND` 结果一致（`render_clip.png` / `render_gltf.png`）。
 - **重定心**：网格整体平移到脚底 y=0、xz 中心为原点，相机取景只依赖模型高度。
 
+## 资产修正（提取管线的贴图错绑）
+
+`N00_000_00_Body_00_SKIN` 在原 FBX 里被绑到内衣贴图 `pan_ichigo_Pink_P_524.png`（97.6% 透明背景、无皮肤），
+按 MASK 渲染时人体几乎整片被裁掉。`tools/assetconvert/fbx2glb.py` 现在会把它换成同目录
+`textures/ImoBody_NL_*.png`（人体皮肤图集）；用 Body_SKIN 网格的 UV 采样该图，alpha 覆盖率 100%、
+RGB 为正常肤色，确认是正确的贴图。转换日志会打印 `FBX2GLB remap: Body_00_SKIN -> ...`。
+
 ## 边界
 
 - 不做动画播放：humanoid muscle-clip 没有离线关键帧（见提取报告），本场景是静态导入姿势；

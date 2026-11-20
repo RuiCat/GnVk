@@ -8,6 +8,8 @@
   * 不导出动画（场景只显示导入姿势）与 morph 目标；
   * 不启用 Draco（引擎的 glTF 导入不解压缩扩展）；
   * 主网格与挂件保持 Blender 导入后的节点层级，坐标转换交给 glTF 导出器。
+  * 修正提取管线的贴图错绑：`N00_000_00_Body_00_SKIN` 被绑到内衣贴图（pan_ichigo），
+    用同目录 `textures/ImoBody_NL_*.png`（人体皮肤图集）替换；未找到时保持原样并告警。
 """
 
 import os
@@ -38,6 +40,30 @@ def describeScene():
              len(bpy.data.materials), len(bpy.data.images)))
 
 
+
+def fixBodySkinTexture(source):
+    """把 Body_SKIN 材质错绑的内衣贴图换成 textures/ImoBody_NL_*.png 人体皮肤图集。"""
+    textureDir = os.path.join(os.path.dirname(os.path.abspath(source)), "textures")
+    if not os.path.isdir(textureDir):
+        return
+    candidates = sorted(name for name in os.listdir(textureDir)
+                        if name.startswith("ImoBody") and name.lower().endswith(".png"))
+    if not candidates:
+        print("FBX2GLB warn: 未找到 ImoBody 皮肤贴图，保留原绑定")
+        return
+    skinPath = os.path.join(textureDir, candidates[0])
+    skinImage = bpy.data.images.load(skinPath, check_existing=True)
+    fixed = 0
+    for material in bpy.data.materials:
+        if "Body_00_SKIN" not in material.name or not material.use_nodes:
+            continue
+        for node in material.node_tree.nodes:
+            if node.type == "TEX_IMAGE":
+                node.image = skinImage
+                fixed += 1
+    print("FBX2GLB remap: Body_00_SKIN -> %s (nodes=%d)" % (candidates[0], fixed))
+
+
 def main():
     """导入 FBX 并导出 GLB，打印对象/顶点统计与输出大小。"""
     source, target = parseArgs()
@@ -46,6 +72,7 @@ def main():
     started = time.time()
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.fbx(filepath=source)
+    fixBodySkinTexture(source)
     describeScene()
     os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
     bpy.ops.export_scene.gltf(

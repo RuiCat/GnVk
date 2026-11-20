@@ -19,6 +19,18 @@
   **本会话无 GPU（/dev/dri 缺失），画面未运行验证**——需在含 Vulkan 设备的机器上跑
   `LD_LIBRARY_PATH=. ./build/imoScene` 确认。
 
+## 2026-11-20（续） — imoScene：修正人体贴图错绑（Body_SKIN → ImoBody 皮肤图集）
+
+- 现象：画面正常后人体仍“不现实”——躯干/四肢按 MASK 被裁掉，只剩帽子、头发、靴子。
+- 根因：提取出的 FBX 把 `N00_000_00_Body_00_SKIN` 绑到了内衣贴图 `pan_ichigo_Pink_P_524.png`
+  （97.6% 透明背景、无皮肤色）；同目录真正的 `textures/ImoBody_NL_260428_268.png` 未被任何材质引用。
+- 证据：用 Body_SKIN 网格 UV 采样 ImoBody 图集得 alpha 覆盖率 100%、RGB≈(240,211,200) 正常肤色；
+  采样错绑的内衣图则 alpha≈0/黑。
+- 修复：`tools/assetconvert/fbx2glb.py` 在导出前把 Body_SKIN 材质的 TEX_IMAGE 节点改绑 ImoBody 图集
+  （找不到时告警并保持原样）。GLB 重新生成（14,529,228 B），Body_SKIN 材质 alpha 变 OPAQUE。
+- 验证：`make imoSceneAsset` 打印 `FBX2GLB remap: Body_00_SKIN -> ImoBody_NL_260428_268.png (nodes=2)`；
+  `IMO_SCENE_INSPECT=1` 通过；`make imoScene` 0 error；lint 0。真机画面待复验。
+
 ## 2026-11-20（续） — 修复：PBR 每 draw 改写同一描述符集，所有网格采样同一贴图
 
 - 现象：imoScene 真机画面整身呈现同一张黑白贴图图案；单独调光照/alpha 都无法解释。
