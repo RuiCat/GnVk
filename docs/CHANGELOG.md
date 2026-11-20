@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-21 — imoScene 直接运行（rpath 指向仓库根）
+
+- `./build/imoScene` 报 `error while loading shared libraries: libGN_mini.so`：链接时加
+  `-Wl,-rpath,'$ORIGIN/..'`，从 `build/` 运行时直接找到仓库根的同名库，不必再设 `LD_LIBRARY_PATH`。
+- README 与 Makefile 的运行提示同步改成 `./build/imoScene`。
+- 验证：`ldd build/imoScene` → `libGN_mini.so => .../build/../libGN_mini.so`；
+  不设 `LD_LIBRARY_PATH` 跑 `IMO_SCENE_INSPECT=room ./build/imoScene` 通过。
+
 ## 2026-11-21 — imoScene 房间室内布光（去天空 IBL / 吸顶点光）
 
 - 真机截图显示房间整体被户外天空 IBL 洗成淡蓝、没有明暗：新增 `applyRoomAmbient()`，

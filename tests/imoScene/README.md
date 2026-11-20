@@ -16,10 +16,10 @@ make imoSceneAssets  # 一次生成两份
 make imoScene
 
 # 3. 运行（需要 Vulkan 设备与窗口；本仓库开发机可能没有 /dev/dri）
-LD_LIBRARY_PATH=. ./build/imoScene
+./build/imoScene                     # 已带 rpath=$ORIGIN/..，不必设 LD_LIBRARY_PATH
 # 换模型 / 换房间 / 不要房间：
-IMO_SCENE_MODEL=/path/to/other.glb LD_LIBRARY_PATH=. ./build/imoScene
-IMO_SCENE_ROOM=/path/to/room.glb IMO_SCENE_NO_ROOM=1 LD_LIBRARY_PATH=. ./build/imoScene
+IMO_SCENE_MODEL=/path/to/other.glb ./build/imoScene
+IMO_SCENE_ROOM=/path/to/room.glb IMO_SCENE_NO_ROOM=1 ./build/imoScene
 ```
 
 `make imoSceneAsset` 的默认输入/输出可用变量覆盖：
@@ -70,11 +70,11 @@ make imoRoomAsset \
 
 ```bash
 # 1) 只做 CPU 转换与统计：不建窗口、不初始化 Vulkan
-IMO_SCENE_INSPECT=1 LD_LIBRARY_PATH=. ./build/imoScene
+IMO_SCENE_INSPECT=1 ./build/imoScene
 
 # 2) 保守运行（建议在 TTY 里、用 timeout 兜底；先跑已知可用的 mmdViewer 对照）
 GN_VSYNC=1 IMO_SCENE_NO_TEXTURES=1 IMO_SCENE_MAX_MESHES=1 \
-  timeout 20 env LD_LIBRARY_PATH=. ./build/imoScene 2> /tmp/imoScene.log
+  timeout 20 ./build/imoScene 2> /tmp/imoScene.log
 
 # 3) 逐步放开：MAX_MESHES=1 → 4 → 全部；再去掉 NO_TEXTURES
 ```
