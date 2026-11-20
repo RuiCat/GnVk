@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-20 — imo_chan 单角色场景程序（glTF 资产 + CPU 蒙皮烘焙）
+
+新增 `tests/imoScene/`：从 Unity 提取资源 `models/imo_chan/imo_chan.fbx` 建立可运行场景
+（角色导入姿势 + 地面 + 天空盒 + 方向光/补光 + 轨道相机），并新增资产转换入口。
+
+- **资产管线**：`tools/assetconvert/fbx2glb.py`（Blender 无头）：FBX → GLB，保留 skin/贴图、
+  不导动画/Draco；`make imoSceneAsset` 调它，输出到 `.local/imoScene/imo_chan.glb`（13.8 MB）。
+- **CPU 蒙皮烘焙**：GLB skin 有 1797 关节（>128 UBO 上限），场景只显示导入姿势，故用
+  `sampleLocalPose`/`buildWorld`/`computeSkinPalette` 四权重混合烘焙进顶点，再走普通 `cMODEL` PBR 路径。
+- **材质 alpha 重判**：Blender 导出的 26 个材质中 25 个标成 BLEND；按贴图 alpha 分布重判为
+  OPAQUE 18 / MASK 7 / BLEND 1（`Toumei`），避免头发整片进入网格级透明排序。
+- **重定心**：整体平移到脚底 y=0、xz 中心为原点；相机默认正面 +Z、距离 = 高度 × 2.2。
+- **操作**：左/右键旋转、滚轮缩放、中键平移、方向键/JL 旋转、R 重置。
+- **验证**：`make imoScene` 编译通过；真实 `buildModelFromGltf` 代码路径的 CPU 探针给出
+  meshes=60 / verts=129951 / tris=193318 / height=1.851 / zeroWeight=0 / badIndex=0 / nanVertex=0；
+  `lintCodeModularity`（tests/imoScene、tools/assetconvert）0 违规 0 告警。
+  **本会话无 GPU（/dev/dri 缺失），画面未运行验证**——需在含 Vulkan 设备的机器上跑
+  `LD_LIBRARY_PATH=. ./build/imoScene` 确认。
+
 ## 2026-11-01（日·晚） — 云改为独立立方体云块；删除两条旧云路径；雾/降水缺陷修复
 
 用户拍板：云不再是"一整层盖住天空"，而是世界固定的一组独立立方体云块，雨雪从各自云块底面落下。

@@ -266,6 +266,29 @@ mmdViewer: $(TARGET)
 	$(CXX) $(MMD_VIEWER_FLAGS) $(MMD_VIEWER_SRC) -L. -l$(LIB_STEM) $(LIBS) -o $(MMD_VIEWER_BIN)
 	@echo "$(GREEN)✅ 运行: LD_LIBRARY_PATH=. ./$(MMD_VIEWER_BIN)$(RESET)"
 
+# ── imo_chan 场景（glTF 角色 + 地面/天空/相机；编译不依赖 GPU）──────────
+IMO_SCENE_SRC   := $(wildcard tests/imoScene/*.cpp)
+IMO_SCENE_BIN   := build/imoScene
+IMO_SCENE_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+# 转换输入/输出：源 FBX 在提取资源盘，GLB 落在本机状态目录（.local/ 不入库）。
+IMO_SCENE_FBX   ?= /run/media/ruicat/9294E1A394E18A55/游戏/unity-extracted/01_新生活は妹ちゃんと_v1.8/models/imo_chan/imo_chan.fbx
+IMO_SCENE_ASSET ?= .local/imoScene/imo_chan.glb
+
+.PHONY: imoScene
+imoScene: $(TARGET)
+	@echo "$(YELLOW)🎬 编译 imo_chan 场景...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(IMO_SCENE_FLAGS) $(IMO_SCENE_SRC) -L. -l$(LIB_STEM) $(LIBS) -o $(IMO_SCENE_BIN)
+	@echo "$(GREEN)✅ 运行: LD_LIBRARY_PATH=. ./$(IMO_SCENE_BIN)$(RESET)"
+
+.PHONY: imoSceneAsset
+imoSceneAsset:
+	@command -v blender >/dev/null 2>&1 || (echo "$(YELLOW)缺少 Blender，无法转换 FBX → GLB$(RESET)"; exit 1)
+	@echo "$(YELLOW)🧩 FBX → GLB: $(IMO_SCENE_FBX)$(RESET)"
+	blender -b --factory-startup --python tools/assetconvert/fbx2glb.py -- \
+		"$(IMO_SCENE_FBX)" "$(IMO_SCENE_ASSET)"
+	@echo "$(GREEN)✅ 资产: $(IMO_SCENE_ASSET)$(RESET)"
+
 # ── Cornell Box 测试程序（独立场景/相机；编译不依赖 GPU）──────────
 CORNELL_SRC   := tests/cornellBox/main.cpp tests/cornellBox/cornellScene.cpp \
                  tests/cornellBox/cornellCamera.cpp tests/cornellBox/cornellHud.cpp \
@@ -465,6 +488,8 @@ help:
 	@echo "║    make cornellCompare      Cornell 误差对比     ║"
 	@echo "║    make cornellRtProbe      CPU 光追预览自检     ║"
 	@echo "║    make cornellCheck        Cornell PT 自检      ║"
+	@echo "║    make imoScene            imo_chan 角色场景    ║"
+	@echo "║    make imoSceneAsset       FBX → GLB 资产转换   ║"
 	@echo "║    make shaders             编译 GLSL → SPIR-V   ║"
 	@echo "║    make clean               清理                 ║"
 	@echo "║    make help                此帮助               ║"
