@@ -22,8 +22,6 @@ namespace {
 const size_t VERTEX_FLOATS = 11;
 // alpha test 阈值：与 glTF 默认一致，头发/镂空衣物按硬边裁剪。
 const float ALPHA_CUTOFF = 0.5f;
-// 半透明像素占比超过该值才走 BLEND；否则用 MASK（避免整头头发进入透明排序）。
-const float PARTIAL_ALPHA_BLEND_THRESHOLD = 0.30f;
 // 权重和下限：低于该值的顶点视为未绑定，保留原始位置。
 const float MIN_WEIGHT_SUM = 1.0e-6f;
 
@@ -47,17 +45,6 @@ GNg::sVEC3 transformDirection(const GNg::sMAT44 &mat, const GNg::sVEC3 &v) {
 
 bool isFiniteVec(const GNg::sVEC3 &v) {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-}
-
-// 贴图 alpha 分布 → 材质 alpha 模式：无 alpha 不透明；少量镂空走 MASK；大量半透明走 BLEND。
-GN3d::eALPHA_MODE classifyAlphaMode(const sTextureData &texture) {
-    if (!texture.aHasAlpha) {
-        return GN3d::eALPHA_OPAQUE;
-    }
-    if (texture.aPartialAlphaRatio > PARTIAL_ALPHA_BLEND_THRESHOLD) {
-        return GN3d::eALPHA_BLEND;
-    }
-    return GN3d::eALPHA_MASK;
 }
 
 // 解出贴图的 alpha 统计；无法解码时按无 alpha 处理（仍然把原始字节留给上传层）。
@@ -255,14 +242,10 @@ void bakeMaterials(const GN3d::sASSET &asset, sModelData &out) {
         material.aAlbedoTexture = source.aAlbedoTexture;
         material.aNormalTexture = source.aNormalTexture;
         material.aAlphaCutoff = ALPHA_CUTOFF;
-        const bool hasTexture = source.aAlbedoTexture >= 0 &&
-                                static_cast<size_t>(source.aAlbedoTexture) < out.aTextures.size();
-        if (hasTexture) {
-            material.aAlphaMode =
-                classifyAlphaMode(out.aTextures[static_cast<size_t>(source.aAlbedoTexture)]);
-        } else {
-            material.aAlphaMode = source.aAlphaMode;
-        }
+        // 直接采用 glTF 的 alphaMode：Blender 用同一份 GLB 以 BLEND 渲出完整角色，
+        // 说明本资产的贴图 alpha 就是镂空/透明的正确来源；按贴图统计重判为 MASK
+        // 会把外套/身体整片裁掉（实测只剩头发、帽子和靴子）。
+        material.aAlphaMode = source.aAlphaMode;
     }
     if (out.aMaterials.empty()) {
         sMaterialData fallback;

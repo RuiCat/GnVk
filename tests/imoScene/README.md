@@ -96,8 +96,10 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
 - **蒙皮在 CPU 烘焙**：GLB 的 skin 有 1797 个关节，超过 GPU 调色板 UBO 上限（128）；
   场景只显示导入姿势，因此用 `computeSkinPalette` + 四权重混合一次性烘焙进顶点，
   之后走普通 `cMODEL`/PBR 路径（不占 SSBO 蒙皮管线，也不受关节数限制）。
-- **alpha 重判**：Blender 导出的 glTF 把 26 个材质里的 25 个标成 `BLEND`；
-  按贴图 alpha 分布重判为 `OPAQUE`（无透明像素）/ `MASK 0.5`（镂空）/ `BLEND`（大量半透明，如 `Toumei`）。
+- **alpha 跟随 glTF**：材质一律采用 glTF 的 `alphaMode`（本资产 26 个材质中 25 个 `BLEND`、1 个 `OPAQUE`）。
+  曾按贴图 alpha 统计重判为 `MASK`，实测把外套/身体整片裁掉（只剩头发、帽子、靴子）；
+  用 Blender + Cycles 渲染同一份 GLB（`BLEND`）得到完整角色，证明贴图 alpha 就是正确的镂空来源。
+  对照渲染：`.local/imoScene/render_gltf.png`。
 - **重定心**：网格整体平移到脚底 y=0、xz 中心为原点，相机取景只依赖模型高度。
 
 ## 边界

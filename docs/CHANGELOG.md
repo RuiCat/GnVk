@@ -19,6 +19,17 @@
   **本会话无 GPU（/dev/dri 缺失），画面未运行验证**——需在含 Vulkan 设备的机器上跑
   `LD_LIBRARY_PATH=. ./build/imoScene` 确认。
 
+## 2026-11-20（续） — imoScene 材质 alpha 改为跟随 glTF（修角色只剩头发/帽子）
+
+- 现象：真机运行场景不再死机（上一条缓冲延迟释放修复生效），但角色躯干/衣服被裁掉，只剩头发、帽子和靴子。
+- 原因：`imoSceneConvert` 曾按贴图 alpha 统计把材质重判为 `MASK`（cutoff 0.5）；本资产贴图 alpha 在衣料外侧为 0、
+  衣料本体为 1，重判后大面积 discard。
+- 证据：Blender + Cycles 直接渲染同一份 GLB（按 glTF 的 `BLEND`）得到**完整角色**（`.local/imoScene/render_gltf.png`）；
+  强制 `OPAQUE` 反而出现黑色补丁（`render_opaque.png`）。
+- 修复：材质直接采用 glTF `alphaMode`，贴图 alpha 统计只留作诊断字段。
+- 验证：`make imoScene` 0 error；`IMO_SCENE_INSPECT=1` 通过；`lintCodeModularity tests/imoScene` 0 违规 0 告警。
+  真机画面待用户复验（引擎侧首次运行已不再触发 GPU reset）。
+
 ## 2026-11-20（续） — 修复：3D 动态缓冲扩容释放了同帧命令仍引用的显存（imoScene 首帧 GPU 页错误 → 桌面崩溃）
 
 - 现象：`LD_LIBRARY_PATH=. ./build/imoScene` 启动后整机桌面退出；`journalctl -b -1 -k` 显示
