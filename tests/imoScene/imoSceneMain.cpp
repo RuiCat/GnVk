@@ -19,7 +19,10 @@
 namespace {
 
 // 默认模型：make imoSceneAsset 生成到本机状态目录（.local/ 不随仓库分发）。
-const char *DEFAULT_MODEL_PATH = ".local/imoScene/imo_chan.glb";
+// 游戏里穿好衣服的角色在 Clothes_imo_chan 根下；imo_chan 根带的是 kemo 裸体变体（inactive）。
+const char *DEFAULT_MODEL_PATH = ".local/imoScene/clothes_imo_chan.glb";
+// 游戏数据里这些对象是 inactive 的变体（kemo 裸体、Jirai 镜片/饰针），默认不画。
+const char *DEFAULT_HIDE_FILTER = "Kemo_Body,Jirai";
 // 地面尺寸（米）与高度：模型已重定心到脚底 y=0。
 const float GROUND_HALF_SIZE = 30.0f;
 const float GROUND_Y = -0.002f;
@@ -83,9 +86,7 @@ imoScene::sConvertOptions convertOptionsFromEnv() {
         options.aShowFilter = showFilter;
     }
     const char *hideFilter = std::getenv("IMO_SCENE_HIDE");
-    if (hideFilter != 0) {
-        options.aHideFilter = hideFilter;
-    }
+    options.aHideFilter = (hideFilter != 0) ? hideFilter : DEFAULT_HIDE_FILTER;
     options.aForceOpaque = std::getenv("IMO_SCENE_FORCE_OPAQUE") != 0;
     return options;
 }

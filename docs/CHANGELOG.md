@@ -19,6 +19,21 @@
   **本会话无 GPU（/dev/dri 缺失），画面未运行验证**——需在含 Vulkan 设备的机器上跑
   `LD_LIBRARY_PATH=. ./build/imoScene` 确认。
 
+## 2026-11-20（续） — imoScene：改用 Clothes_imo_chan + 默认隐藏 inactive 变体
+
+- 取证：游戏 `_Data` 里 `imo_chan`/`Clothes_imo_chan` 两个根的 `kemo_Body` 都是 `m_IsActive=False`
+  （裸体变体，mesh `Body (merged).baked.001`，5047 顶点）；提取管线只按子树收集 SMR、未看 active，
+  所以把 kemo 身体也导出了，表现为“胸穿透衣服/身体实体混乱”。
+- 修法：场景默认模型切到 `Clothes_imo_chan`（穿好衣服的根：`Clo_T_Shatu`/`Clo_Jazi_Uwagi`/
+  `Clo_Zubon_Mat`/`Clo_Sera_top`/`Clo_Sukart_Mat` + `Clo_Body_00_SKIN`），默认 `IMO_SCENE_HIDE=Kemo_Body,Jirai`。
+- 资产：`make imoSceneAsset` 默认把 `models/Clothes_imo_chan/Clothes_imo_chan.fbx` 转成
+  `.local/imoScene/clothes_imo_chan.glb`（13,304,088 B；40 网格 / 102,625 顶点 / 32 材质）。
+- 验证：`IMO_SCENE_INSPECT=1` 默认加载 43 网格 / 95,085 顶点 / 过滤 6 个网格 / 高 1.624 m；
+  Blender CPU 渲染确认去掉 kemo 身体后是完整穿衣角色（`.local/imoScene/render_clothes_nokemo.png`）。
+  真机画面待复验。
+- 旁注：`/run/media/.../游戏/.unity-extract/pipeline/characterExport.py` 已加 active 过滤（备份 .bak），
+  后续重提取会跳过 inactive 对象；该补丁在外部磁盘、不在本仓库。
+
 ## 2026-11-20（续） — imoScene：修正人体贴图错绑（Body_SKIN → ImoBody 皮肤图集）
 
 - 现象：画面正常后人体仍“不现实”——躯干/四肢按 MASK 被裁掉，只剩帽子、头发、靴子。

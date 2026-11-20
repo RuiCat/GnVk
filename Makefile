@@ -271,8 +271,9 @@ IMO_SCENE_SRC   := $(wildcard tests/imoScene/*.cpp)
 IMO_SCENE_BIN   := build/imoScene
 IMO_SCENE_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
 # 转换输入/输出：源 FBX 在提取资源盘，GLB 落在本机状态目录（.local/ 不入库）。
-IMO_SCENE_FBX   ?= /run/media/ruicat/9294E1A394E18A55/游戏/unity-extracted/01_新生活は妹ちゃんと_v1.8/models/imo_chan/imo_chan.fbx
-IMO_SCENE_ASSET ?= .local/imoScene/imo_chan.glb
+# 默认转换“穿好衣服”的 Clothes_imo_chan（imo_chan 根带的是 inactive 的 kemo 裸体变体）。
+IMO_SCENE_FBX   ?= /run/media/ruicat/9294E1A394E18A55/游戏/unity-extracted/01_新生活は妹ちゃんと_v1.8/models/Clothes_imo_chan/Clothes_imo_chan.fbx
+IMO_SCENE_ASSET ?= .local/imoScene/clothes_imo_chan.glb
 
 .PHONY: imoScene
 imoScene: $(TARGET)

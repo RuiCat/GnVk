@@ -102,6 +102,17 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
   其余 → `MASK 0.5`。Blender 用 `CLIP` 渲染同一份 GLB 与 `BLEND` 结果一致（`render_clip.png` / `render_gltf.png`）。
 - **重定心**：网格整体平移到脚底 y=0、xz 中心为原点，相机取景只依赖模型高度。
 
+## 默认模型：Clothes_imo_chan（穿好衣服的版本）
+
+游戏数据里 `imo_chan` 根下的 `kemo_Body` 是 **inactive** 的裸体变体（Unity 里 `m_IsActive=False`），
+提取管线原先没有过滤它，导致“胸穿透衣服/身体实体混乱”。真正穿好衣服的角色在 `Clothes_imo_chan` 根下
+（材质 `Clo_T_Shatu`/`Clo_Jazi_Uwagi`/`Clo_Zubon_Mat`/`Clo_Sera_top`/`Clo_Sukart_Mat`，皮肤 `Clo_Body_00_SKIN`）。
+
+- 默认模型：`.local/imoScene/clothes_imo_chan.glb`（`make imoSceneAsset` 生成，源 FBX 指向 `models/Clothes_imo_chan`）；
+- 默认过滤：`Kemo_Body,Jirai`（游戏里同为 inactive 的裸体/镜片变体），可用 `IMO_SCENE_HIDE=` 覆盖；
+- 想回看 `imo_chan` 那套（短裤+白上衣）：
+  `IMO_SCENE_MODEL=.local/imoScene/imo_chan.glb IMO_SCENE_HIDE=Kemo_Body LD_LIBRARY_PATH=. ./build/imoScene`。
+
 ## 资产修正（提取管线的贴图错绑）
 
 `N00_000_00_Body_00_SKIN` 在原 FBX 里被绑到内衣贴图 `pan_ichigo_Pink_P_524.png`（97.6% 透明背景、无皮肤），
