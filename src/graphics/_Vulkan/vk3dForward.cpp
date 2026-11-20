@@ -7,6 +7,9 @@
 
 namespace GNg {
 
+// 定义在 vk3dShutdown.cpp：延迟释放扩容时退休的 3D 动态缓冲（避免同帧已录制命令引用已释放显存）。
+void ReleaseRetired3DBuffers();
+
 // P10：最近一次 PBR 绘制提交的 indexCount（诊断/验收钩子）。
 namespace {
 uint32_t s_last3DIndexCount = 0;
@@ -21,6 +24,7 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     // ★ 重置缓冲偏移 (每个 3D Pass 内各 draw call 使用独立区域)
     s_vtxOfs3D = 0;
     s_idxOfs3D = 0;
+    ReleaseRetired3DBuffers(); // 上一帧已完成，回收扩容时退休的旧缓冲
 
     // 刷新当前 2D 批次
     if(gVCnt > 0) {

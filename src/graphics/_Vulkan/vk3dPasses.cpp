@@ -7,6 +7,9 @@
 
 namespace GNg {
 
+// 定义在 vk3dShutdown.cpp：延迟释放扩容时退休的 3D 动态缓冲（避免同帧已录制命令引用已释放显存）。
+void ReleaseRetired3DBuffers();
+
 bool s_inShadowPass = false;
 
 namespace {
@@ -26,6 +29,7 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
     if(s_in3DPass) return;
     s_vtxOfs3D = 0;
     s_idxOfs3D = 0;
+    ReleaseRetired3DBuffers();
 
     // 刷新 2D 批次并结束当前渲染通道
     if(gVCnt > 0) {
@@ -215,6 +219,7 @@ void GN_VkBegin3DPassPBR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     if(!GN_Vk.initialized || s_in3DPass) return;
     s_vtxOfs3D = 0;
     s_idxOfs3D = 0;
+    ReleaseRetired3DBuffers();
     // 刷新 2D 批次 (与 GN_VkBegin3DPass 相同逻辑)
     if(gVCnt > 0) {
         void *d;
@@ -317,6 +322,7 @@ void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     s_hasDeferredViewProj = true;
     s_vtxOfs3D = 0;
     s_idxOfs3D = 0;
+    ReleaseRetired3DBuffers();
     // 刷新 2D 批次
     if(gVCnt > 0) {
         void *d;

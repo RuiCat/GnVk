@@ -19,6 +19,19 @@
   **本会话无 GPU（/dev/dri 缺失），画面未运行验证**——需在含 Vulkan 设备的机器上跑
   `LD_LIBRARY_PATH=. ./build/imoScene` 确认。
 
+## 2026-11-20（续） — 修复：3D 动态缓冲扩容释放了同帧命令仍引用的显存（imoScene 首帧 GPU 页错误 → 桌面崩溃）
+
+- 现象：`LD_LIBRARY_PATH=. ./build/imoScene` 启动后整机桌面退出；`journalctl -b -1 -k` 显示
+  `amdgpu [gfxhub] page fault … Process imoScene`（连续 7 个 4KB 页，`Faulty UTCL2 client ID: GE1`，只读）→
+  `ring gfx_0.0.0 timeout` → GPU reset → niri SIGABRT（Mesa EGL 线程 abort）。
+- 根因：`Ensure3DBufferCapacity` 在**同帧已有 draw 命令绑定旧 `vertexBuffer3D`/`indexBuffer3D`** 时，
+  直接 `vkDestroyBuffer` + `vkFreeMemory` 后重建；首帧 60 个网格触发多次 2× 扩容，命令提交时 GPU 读到已释放缓冲 → 页错误。
+- 修复：扩容产生的旧缓冲先进入退休表（`Retire3DBuffer`，`src/graphics/_Vulkan/vk3dShutdown.cpp`），
+  由 `ReleaseRetired3DBuffers()` 在后续 3D pass（`GN_VkBegin3DPass` / `…PBR` / `…Deferred` / `GN_VkShadowPassBegin`）
+  延迟释放；`GN_VkShutdown3D` 兜底释放。
+- 验证：`make -j4` 0 error；`make imoScene` 0 error；`IMO_SCENE_INSPECT=1` 通过（60 网格 / 129,951 顶点）。
+  **真机画面未验证**：开发环境无 `/dev/dri`，且用户要求不再直接启动；需在有 GPU 的机器按 README 的安全配方复验。
+
 ## 2026-11-20（续） — imoScene 安全诊断入口
 
 - 新增 `IMO_SCENE_INSPECT=1`：只走 CPU 转换并退出（不建窗口、不初始化 Vulkan），用于在疑似驱动/桌面不稳的机器上安全验证资产路径。

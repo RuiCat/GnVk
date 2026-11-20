@@ -3,6 +3,8 @@
 #include "GN_Vk.h"
 #include "vkInternal.h"
 
+#include <vector>
+
 namespace GNg {
 
 // ── 3D 绘制缓冲容量追踪 (共享于 GN_VkDraw3D / GN_VkDraw3DPBR / GN_VkShadowDraw) ──
@@ -13,6 +15,50 @@ static uint32_t s_idxCap3D = 0;
 GN_VK_INTERNAL VkDeviceSize s_vtxOfs3D = 0;
 GN_VK_INTERNAL VkDeviceSize s_idxOfs3D = 0;
 
+namespace {
+// 3D 动态缓冲扩容时，旧缓冲可能仍被“当前帧已录制的命令”引用；
+// 立即 vkDestroyBuffer/vkFreeMemory 会让 GPU 在提交后读到已释放的显存
+// （实测表现为 imoScene 首帧 gfx ring 页错误 → GPU reset → 合成器崩溃）。
+// 因此旧缓冲先进入退休表，并在后续 3D pass 里延迟释放。
+struct sRETIRED_3D_BUFFER {
+    VkBuffer aBuffer;
+    VkDeviceMemory aMemory;
+    uint64_t aPassSerial;
+};
+
+std::vector<sRETIRED_3D_BUFFER> s_retired3DBuffers;
+uint64_t s_3DPassSerial = 0;
+} // namespace
+
+static void Retire3DBuffer(VkBuffer buffer, VkDeviceMemory memory) {
+    if(buffer == VK_NULL_HANDLE && memory == VK_NULL_HANDLE) return;
+    sRETIRED_3D_BUFFER entry;
+    entry.aBuffer = buffer;
+    entry.aMemory = memory;
+    entry.aPassSerial = s_3DPassSerial;
+    s_retired3DBuffers.push_back(entry);
+}
+
+void ReleaseRetired3DBuffers() {
+    ++s_3DPassSerial; // 新 pass 开始（上一帧已在 BeginFrame 的 fence 处完成）
+    size_t kept = 0;
+    for(size_t i = 0; i < s_retired3DBuffers.size(); ++i) {
+        const sRETIRED_3D_BUFFER &entry = s_retired3DBuffers[i];
+        // 多留一个 pass 的余量，覆盖“同一帧阴影 pass + 主 pass”两次退役的情况。
+        if(entry.aPassSerial + 2 < s_3DPassSerial) {
+            if(entry.aBuffer != VK_NULL_HANDLE) {
+                vkDestroyBuffer(GN_Vk.device, entry.aBuffer, nullptr);
+            }
+            if(entry.aMemory != VK_NULL_HANDLE) {
+                vkFreeMemory(GN_Vk.device, entry.aMemory, nullptr);
+            }
+        } else {
+            s_retired3DBuffers[kept++] = entry;
+        }
+    }
+    s_retired3DBuffers.resize(kept);
+}
+
 // ── 辅助: 确保 3D 顶点/索引缓冲容量 >= (当前偏移 + 本次需求) ──
 // 每个 draw call 独占缓冲的一段区域, 不会覆盖同一帧内其他 draw call 的数据.
 void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize) {
@@ -20,14 +66,9 @@ void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize) {
     VkDeviceSize needIdx = s_idxOfs3D + idxSize;
     // 顶点缓冲
     if(needVtx > s_vtxCap3D) {
-        if(GN_Vk.vertexBuffer3D) {
-            vkDestroyBuffer(GN_Vk.device, GN_Vk.vertexBuffer3D, nullptr);
-            GN_Vk.vertexBuffer3D = VK_NULL_HANDLE;
-        }
-        if(GN_Vk.vertexMemory3D) {
-            vkFreeMemory(GN_Vk.device, GN_Vk.vertexMemory3D, nullptr);
-            GN_Vk.vertexMemory3D = VK_NULL_HANDLE;
-        }
+        Retire3DBuffer(GN_Vk.vertexBuffer3D, GN_Vk.vertexMemory3D);
+        GN_Vk.vertexBuffer3D = VK_NULL_HANDLE;
+        GN_Vk.vertexMemory3D = VK_NULL_HANDLE;
         // 按 2x 扩容减少重分配次数
         VkDeviceSize allocVtx = needVtx * 2;
         CreateBuf(allocVtx, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
@@ -37,14 +78,9 @@ void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize) {
     }
     // 索引缓冲
     if(needIdx > s_idxCap3D) {
-        if(GN_Vk.indexBuffer3D) {
-            vkDestroyBuffer(GN_Vk.device, GN_Vk.indexBuffer3D, nullptr);
-            GN_Vk.indexBuffer3D = VK_NULL_HANDLE;
-        }
-        if(GN_Vk.indexMemory3D) {
-            vkFreeMemory(GN_Vk.device, GN_Vk.indexMemory3D, nullptr);
-            GN_Vk.indexMemory3D = VK_NULL_HANDLE;
-        }
+        Retire3DBuffer(GN_Vk.indexBuffer3D, GN_Vk.indexMemory3D);
+        GN_Vk.indexBuffer3D = VK_NULL_HANDLE;
+        GN_Vk.indexMemory3D = VK_NULL_HANDLE;
         VkDeviceSize allocIdx = needIdx * 2;
         CreateBuf(allocIdx, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -54,6 +90,17 @@ void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize) {
 }
 
 void GN_VkShutdown3D() {
+    // 先释放扩容过程中退休的旧缓冲（此刻设备仍有效）。
+    for(size_t i = 0; i < s_retired3DBuffers.size(); ++i) {
+        if(s_retired3DBuffers[i].aBuffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(GN_Vk.device, s_retired3DBuffers[i].aBuffer, nullptr);
+        }
+        if(s_retired3DBuffers[i].aMemory != VK_NULL_HANDLE) {
+            vkFreeMemory(GN_Vk.device, s_retired3DBuffers[i].aMemory, nullptr);
+        }
+    }
+    s_retired3DBuffers.clear();
+
     // G0b：调试视图管线布局（管线本体归 aPipelineCache，已先于本函数释放）。
     destroy3DGbufferDebug();
     // G5b-2：探针 9× 3D 纹理/sampler/UBO（固定尺寸，不随 resize）。
