@@ -84,8 +84,14 @@ bool matchesNameFilter(const std::string &name, const std::string &filter) {
 //   * 其余是二值镂空（衣料外侧 alpha=0、本体 1）→ MASK（Blender CLIP 渲染与 BLEND 结果一致，
 //     比 BLEND 少一次透明排序、且能写深度）。
 GN3d::eALPHA_MODE resolveAlphaMode(const sTextureData &texture, GN3d::eALPHA_MODE source) {
-    if (!texture.aHasAlpha || source == GN3d::eALPHA_OPAQUE) {
+    if (source == GN3d::eALPHA_OPAQUE) {
         return source;
+    }
+    // 贴图没有 alpha 通道/全不透明：内容本来就是实心的，必须按 OPAQUE 画。
+    // 否则 glTF 的 BLEND 会让这些网格走“深度写关”的混合管线——远侧表面会盖住近侧
+    // （帽子压住头发、衣料互相穿透），表现就是“远处遮挡近处”。
+    if (!texture.aHasAlpha) {
+        return GN3d::eALPHA_OPAQUE;
     }
     if (texture.aPartialAlphaRatio > PARTIAL_ALPHA_BLEND_THRESHOLD) {
         return GN3d::eALPHA_BLEND;
