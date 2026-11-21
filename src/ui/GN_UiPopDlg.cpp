@@ -34,7 +34,6 @@ void GT_sSP_CHILD::Release() {
     GN_DeleteArray(enumName);
     GN_DeleteArray(enumIds);
 }
-GNu::cSIM_DIALOGEX *GT_FullSelectPathDlg = 0;
 
 //绘制模糊屏幕图(坐标X, Y, 宽, 高, 颜色, 模糊级别与重复铺盖标记与混合模式, 蒙版图)
 void GT_DrawBlurScreenImg(short _x, short _y, short _w, short _h, unsigned int color, unsigned short blmode, GNg::sIMAGE *img) {
@@ -99,7 +98,7 @@ void GNu::cUI_SIM_DIALOG::UpdateRun(unsigned int updatetime, sUI_LEVEL *parent) 
         cSIM_DIALOGEX::UpdateRun(updatetime);
     }
     if(RecvInputUiObject == this) {
-        if(zDetailSetState == eDETAIL_SET_PATH_SELECTF) GT_FullSelectPathDlg = (cSIM_DIALOGEX *)this;
+        if(zDetailSetState == eDETAIL_SET_PATH_SELECTF) GN_UiPopDlgContext().aFullSelectPathDlg = (cSIM_DIALOGEX *)this;
         else if(zSelect >= zChildNum && zState == 2 && zDetailSetState == eDETAIL_SET_NULL) {
             if(GN::Key1[zKeyOK]) UiActionCall(this, zSelect - zChildNum + 1);
             else if(GN::Mouse1[GM_LEFT] && (unsigned int)zSelect < zTmpRangeRect.Num()) {

@@ -88,6 +88,8 @@
 
 - lead（2026-11-22T00:18+08:00，新会话接管）：**基线复核 + DA-M2 批 2b done**。开工前先验基线：`make` exit=0、`make unit` **463 cases / 0 failed**（与交接一致，日志 `.local/tmp/lead_{make,unit}_base.log`）。批 2b：`GT_FilePreviewGenList` → `sUI_FB_PREVIEW_CONTEXT{GN::sLIST<GT_cFILE_PREVIEW_GEN> aPreviewGenList}` + `static gFbPreviewContext`，插在 `GT_cFILE_PREVIEW_GEN` 类定义之后（依赖本地类型，不能并入 `sUI_FB_CONTEXT`）；改 `GNf_FB_DefOnCreateProc`/`GNf_FB_DefOnDestroyProc` 两处引用；全仓 `GT_FilePreviewGenList` 引用清零。验收：`make` exit=0（0 error / 245 warning）、`make unit` 463/0、lint naming/comments 0 告警（本文件 1972 有效行 = 历史超限，本批净增 3 行，未顺手拆）。**口径订正**：剩余全局 26 里含 1 条误命中（`GN_AmCtrl.cpp` 的 `else zNowtime = zRuntime;` 是局部赋值），真候选 **25**；另实测最新归档为 1875 普通文件（+320 目录），订正 BACKLOG B7b 的 1861 口径。
 
+- lead（2026-11-22T00:5x+08:00）：**DA-M2 批 3 + 批 4 一并收口（done）**。一次收 21 项文件级全局 → 文件内上下文 + static 单实例：GN_Init（模块句柄/路径目录，含 `char[]`+`char*` 别名对，构造里重挂指针）、GN_Sys（剪贴板缓冲/用户线程表）、GN_Sound（OpenAL 设备+上下文）、GN_2D（剪贴屏栈 32 层）、GN_Parallel（两路空闲轮表头）、GN_2Dtype（最近图像类型名）、GN_File（日志打开模式）、GN_NetTrans（外发 socket + 端口）、GN_FormatScale（行尾像素号）；并**补收审计正则漏掉的多词类型 8 项**（`GN_Input` 的 `unsigned int/short` 全局）。两处跨 TU 共享量改访问器：UI 选单（`sPopDlgContext`+`GN_UiPopDlgContext()`，GN_UI.cpp 需 `#include "GN_UiPopDlgInner.h"`——漏 include 时编译报 `GN_UiPopDlgContext 在此作用域尚未声明`，已修）与网络地址长度（`sNetAddrContext`+`GN_NetAddrContext()`）。**故意保留 4 个**：`GT_MainWindow`（`GN_MAIN_API` 公共 ABI，3 个测试程序在用）、`GT_SoundInitError`（仅 WCE 分支）、`GT_CurAppDir/W(+Len)`（Android extern 引用）、`GT_TimeFreq`（`LARGE_INTEGER`，Windows 分支）——本机无对应工具链，迁移即不可验证，故不迁。验收：`make` exit=0、`make unit` 463/0、lint naming/comments 0 告警（3 个历史超限文件只记录不拆）。
+
 ## 6. 回滚与恢复（备用）
 
 - 若要立刻回到 B5i 双绿状态：按 `docs/` 外记录的恢复命令执行（备份 `GnVk-20261121T102533Z.tar.zst` 取回 `GN_Format.cpp`，删除 6 个新文件 + `GN_FormatInternal.h`）。

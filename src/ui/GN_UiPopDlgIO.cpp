@@ -62,7 +62,7 @@ void GNu::cSIM_DIALOG::zSave(int offset_num) {
         char file_head[4];
         GNf::Read(file_head, 1, 4, savefile);
         if(!strcmp(file_head, "YGS")) {
-            GT_SimMenuTextOffsetPos = 0.0f;
+            GN_UiPopDlgContext().aSimMenuTextOffsetPos = 0.0f;
             GNf::Seek(savefile, offset_num, GNf::eSEEK_CUR); /*跳至变量要保存的文件正确位置*/
             GT_sSP_CHILD *_chd;
             short si = 0;
@@ -70,10 +70,10 @@ void GNu::cSIM_DIALOG::zSave(int offset_num) {
                 _chd = &(zTargetMenu->zChild[si]);
                 if(_chd->type == GT_SP_VALUE_TEXT) {
                     GNf::Write((char *)&(_chd->maxValue), 4, 1, savefile);
-                    GT_SimMenuTextOffsetPos = 1.0f;
+                    GN_UiPopDlgContext().aSimMenuTextOffsetPos = 1.0f;
                 } else if(_chd->type <= GT_SP_VALUE_FLOAT) GNf::Write((char *)(_chd->pointer), 4, 1, savefile); //写入当前选单的变量数据
             }
-            if(GT_SimMenuTextOffsetPos) { //写入当前选单的文本内容
+            if(GN_UiPopDlgContext().aSimMenuTextOffsetPos) { //写入当前选单的文本内容
                 GNf::Close(savefile);
                 char *name_end = zFileName + (strlen(zFileName) - 1);
                 *name_end = 't';
@@ -234,7 +234,7 @@ void GNu::cUI_SIM_DIALOG::SetBackFrame(P<GNg::sIMAGE> &frame_img, P<GNg::sIMAGE>
     else zBackFrame1.Delete();
 }
 GNu::cUI_SIM_DIALOG::~cUI_SIM_DIALOG() {
-    if(GT_FullSelectPathDlg == (cSIM_DIALOGEX *)this) GT_FullSelectPathDlg = 0;
+    if(GN_UiPopDlgContext().aFullSelectPathDlg == (cSIM_DIALOGEX *)this) GN_UiPopDlgContext().aFullSelectPathDlg = 0;
     if(zObjsKeep.Us() == 1) {
         GN_Delete(zEffect);
         zObjsKeep.Delete();

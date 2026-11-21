@@ -16,9 +16,12 @@ enum GT_SP_OPTION_TYPE { //简单对话筐内容类型
     GT_SP_TEXT //文本提示
 };
 
-// 文件级全局变量（原定义在本文件，拆分后被多个 TU 引用）
-extern float GT_SimMenuTextOffsetPos; //临时记录文本读写时的偏移记数
-extern GNu::cSIM_DIALOGEX *GT_FullSelectPathDlg;
+// DA-M2 批 4：原两个 ad-hoc extern 全局收敛进上下文，跨 TU 改用访问器（定义在 GN_UiPopDlgMenu.cpp）。
+struct sPopDlgContext {
+    float aSimMenuTextOffsetPos = 0.0f; //临时记录文本读写时的偏移记数
+    GNu::cSIM_DIALOGEX *aFullSelectPathDlg = 0;
+};
+sPopDlgContext &GN_UiPopDlgContext();
 
 // 文件级辅助函数（原 static；拆分后 Menu / Run 两个 TU 共用，保持内部链接）
 //设置文本变量显示的字符串(变量项)

@@ -68,27 +68,27 @@ class NET_API cSOC_TCP //★TCP协议的类  传统socket的一个简单封装
 
     //获得已连接的套接口的本机地址(返回地址)   成功返回0 失败返回-1
     inline int GetsockAddr(sADDR &addr_out) {
-        addr_len_t addr_len = GT_ADDR_LEN;
+        addr_len_t addr_len = GN_NetAddrContext().aAddrLen;
         return getsockname((SOCKET)fd, (sockaddr *)(&addr_out), &addr_len);
     }
 
     //获得已连接的套接口的另一端地址(返回地址) 成功返回0 失败返回-1
     inline int GetpeerAddr(sADDR &addr_out) {
-        addr_len_t addr_len = GT_ADDR_LEN;
+        addr_len_t addr_len = GN_NetAddrContext().aAddrLen;
         return getpeername((SOCKET)fd, (sockaddr *)(&addr_out), &addr_len);
     }
 
     //作为服务器需调用的功能 --------------------------------------------------------------------------------------------------------------------------------------
 
     //绑定指定地址以便其它主机能访问它(地址)成功返回0 失败返回-1 使它作为被动方式
-    inline int Bind(const sADDR &addr) { return bind((SOCKET)fd, (sockaddr *)(&addr), GT_ADDR_LEN); }
+    inline int Bind(const sADDR &addr) { return bind((SOCKET)fd, (sockaddr *)(&addr), GN_NetAddrContext().aAddrLen); }
 
     //设置已绑定地址端口的套接口聆听待连接队列的最大数(待连接队列的最大数)成功返回0 失败返回-1
     inline int Listen(int maxn) { return listen((SOCKET)fd, maxn); }
 
     //同意一个连接(返回远端主机的地址信息) 返回和远端主机通信的套接口 如果套接口为空表示操作失败 !该函数会有堵塞行为
     inline P<cSOC_TCP> Accept(sADDR &addr_out) {
-        addr_len_t addr_len = GT_ADDR_LEN;
+        addr_len_t addr_len = GN_NetAddrContext().aAddrLen;
         int ret = (int)accept((SOCKET)fd, (sockaddr *)(&addr_out), &addr_len);
         if(ret == -1) return P<cSOC_TCP>();
         else {
@@ -101,7 +101,7 @@ class NET_API cSOC_TCP //★TCP协议的类  传统socket的一个简单封装
     //作为客户端需调用的功能 --------------------------------------------------------------------------------------------------------------------------------------
 
     //连接到目标地址的主机(目标地址) 成功返回0 失败返回-1
-    inline int Connect(const sADDR &addr) { return connect((SOCKET)fd, (sockaddr *)(&addr), GT_ADDR_LEN); }
+    inline int Connect(const sADDR &addr) { return connect((SOCKET)fd, (sockaddr *)(&addr), GN_NetAddrContext().aAddrLen); }
 
     //双方收发的功能 ----------------------------------------------------------------------------------------------------------
 
@@ -164,23 +164,23 @@ class NET_API cSOC_UDP //★UDP协议类  传统socket的一个简单封装
 
     //获得套接口的本机地址  成功返回0 失败返回-1  !!这个必需要已和对方通信过之后获取才有正确值返回
     inline int GetsockAddr(sADDR &addr_out) {
-        addr_len_t addr_len = GT_ADDR_LEN;
+        addr_len_t addr_len = GN_NetAddrContext().aAddrLen;
         return getsockname((SOCKET)fd, (sockaddr *)(&addr_out), &addr_len);
     }
 
     //作为服务器需调用的功能 --------------------------------------------------------------------------------------------------------------------------
 
     //绑定指定地址以便其它主机能访问它(地址)成功返回0 失败返回-1 使它作为被动方式
-    inline int Bind(const sADDR &addr) { return bind((SOCKET)fd, (sockaddr *)(&addr), GT_ADDR_LEN); }
+    inline int Bind(const sADDR &addr) { return bind((SOCKET)fd, (sockaddr *)(&addr), GN_NetAddrContext().aAddrLen); }
 
     //双方收发的功能 ----------------------------------------------------------------------------------------------------------------------------------
 
     //发送数据包到指定IP地址(指定地址, 数据, 数据字节长度, 附加功能) 返回这次发送了的字节数 返回-1代表有错 !一次最多只能发 GN_MAX_BUF_UDP 字节数据
-    inline int SendTo(const sADDR &addr, const char *buf_in, int buf_len, int flags = 0) { return sendto((SOCKET)fd, buf_in, buf_len, flags, (sockaddr *)(&addr), GT_ADDR_LEN); }
+    inline int SendTo(const sADDR &addr, const char *buf_in, int buf_len, int flags = 0) { return sendto((SOCKET)fd, buf_in, buf_len, flags, (sockaddr *)(&addr), GN_NetAddrContext().aAddrLen); }
 
     //接收数据包(数据包来源地址输出, 接收数据的缓冲 须先分配好空间, 缓冲字节长度, 附加功能) 返回已接收的字节数 返回-1代表有错 !!该函数有堵塞行为 如果设置成不等接收当没消息到时也会返回-1
     inline int RecvFrom(sADDR &addr_out, char *buf_out, int buf_len, int flags = 0) {
-        addr_len_t addr_len = GT_ADDR_LEN;
+        addr_len_t addr_len = GN_NetAddrContext().aAddrLen;
         return recvfrom((SOCKET)fd, buf_out, buf_len, flags, (sockaddr *)(&addr_out), &addr_len);
     }
 

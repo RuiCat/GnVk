@@ -848,22 +848,26 @@ GN_SOUND_API void GT_ReSetSoundMode2D() {
 }
 GN_SOUND_API void GT_ReSetSoundMode3D() {}
 
-ALCdevice *GT_AlDevice = 0;
-ALCcontext *GT_Context = 0;
+// DA-M2 批 3：OpenAL 设备/上下文收敛进文件内上下文（仅在非 WinCE 分支编译；GT_SoundInitError 属 WinCE 分支，本机无该工具链不迁）。
+struct sSoundAlContext {
+    ALCdevice *aAlDevice = 0;
+    ALCcontext *aAlContext = 0;
+};
+static sSoundAlContext gSoundAlContext;
 GN_SOUND_API bool GT_InitSound() {
 #ifdef AL_ALUT_H
     char c = alutInit(0, 0);
 #else
-    GT_AlDevice = alcOpenDevice(0);
-    if(!GT_AlDevice) return false;
-    GT_Context = alcCreateContext(GT_AlDevice, 0);
-    if(!GT_Context) {
-        alcCloseDevice(GT_AlDevice);
+    gSoundAlContext.aAlDevice = alcOpenDevice(0);
+    if(!gSoundAlContext.aAlDevice) return false;
+    gSoundAlContext.aAlContext = alcCreateContext(gSoundAlContext.aAlDevice, 0);
+    if(!gSoundAlContext.aAlContext) {
+        alcCloseDevice(gSoundAlContext.aAlDevice);
         return false;
     }
-    if(!alcMakeContextCurrent(GT_Context)) {
-        alcDestroyContext(GT_Context);
-        alcCloseDevice(GT_AlDevice);
+    if(!alcMakeContextCurrent(gSoundAlContext.aAlContext)) {
+        alcDestroyContext(gSoundAlContext.aAlContext);
+        alcCloseDevice(gSoundAlContext.aAlDevice);
         return false;
     }
 #endif
@@ -873,15 +877,15 @@ GN_SOUND_API bool GT_UnInitSound() {
 #ifdef AL_ALUT_H
     alutExit();
 #else
-    if(GT_Context) {
+    if(gSoundAlContext.aAlContext) {
         alcMakeContextCurrent(0);
-        alcDestroyContext(GT_Context);
-        if(alcGetError(GT_AlDevice) != ALC_NO_ERROR) return false;
-        GT_Context = 0;
+        alcDestroyContext(gSoundAlContext.aAlContext);
+        if(alcGetError(gSoundAlContext.aAlDevice) != ALC_NO_ERROR) return false;
+        gSoundAlContext.aAlContext = 0;
     }
-    if(GT_AlDevice) {
-        if(!alcCloseDevice(GT_AlDevice)) return false;
-        GT_AlDevice = 0;
+    if(gSoundAlContext.aAlDevice) {
+        if(!alcCloseDevice(gSoundAlContext.aAlDevice)) return false;
+        gSoundAlContext.aAlDevice = 0;
     }
 #endif
     return true;

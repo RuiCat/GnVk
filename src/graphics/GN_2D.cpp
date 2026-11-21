@@ -68,51 +68,55 @@ void GNg::cVIEW2D::zScissorRectSet(int x, int y, int w, int h) {
     GNg::GN_VkSetScissor(x, y, w, h, true);
 }
 #define GN_SCISSOR_LV_NUM 32 //剪裁范围嵌套最大层数
-GNg::sRECT GT_ScissorRect[GN_SCISSOR_LV_NUM];
-uint8 GT_ScissorRectLv = 0;
+// DA-M2 批 4：2D 剪裁栈（嵌套矩形 + 当前层）收敛进文件内上下文。
+struct sScissorContext {
+    GNg::sRECT aScissorRect[GN_SCISSOR_LV_NUM];
+    uint8 aScissorRectLv = 0;
+};
+static sScissorContext gScissorContext;
 
 void GNg::cVIEW2D::ScissorRectSetup(int x, int y, int w, int h, bool is_include) {
 #ifdef GN_DEBUG
-    if(GT_ScissorRectLv >= GN_SCISSOR_LV_NUM) {
+    if(gScissorContext.aScissorRectLv >= GN_SCISSOR_LV_NUM) {
         GN_Log("剪裁范围嵌套超出最大限制%d个!\n", GN_SCISSOR_LV_NUM);
     }
 #endif
-    GNg::sRECT *p_rect = GT_ScissorRect + GT_ScissorRectLv;
+    GNg::sRECT *p_rect = gScissorContext.aScissorRect + gScissorContext.aScissorRectLv;
     p_rect->left = x;
     p_rect->right = x + w;
     p_rect->top = y;
     p_rect->bottom = y + h;
 
-    if(is_include && GT_ScissorRectLv) {
+    if(is_include && gScissorContext.aScissorRectLv) {
         GNg::RectOverlap(p_rect, p_rect, (p_rect - 1));
         x = p_rect->left, y = p_rect->top;
         w = p_rect->right - x, h = p_rect->bottom - y;
     }
     GT_ScissorEnable(1);
     zScissorRectSet(x, y, w, h);
-    ++GT_ScissorRectLv;
+    ++gScissorContext.aScissorRectLv;
 }
 void GNg::cVIEW2D::ScissorRectRemove() {
-    switch(GT_ScissorRectLv) {
+    switch(gScissorContext.aScissorRectLv) {
         case 0:
 #ifdef GN_DEBUG
             GN_Log("调用 cVIEW2D::ScissorRectRemove 失败! 剪裁层已经是根层了!!\n");
 #endif
             break;
         case 1:
-            --GT_ScissorRectLv;
+            --gScissorContext.aScissorRectLv;
             GNg::GN_VkSetScissor(0, 0, 0, 0, false);
             break;
         default: {
-            --GT_ScissorRectLv;
-            GNg::sRECT *p_rect = GT_ScissorRect + (GT_ScissorRectLv - 1);
+            --gScissorContext.aScissorRectLv;
+            GNg::sRECT *p_rect = gScissorContext.aScissorRect + (gScissorContext.aScissorRectLv - 1);
             zScissorRectSet(p_rect->left, p_rect->top, p_rect->right - p_rect->left, p_rect->bottom - p_rect->top);
         }
     }
 }
 uint8 GNg::cVIEW2D::ScissorRectGet(GNg::sRECT *rc) {
-    if(rc && GT_ScissorRectLv) *rc = GT_ScissorRect[GT_ScissorRectLv - 1];
-    return GT_ScissorRectLv;
+    if(rc && gScissorContext.aScissorRectLv) *rc = gScissorContext.aScissorRect[gScissorContext.aScissorRectLv - 1];
+    return gScissorContext.aScissorRectLv;
 }
 uint8 GNg::cVIEW2D::GetRangeTouchDownId(short left, short top, short right, short bottom) {
 #ifdef _GN_MAIN_H_

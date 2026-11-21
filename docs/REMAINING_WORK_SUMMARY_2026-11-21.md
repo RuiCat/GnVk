@@ -5,14 +5,14 @@
 
 ## 0. 当前一句话
 
-CPU 可验的遗留项已基本落地（多着色器 P2a/P3-CPU/P5-CPU、G1b、§8 台账、DA-M2 批 1a/1b/2a/2b）；剩余 CPU 工作 = **DA-M2 批 3 + 批 4（25 个全局；原口径 26 含 1 条误命中）**；GPU/真机项与 DA-M1r 已逐条标 blocked 并附复算命令。
+**CPU 可验的遗留项已全部收口**（多着色器 P2a/P3-CPU/P5-CPU、G1b、§8 台账、DA-M2 批 1a/1b/2a/2b/3/4 一次收完）；DA-M2 只余 **4 个有明确理由的保留项**（公共 ABI / WinCE 分支 / Android extern / `LARGE_INTEGER`）；剩余项全部是 GPU·真机·ABI 阻塞项，已逐条附复算命令。
 
 ## 1. Goal 与基线
 
 | 项 | 值 |
 |---|---|
 | Goal | 旧 `goal-6fde2e21-…`（轮次 8 为止）；**2026-11-22 新会话 `get_goal` 为 null，已按续跑需要重建** |
-| 构建基线 | `make` exit=0；`make unit` **463/0**；`make imoScene` exit=0 |
+| 构建基线 | `make` exit=0；`make unit` **463/0**；`make imoScene` exit=0（2026-11-22 二次实测仍 463/0） |
 | lint | 新增/改动文件 0/0；`GN_UiTextIn`(1129)/`GN_UiFBrowser`(1966) 为历史超限（非本轮引入） |
 | 最新备份 | `GnVk-20261121T153906Z.tar.zst`（213143276 B，sha256 `d11557cd…633e88`；**2026-11-22 实测 1875 普通文件 + 320 目录**，订正 BACKLOG B7b 的 1861 口径；同盘 staging，外盘 EROFS） |
 | 工作树 | 含多会话未提交改动；**禁止** `make clean`/`git checkout/clean/stash`；恢复单文件不要用 `git show HEAD:`（HEAD 可能是未拆分旧版） |
@@ -31,6 +31,7 @@ CPU 可验的遗留项已基本落地（多着色器 P2a/P3-CPU/P5-CPU、G1b、�
 | P1a/P1b | API done；GPU 销毁 blocked | 特殊化常量/键版本/GC API |
 | B6 | obsolete | 云层已由 L5/立方体云接管 |
 | §8 收敛台账 | done | `docs/BACKLOG.md` §8 |
+| DA-M2 全局收敛 | done（CPU 可验部分，2026-11-22） | 61→4 保留；`make` exit=0、`make unit` 463/0、lint naming/comments 0 告警 |
 
 ## 3. blocked（需要硬件 / 决策 / 环境）
 
@@ -55,17 +56,17 @@ CPU 可验的遗留项已基本落地（多着色器 P2a/P3-CPU/P5-CPU、G1b、�
 | 1b | IME 4 个（On/OnRecv/Count/Char）→ `GN::sIME_CONTEXT` + `GN::GetImeContext()` | done |
 | 2a | `GN_UiFBrowser.cpp` 15 个 → `sUI_FB_CONTEXT`（含 token-paste 宏改写） | done |
 | 2b | `GT_FilePreviewGenList` → `sUI_FB_PREVIEW_CONTEXT`（依赖本地类 `GT_cFILE_PREVIEW_GEN`） | **done（2026-11-22 00:18）**：make exit=0、unit 463/0、lint 0 告警；文件 1972 有效行属历史超限 |
-| 3 | `GN_Init` 6 + `GN_Sys` 4 + `GN_Sound` 3 | pending（注意 Sys 为平台文件、部分可能被 extern 引用，先查 extern） |
-| 4 | 其余约 12 个（每文件 1–2：`GN_2D`、`GN_2Dtype`、`GN_File`、`GN_NetBase`、`GN_NetTrans`、`GN_Main`、`GN_Parallel`、`GN_AmCtrl`、`GN_UiPopDlg*` 等） | pending |
+| 3 | `GN_Init` 6 + `GN_Sys` 4 + `GN_Sound` 3 | **done（2026-11-22）**：Init 6（含 `char[]`+`char*` 别名对）、Sys 3（剪贴板/线程表；`GT_CurAppDirW` 因 Android extern 保留）、Sound 2（WCE 分支的 `GT_SoundInitError` 保留） |
+| 4 | 其余约 12 个（每文件 1–2：`GN_2D`、`GN_2Dtype`、`GN_File`、`GN_NetBase`、`GN_NetTrans`、`GN_Main`、`GN_Parallel`、`GN_AmCtrl`、`GN_UiPopDlg*` 等） | **done（2026-11-22）**：12 项收 11（`GT_MainWindow` 为 `GN_MAIN_API` 公共 ABI 保留）；另补收审计正则漏掉的多词类型 `GN_Input` 8 项 + `GT_ExternNoticePort` + `GT_ImgRowEndID` |
 
 **每批验收**：`make` exit=0、`make unit` 463/0、lint 0/0（历史超限文件只记录不顺手拆）、同盘备份 + B7b 更新 + BACKLOG/协作/记忆回写。
 
 ## 5. 下一轮顺序（自动目标会用）
 
 1. ~~**DA-M2 2b**~~：**已完成 2026-11-22 00:18**（结构体插在类定义后，替换 2 处引用；make exit=0、unit 463/0）。
-2. **批 3**：先 `rg` 这 13 个名字的 extern 引用；`GT_SysDir/GT_AppDir/GT_TimeFreq` 等若是跨 TU 公共量，走访问器或保留并在台账注明。
-3. **批 4**：逐个 1–2 个全局收敛，按文件收尾。
-4. 全部 done 后：`goal` 标 complete；终态备份；给用户「仍需你做的两件事」：
+2. ~~**批 3**~~：**已完成**（2026-11-22；`GT_CurAppDirW`/`GT_TimeFreq`/`GT_SoundInitError` 因 Android extern / Windows 分支 / WinCE 分支保留并在 §2 与 §8 注明）。
+3. ~~**批 4**~~：**已完成**（2026-11-22；`GT_MainWindow` 因公共 ABI 保留）。
+4. 全部 done 后：终态备份（同盘 staging；异盘需一次 danger-full-access 批准）；给用户「仍需你做的两件事」：
    - 真机 GPU：`make gpuCheck`、`IMO_SCENE_SHADOWS=1 timeout 20 ./build/imoScene` ×3、E2/E3 截图 A/B；
    - DA-M1r ABI 决策（保持 / 升 ABI / 逐处迁移）。
 

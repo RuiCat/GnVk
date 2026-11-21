@@ -143,14 +143,14 @@ void GNu::cSIM_DIALOG::EndInitToData() {
         file_var_num = (file_size >> 2) - 1; //计算得到变量值数
         GNf::Read(file_type, 1, 4, pfile);
         if(!strcmp(file_type, "YGS")) { //确认是该文件类型
-            GT_SimMenuTextOffsetPos = 0.0f;
+            GN_UiPopDlgContext().aSimMenuTextOffsetPos = 0.0f;
             zReadData(pfile, file_var_num); //递归读入数据 不够的保持默认值
             const char *err_str1 = "读取简单对话筐存档文件数据有错! 该.yg%c文件是过期的! 与当前对话筐变量条目或层次结构匹配不上!\n";
             if(file_var_num == GN_INT_MIN) {
                 zReDefault(true); //出错时就恢复为默认值
                 GN_Log(err_str1, 's'); //文件不对应 这可能在生成该文件后又在代码里修改过变量条目或文件搞错或损坏
 
-            } else if(GT_SimMenuTextOffsetPos) { //有文本要读
+            } else if(GN_UiPopDlgContext().aSimMenuTextOffsetPos) { //有文本要读
                 GNf::Close(pfile);
                 char *name_end = zFileName + (strlen(zFileName) - 1);
                 *name_end = 't';
@@ -189,11 +189,11 @@ void GNu::cSIM_DIALOG::EndInitToData() {
             if(pfile) {
                 char file_type2[] = "YGS";
                 GNf::Write(file_type2, 1, 4, pfile); //写文件头
-                GT_SimMenuTextOffsetPos = 0.0f;
+                GN_UiPopDlgContext().aSimMenuTextOffsetPos = 0.0f;
                 zWriteData(pfile); //递归写入数据
                 GNf::Close(pfile);
 
-                if(GT_SimMenuTextOffsetPos) { //有文本要写就另创建个ygt文件
+                if(GN_UiPopDlgContext().aSimMenuTextOffsetPos) { //有文本要写就另创建个ygt文件
                     char *name_end = zFileName + (strlen(zFileName) - 1);
                     *name_end = 't';
                     pfile = GNf::Open(zFileName, "wb", GNf::eFILE_SAFE);

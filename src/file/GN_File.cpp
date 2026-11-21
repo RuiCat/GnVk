@@ -887,7 +887,11 @@ GN_API void GN_ErrorInfoClear() {
 }
 GN_API bool GN_RunErrorOutputOn = true;
 
-char GT_RunLogOpenMode[2] = "w";
+// DA-M2 批 4：运行日志打开模式收敛进文件内上下文。
+struct sFileLogContext {
+    char aRunLogOpenMode[2] = "w";
+};
+static sFileLogContext gFileLogContext;
 GN_API void GN_Log(const char *fmt, ...) {
     if(!GN_RunErrorOutputOn) return;
 
@@ -897,7 +901,7 @@ GN_API void GN_Log(const char *fmt, ...) {
         GN_StrToSysFilePath(run_filename, GN_RunErrorFileName, "w", false);
         GNf_DirStatePop();
     }
-    FILE *fp = fopen(run_filename, GT_RunLogOpenMode);
+    FILE *fp = fopen(run_filename, gFileLogContext.aRunLogOpenMode);
     if(fp) {
         va_list va;
         va_start(va, fmt);
@@ -906,7 +910,7 @@ GN_API void GN_Log(const char *fmt, ...) {
         fclose(fp);
 
 #if defined GT_USING_ANDROID_JNI || defined GT_USING_ANDROID
-        fp = fopen(GN_DocDir(GN_RunErrorFileName), GT_RunLogOpenMode); //Android 多输出个文件到Sdcard 以方便查阅
+        fp = fopen(GN_DocDir(GN_RunErrorFileName), gFileLogContext.aRunLogOpenMode); //Android 多输出个文件到Sdcard 以方便查阅
         if(fp) {
             va_start(va, fmt);
             vfprintf(fp, fmt, va);
@@ -914,7 +918,7 @@ GN_API void GN_Log(const char *fmt, ...) {
             fclose(fp);
         }
 #endif
-        GT_RunLogOpenMode[0] = 'a';
+        gFileLogContext.aRunLogOpenMode[0] = 'a';
     }
 }
 GN_API char *GN_RunErrorFileName = "RunLog.txt";

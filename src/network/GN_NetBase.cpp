@@ -29,8 +29,10 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 #include "GN.h"
 #endif
 #ifdef _GN_NETBASE_H_
-int GT_ADDR_LEN = 0;
-int GT_ADDR0_LEN = 0;
+sNetAddrContext &GN_NetAddrContext() {
+    static sNetAddrContext ctx;
+    return ctx;
+}
 NET_API P<char> GNn_ErrorLast;
 NET_API const char GNn_DefWebFileName[] = "index.htm";
 

@@ -744,22 +744,26 @@ GN_SYS_API unsigned int GT_GetSysCoreCount() {
     return sysconf(_SC_NPROCESSORS_CONF);
 #endif
 }
-char *GT_StrPasteBuffer = 0;
+// DA-M2 批 3：剪贴板文本缓冲收敛进文件内上下文（跨平台各分支共用同一字段）。
+struct sClipboardContext {
+    char *aStrPasteBuffer = 0;
+};
+static sClipboardContext gClipboardContext;
 #if defined(_WIN32_) || defined(_WIN32_WCE)
 GN_SYS_API char const *GN_StrGetPasteText() {
-    GN_DeleteArray(GT_StrPasteBuffer);
+    GN_DeleteArray(gClipboardContext.aStrPasteBuffer);
     if(IsClipboardFormatAvailable(CF_TEXT)) { //确定剪贴板是否含有CF_TEXT格式的数据
         OpenClipboard(0 /*(HWND)GNg::sWINDOW::Hwnd*/); //打开剪贴板
         HGLOBAL hGlobal = GetClipboardData(CF_TEXT); //获得引用文本的内存块句柄
         size_t clipSize = GlobalSize(hGlobal);
-        GT_StrPasteBuffer = new char[clipSize]; //分配一块与剪贴板数据块大小相同的内存块
+        gClipboardContext.aStrPasteBuffer = new char[clipSize]; //分配一块与剪贴板数据块大小相同的内存块
         LPVOID pGlobal = GlobalLock(hGlobal);
-        strncpy(GT_StrPasteBuffer, (char *)pGlobal, clipSize - 1);
-        GT_StrPasteBuffer[clipSize - 1] = 0;
+        strncpy(gClipboardContext.aStrPasteBuffer, (char *)pGlobal, clipSize - 1);
+        gClipboardContext.aStrPasteBuffer[clipSize - 1] = 0;
         GlobalUnlock(hGlobal);
         CloseClipboard();
     }
-    return GT_StrPasteBuffer;
+    return gClipboardContext.aStrPasteBuffer;
 }
 GN_SYS_API void GN_StrSetPasteText(const char *text) {
     OpenClipboard(0); //打开剪贴板
@@ -784,8 +788,8 @@ GN_SYS_API void GN_StrSetPasteText(const char *text) {
 #elif defined _MAC_
 GN_SYS_API char const *GN_StrGetPasteText() {
     char const *text = macGetPasteText();
-    GN_StrcpyData(GT_StrPasteBuffer, text);
-    return GT_StrPasteBuffer;
+    GN_StrcpyData(gClipboardContext.aStrPasteBuffer, text);
+    return gClipboardContext.aStrPasteBuffer;
 }
 GN_SYS_API void GN_StrSetPasteText(const char *text) {
     macSetPasteText(text ? text : "");
@@ -848,23 +852,23 @@ struct GT_ClipboardX11 {
 };
 static GT_ClipboardX11 GT_X11Clip;
 GN_SYS_API char const *GN_StrGetPasteText() {
-    GN_DeleteArray(GT_StrPasteBuffer);
+    GN_DeleteArray(gClipboardContext.aStrPasteBuffer);
     char *text = GT_X11Clip.ReadSelection(GT_X11Clip.clip);
     if(!text) text = GT_X11Clip.ReadSelection(XA_PRIMARY);
     if(text) {
-        GT_StrPasteBuffer = text;
-        return GT_StrPasteBuffer;
+        gClipboardContext.aStrPasteBuffer = text;
+        return gClipboardContext.aStrPasteBuffer;
     }
     FILE *fp = popen("wl-paste -t text 2>/dev/null", "r");
     if(fp) {
         char buf[4096] = {0};
-        if(fread(buf, 1, sizeof(buf) - 1, fp) > 0) GN_StrcpyData(GT_StrPasteBuffer, buf);
+        if(fread(buf, 1, sizeof(buf) - 1, fp) > 0) GN_StrcpyData(gClipboardContext.aStrPasteBuffer, buf);
         pclose(fp);
     }
-    return GT_StrPasteBuffer;
+    return gClipboardContext.aStrPasteBuffer;
 }
 GN_SYS_API void GN_StrSetPasteText(const char *text) {
-    GN_StrcpyData(GT_StrPasteBuffer, text ? text : "");
+    GN_StrcpyData(gClipboardContext.aStrPasteBuffer, text ? text : "");
     if(GT_X11Clip.Setup(), GT_X11Clip.disp) {
         XSetSelectionOwner(GT_X11Clip.disp, XA_PRIMARY, GT_X11Clip.win, CurrentTime);
         XSetSelectionOwner(GT_X11Clip.disp, GT_X11Clip.clip, GT_X11Clip.win, CurrentTime);
@@ -885,7 +889,7 @@ GN_SYS_API void GN_StrSetPasteText(const char *text) {
             } else {
                 XChangeProperty(GT_X11Clip.disp, ev.xselectionrequest.requestor,
                                 ev.xselectionrequest.property, ev.xselectionrequest.target, 8, PropModeReplace,
-                                (unsigned char *)GT_StrPasteBuffer, strlen(GT_StrPasteBuffer));
+                                (unsigned char *)gClipboardContext.aStrPasteBuffer, strlen(gClipboardContext.aStrPasteBuffer));
             }
             XSendEvent(GT_X11Clip.disp, ev.xselectionrequest.requestor, False, 0, (XEvent *)&sev);
         }
@@ -901,17 +905,17 @@ GN_SYS_API void GN_StrSetPasteText(const char *text) {
 }
 #else
 GN_SYS_API char const *GN_StrGetPasteText() {
-    GN_DeleteArray(GT_StrPasteBuffer);
+    GN_DeleteArray(gClipboardContext.aStrPasteBuffer);
     FILE *fp = popen("wl-paste -t text 2>/dev/null", "r");
     if(fp) {
         char buf[4096] = {0};
-        if(fread(buf, 1, sizeof(buf) - 1, fp) > 0) GN_StrcpyData(GT_StrPasteBuffer, buf);
+        if(fread(buf, 1, sizeof(buf) - 1, fp) > 0) GN_StrcpyData(gClipboardContext.aStrPasteBuffer, buf);
         pclose(fp);
     }
-    return GT_StrPasteBuffer;
+    return gClipboardContext.aStrPasteBuffer;
 }
 GN_SYS_API void GN_StrSetPasteText(const char *text) {
-    GN_StrcpyData(GT_StrPasteBuffer, text ? text : "");
+    GN_StrcpyData(gClipboardContext.aStrPasteBuffer, text ? text : "");
     if(text && text[0]) {
         FILE *fp = popen("wl-copy 2>/dev/null", "w");
         if(fp) {
@@ -923,10 +927,10 @@ GN_SYS_API void GN_StrSetPasteText(const char *text) {
 #endif
 #else
 GN_SYS_API char const *GN_StrGetPasteText() {
-    return GT_StrPasteBuffer;
+    return gClipboardContext.aStrPasteBuffer;
 }
 GN_SYS_API void GN_StrSetPasteText(const char *text) {
-    GN_StrcpyData(GT_StrPasteBuffer, text);
+    GN_StrcpyData(gClipboardContext.aStrPasteBuffer, text);
 }
 #endif
 
@@ -1157,7 +1161,11 @@ struct GT_sTHREAD_ARG {
     GT_sTHREAD_ARG() {}
     GT_sTHREAD_ARG(P<GN_sTHREAD> &_tr, void *_arg, void *_arg2, void (*_fun)(P<GN_sTHREAD>, void *, void *)) : tr(_tr), arg(_arg), arg2(_arg2), fun(_fun) {}
 };
-GN::sLIST<GT_sTHREAD_ARG> GT_UsThreadTable;
+// DA-M2 批 3：用户线程登记表收敛进文件内上下文。
+struct sUserThreadContext {
+    GN::sLIST<GT_sTHREAD_ARG> aUsThreadTable;
+};
+static sUserThreadContext gUserThreadContext;
 
 GN_SYS_API bool GN_ThreadSupport = false;
 
@@ -1200,12 +1208,12 @@ GN_sTHREAD::~GN_sTHREAD() {
 unsigned WINAPI GT_ThreadStartPoint(void *arg) {
     GT_sTHREAD_ARG *del_tr = (GT_sTHREAD_ARG *)arg;
     del_tr->fun(del_tr->tr, del_tr->arg, del_tr->arg2);
-    GT_UsThreadTable.del(del_tr);
+    gUserThreadContext.aUsThreadTable.del(del_tr);
     return 0;
 }
 GN_SYS_API P<GN_sTHREAD> GN_ThreadStart(void (*proc)(P<GN_sTHREAD> this_thread, void *arg, void *arg2), void *_arg, void *_arg2) {
     P<GN_sTHREAD> p_tr(1);
-    GT_sTHREAD_ARG *del_tr = GT_UsThreadTable.add(GT_sTHREAD_ARG(p_tr, _arg, _arg2, proc));
+    GT_sTHREAD_ARG *del_tr = gUserThreadContext.aUsThreadTable.add(GT_sTHREAD_ARG(p_tr, _arg, _arg2, proc));
     unsigned pid;
     HANDLE porc = (HANDLE)::_beginthreadex(0, 0, GT_ThreadStartPoint, del_tr, 0 /*CREATE_SUSPENDED*/, &pid);
     if(porc) {
@@ -1214,7 +1222,7 @@ GN_SYS_API P<GN_sTHREAD> GN_ThreadStart(void (*proc)(P<GN_sTHREAD> this_thread, 
         p_tr->id = porc;
         return p_tr;
     } else {
-        GT_UsThreadTable.del(del_tr);
+        gUserThreadContext.aUsThreadTable.del(del_tr);
         return P_();
     }
 }
@@ -1261,20 +1269,20 @@ void *GT_ThreadStartPoint(void *arg) {
         GT_JEnv = 0;
     }
 #endif
-    GT_UsThreadTable.del(del_thread);
+    gUserThreadContext.aUsThreadTable.del(del_thread);
     return 0;
 }
 GN_SYS_API P<GN_sTHREAD> GN_ThreadStart(void (*proc)(P<GN_sTHREAD> this_thread, void *arg, void *arg2), void *_arg, void *_arg2) {
     void *proc_id;
     P<GN_sTHREAD> p_thread(1);
-    GT_sTHREAD_ARG *del_thread = GT_UsThreadTable.add(GT_sTHREAD_ARG(p_thread, _arg, _arg2, proc));
+    GT_sTHREAD_ARG *del_thread = gUserThreadContext.aUsThreadTable.add(GT_sTHREAD_ARG(p_thread, _arg, _arg2, proc));
     int ret = pthread_create((pthread_t *)&proc_id, 0, GT_ThreadStartPoint, del_thread);
     if(ret != -1) {
         /*存在问题:还未设为高优先级*/
         p_thread->id = proc_id;
         return p_thread;
     } else {
-        GT_UsThreadTable.del(del_thread);
+        gUserThreadContext.aUsThreadTable.del(del_thread);
         return P_();
     }
 }
@@ -1436,13 +1444,13 @@ GN_SYS_API void GN_InitSys() {
     GT_SystemInited |= 1 << 5;
 }
 GN_SYS_API void GN_UnInitSys() {
-    GN_DeleteArray(GT_StrPasteBuffer); //删除剪贴板内容
+    GN_DeleteArray(gClipboardContext.aStrPasteBuffer); //删除剪贴板内容
     UnInitUsIO();
-    if(!GT_UsThreadTable.empty()) {
+    if(!gUserThreadContext.aUsThreadTable.empty()) {
 #ifdef GN_DEBUG
-        GN_Log("还有线程 %d 个没有退出!!\n", GT_UsThreadTable.size());
+        GN_Log("还有线程 %d 个没有退出!!\n", gUserThreadContext.aUsThreadTable.size());
 #endif
-        GT_UsThreadTable.clear();
+        gUserThreadContext.aUsThreadTable.clear();
     }
     GT_SystemInited -= 1 << 5;
 }

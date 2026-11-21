@@ -54,44 +54,57 @@ GT_PFUNC_VOID GN_cMODULE::GetFunction(const char *func_name) {
     if(zModule) return GT_ModuleGetFunction(zModule, func_name);
     else return 0;
 }
-P<char> GT_UserModuleFileName; //用户程序模块路径文件名 不包含.dll等
-P<GN_cMODULE> GT_UserModule; //用户程序模块
+// DA-M2 批 3：用户程序模块句柄/路径文件名收敛进文件内上下文。
+struct sUserModuleContext {
+    P<char> aModuleFileName; //用户程序模块路径文件名 不包含.dll等
+    P<GN_cMODULE> aModule; //用户程序模块
+};
+static sUserModuleContext gUserModuleContext;
 
 /************************************************************* 特殊目录与文件 ****************************************************************************/
-char GT_SysDir[384] = "assets/";
-char *GT_SysFile = GT_SysDir + 7;
+// DA-M2 批 3：系统资源目录 + 写入游标（原 char[]/char* 别名对）收敛进上下文；游标在构造里指向各自缓冲区。
+struct sPathDirContext {
+    char aSysDir[384];
+    char *aSysFile;
+    char aAppDir[384];
+    char *aAppFile;
+    sPathDirContext() : aSysFile(aSysDir + 7), aAppFile(aAppDir) {
+        memcpy(aSysDir, "assets/", 8); //含结尾 0，与原 "assets/" 初值一致
+        aAppDir[0] = 0;
+    }
+};
+static sPathDirContext gPathDirContext;
 
 GN_INIT_API char *const GN_SysDir(const char *pathfile) {
     if(pathfile) {
-        strncpy(GT_SysFile, pathfile, sizeof(GT_SysDir) - (GT_SysFile - GT_SysDir) - 1);
-        GT_SysFile[sizeof(GT_SysDir) - (GT_SysFile - GT_SysDir) - 1] = 0;
+        strncpy(gPathDirContext.aSysFile, pathfile, sizeof(gPathDirContext.aSysDir) - (gPathDirContext.aSysFile - gPathDirContext.aSysDir) - 1);
+        gPathDirContext.aSysFile[sizeof(gPathDirContext.aSysDir) - (gPathDirContext.aSysFile - gPathDirContext.aSysDir) - 1] = 0;
     }
-    return (char *const)GT_SysDir;
+    return (char *const)gPathDirContext.aSysDir;
 }
 /*------------------------------------------------------------ 用户应用资源目录 -------------------------------------------------------------------------*/
-char GT_AppDir[384] = "\0";
-char *GT_AppFile = GT_AppDir;
+// 应用资源目录与其写入游标已并入上方 sPathDirContext（aAppDir/aAppFile 两字段）。
 
 GN_INIT_API char *const GN_AppDir(const char *pathfile) {
     if(pathfile) {
-        strncpy(GT_AppFile, pathfile, sizeof(GT_AppDir) - 1);
-        GT_AppFile[sizeof(GT_AppDir) - 1] = 0;
-    } else *GT_AppFile = 0;
-    return (char *const)GT_AppDir;
+        strncpy(gPathDirContext.aAppFile, pathfile, sizeof(gPathDirContext.aAppDir) - 1);
+        gPathDirContext.aAppFile[sizeof(gPathDirContext.aAppDir) - 1] = 0;
+    } else *gPathDirContext.aAppFile = 0;
+    return (char *const)gPathDirContext.aAppDir;
 }
 GN_INIT_API void GN_AppDirSet(const char *dir) {
-    if(dir && dir[0]) GT_AppFile = sprintf(GT_AppDir, "%s/", dir) + GT_AppDir;
+    if(dir && dir[0]) gPathDirContext.aAppFile = sprintf(gPathDirContext.aAppDir, "%s/", dir) + gPathDirContext.aAppDir;
     else {
-        GT_AppDir[0] = 0;
-        GT_AppFile = GT_AppDir;
+        gPathDirContext.aAppDir[0] = 0;
+        gPathDirContext.aAppFile = gPathDirContext.aAppDir;
     }
 }
 GN_INIT_API void GN_AppDirGet(char *dir_out) {
-    if(GT_AppFile == GT_AppDir) *dir_out = 0;
+    if(gPathDirContext.aAppFile == gPathDirContext.aAppDir) *dir_out = 0;
     else {
-        char *_end = GT_AppFile - 1;
+        char *_end = gPathDirContext.aAppFile - 1;
         *_end = 0; //临时断开文件名
-        strncpy(dir_out, GT_AppDir, 383);
+        strncpy(dir_out, gPathDirContext.aAppDir, 383);
         dir_out[383] = 0;
         *_end = '/';
     }
@@ -168,10 +181,10 @@ GN_INIT_API bool GN_LoadCallBackFuncFromModule(const char *mod_name, GT_PFUNC_VO
     md_name[sizeof(md_name) - 1] = 0;
     strncat(md_name, GN_StrGetModuleExtName(GN_eMODULE_DLL), sizeof(md_name) - strlen(md_name) - 1);
     {
-        GT_UserModule.New(1);
-        GN_cMODULE *_md = GT_UserModule;
+        gUserModuleContext.aModule.New(1);
+        GN_cMODULE *_md = gUserModuleContext.aModule;
         if(_md->InitToData(md_name)) { //加载用户应用程序动态库
-            GT_UserModuleFileName(mod_name, 0);
+            gUserModuleContext.aModuleFileName(mod_name, 0);
             load_func = (GT_PFUNC_VOID)_md->GetFunction("AppInit");
             exit_func = (GT_PFUNC_VOID)_md->GetFunction("AppUnInit");
             display2D_func = (GT_VOID_PFUNC_UINT)_md->GetFunction("AppDisplay2D");
@@ -194,8 +207,8 @@ GN_INIT_API bool GN_InitCallBackFuncFromModule(const char *mod_name) {
     return false;
 }
 GN_INIT_API void GN_CallBackFuncModuleRelease() {
-    GT_UserModuleFileName.Delete();
-    GT_UserModule.Delete();
+    gUserModuleContext.aModuleFileName.Delete();
+    gUserModuleContext.aModule.Delete();
 }
 /*************************************************************** 供循环框架调用的处理 ***********************************************************************************************************/
 GN_INIT_API void GF_FrameCycleProc1(unsigned int nTime) {

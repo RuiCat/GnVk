@@ -26,8 +26,12 @@ NET_API void GNn_UrlRemedy(char *url_out /*[384]*/, const char *url);
 
 extern NET_API P<char> GNn_ErrorLast; //最近一次的网络错误信息记录 在运行中途易发生 但不会导致运行中断的小错误
 
-extern int GT_ADDR0_LEN;
-extern int GT_ADDR_LEN;
+// DA-M2 批 4：套接字地址长度由 ad-hoc extern 收敛进上下文，跨 TU 改用访问器（定义在 GN_NetBase.cpp）。
+struct sNetAddrContext {
+    int aAddrLen = 0;
+    int aAddr0Len = 0;
+};
+sNetAddrContext &GN_NetAddrContext();
 
 #endif //_GN_NETBASE_H_
 #if defined(NET_USING_INDEPENDENT) && defined(GN_USING_UTILITY_LIB)

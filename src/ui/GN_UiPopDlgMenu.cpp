@@ -270,7 +270,10 @@ void GNu::sSIM_MENU::InitTextToDataf(const char *text, float *value, P<GNg::sIMA
     }
     GT_TMP_SIMPLE_MENU_InitText(GT_SP_VALUE_FLOAT)
 }
-float GT_SimMenuTextOffsetPos; //临时记录文本读写时的偏移记数
+sPopDlgContext &GN_UiPopDlgContext() {
+    static sPopDlgContext ctx;
+    return ctx;
+}
 
 bool GNu::sSIM_MENU::ReplaceChildName(const char *name, const char *new_name) {
 #define GT_TMP_FIND_MENU_CHILD_FROM_NAME_BEGIN \
@@ -308,8 +311,8 @@ void GNu::sSIM_MENU::zWriteData(GNf::sFILE *fp) {
     for(si = 0; si < sn; ++si) {
         _chd = &(zChild[si]);
         if(_chd->type == GT_SP_VALUE_TEXT) {
-            _chd->addValue = GT_SimMenuTextOffsetPos;
-            GT_SimMenuTextOffsetPos += _chd->maxValue;
+            _chd->addValue = GN_UiPopDlgContext().aSimMenuTextOffsetPos;
+            GN_UiPopDlgContext().aSimMenuTextOffsetPos += _chd->maxValue;
             GNf::Write((char *)&(_chd->maxValue), 4, 1, fp);
 
         } else if(_chd->type <= GT_SP_VALUE_FLOAT) { //先写入该选单的所有变量值
@@ -386,8 +389,8 @@ void GNu::sSIM_MENU::zReadData(GNf::sFILE *fp, int &max_read_count) {
                         max_read_count = GN_INT_MIN;
                         return;
                     }
-                    _chd->addValue = GT_SimMenuTextOffsetPos;
-                    GT_SimMenuTextOffsetPos += _chd->maxValue;
+                    _chd->addValue = GN_UiPopDlgContext().aSimMenuTextOffsetPos;
+                    GN_UiPopDlgContext().aSimMenuTextOffsetPos += _chd->maxValue;
                     break;
             }
             --max_read_count;

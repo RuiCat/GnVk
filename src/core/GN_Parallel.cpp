@@ -27,17 +27,21 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 //#include"GND.h"
 #ifdef _GN_PARALLEL_H_
 /*--------------------------------------------------------- 多线程任务管理 ---------------------------------------------------------------------------------------------------------*/
-GN_sTASK_LIST_NODE *GT_IdleTasks[2] = {0, 0};
+// DA-M2 批 4：两路空闲任务轮表头收敛进文件内上下文。
+struct sParallelContext {
+    GN_sTASK_LIST_NODE *aIdleTasks[2] = {0, 0};
+};
+static sParallelContext gParallelContext;
 
 GN_API void GN_TaskPushToIdleExec(P<GN_sTASK_BASE> task, bool thread_b) {
-    GN_ListWheelListPushBack(GT_IdleTasks[(uint8)thread_b], task);
+    GN_ListWheelListPushBack(gParallelContext.aIdleTasks[(uint8)thread_b], task);
 }
 GN_API void GN_TaskIdleProc(unsigned int nTime, bool thread_b) {
-    GN_ListWheelListProc<P<GN_sTASK_BASE>, GN_sTASK_LIST_NODE>(GT_IdleTasks[(uint8)thread_b], nTime);
+    GN_ListWheelListProc<P<GN_sTASK_BASE>, GN_sTASK_LIST_NODE>(gParallelContext.aIdleTasks[(uint8)thread_b], nTime);
 }
 GN_API void GN_TaskIdleClearAll() {
-    GN_ListWheelListClear(GT_IdleTasks[0]);
-    GN_ListWheelListClear(GT_IdleTasks[1]);
+    GN_ListWheelListClear(gParallelContext.aIdleTasks[0]);
+    GN_ListWheelListClear(gParallelContext.aIdleTasks[1]);
 }
 void GN_sDATA_SGM::Reset() {
     st = end = 0;

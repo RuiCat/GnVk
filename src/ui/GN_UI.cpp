@@ -25,6 +25,7 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 
 #include "GN.h"
 #include "GN_Def.h"
+#include "GN_UiPopDlgInner.h" //DA-M2 批 4：取 sPopDlgContext/GN_UiPopDlgContext() 声明
 #ifdef _GN_UI_H_
 GN_API const char *GNu::UiObjTypeNames[eUI_TYPE_NUM] = {"UI组", GNg::ObjTypeNames[1], GNg::ObjTypeNames[2], GNg::ObjTypeNames[3], GNg::ObjTypeNames[4], GNg::ObjTypeNames[5], GNg::ObjTypeNames[6], GNg::ObjTypeNames[7],
                                                         "底筐", "靠边图像", "靠边动画图筐", "静态文本", "输入筐", "颜色版", "滚动筐", "滚动列表", "滚动嵌套UI列表", "图标选择列表", "文本选择列表", "滚动列表树", "文件浏缆", "简单对话筐", "选择按钮联", "分页栏", "滑动条", "触屏虚拟按钮", "触屏虚拟控杆", "数值提取描述"};
@@ -709,7 +710,6 @@ GNu::cUI_PTR GNu::cUI_GROUP::Search(P<iUI_OBJECT> obj) {
 GNu::cUI_PTR GNu::cUI_SCENE::Search(const char *name) {
     GT_TMP_SEARCH_SCENE_PTR(GNu::cUI_PTR, UiObj, 0)
 }
-extern GNu::cSIM_DIALOGEX *GT_FullSelectPathDlg;
 bool GNu::cUI_SCENE::zNeedScreenImg = false;
 unsigned int GNu::cUI_SCENE::zNeedScreenImgObjN = 0;
 
@@ -751,9 +751,9 @@ void GNu::cUI_SCENE::UpdateRun(unsigned int updatetime, sUI_LEVEL *parent) {
     cUI_GROUP::UpdateRun(updatetime, parent);
 }
 void GNu::cUI_SCENE::UpdatePlay(unsigned int updatetime) {
-    if(GT_FullSelectPathDlg) {
-        GT_FullSelectPathDlg->UpdateRun(updatetime);
-        if(GT_FullSelectPathDlg->GetCurDetailSetState() != eDETAIL_SET_PATH_SELECTF) GT_FullSelectPathDlg = 0;
+    if(GN_UiPopDlgContext().aFullSelectPathDlg) {
+        GN_UiPopDlgContext().aFullSelectPathDlg->UpdateRun(updatetime);
+        if(GN_UiPopDlgContext().aFullSelectPathDlg->GetCurDetailSetState() != eDETAIL_SET_PATH_SELECTF) GN_UiPopDlgContext().aFullSelectPathDlg = 0;
         return;
     }
     //Resize(GNg::ViewCur); //主UI场景范围与视口截取范围相同
