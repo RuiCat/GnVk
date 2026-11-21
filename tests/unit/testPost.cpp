@@ -29,7 +29,7 @@ TEST_CASE(postDefaultValues) {
     CHECK(nearly(ubo.bloomKnee, 0.5f));
     CHECK(nearly(ubo.ev, 0.0f));
     CHECK(nearly(ubo.fxaa, 0.0f));
-    CHECK(nearly(ubo.pad1, 0.0f));
+    CHECK(nearly(ubo.srgbEncode, 0.0f));
     CHECK_EQ(sizeof(sPOST_UBO), (size_t)32);
 }
 

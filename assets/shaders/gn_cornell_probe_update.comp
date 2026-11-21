@@ -1,0 +1,158 @@
+// gn_cornell_probe_update.comp — DDGI 探针异步更新（软件解析光追路径）
+//
+// 每个 workgroup 更新 1 个探针：96 个 invocation = 6 面 × 4×4 texel（R=4，与 GPV4 资产一致）。
+// 每个 texel 先追 4 条抖动射线得到 depth moments（mean/mean²），再追 spp 条射线做间接光
+// radiance，最后 group 内归约成 SH9 并用 temporal alpha 与旧值混合写回。
+// 采样语义与 tests/cornellBox/cornellProbeBake.cpp 的 bakeProbeCubemap 对齐（同面映射、同
+// texel 中心、同 seed），因此可用“一次全量 vs 预算分批”的逐位一致性做 parity 验收。
+//
+// 布局契约（见 docs/PROBE_BAKE_PLAN.md §10.2）：binding 12 = vec4[9N] SH9，13 = vec2[6R²N]
+// depth moments，14 = vec4[N] relocation offset，15 = uvec4[N] probe state。
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+#define CORNELL_PROBE_FACE_SIZE 4
+#define CORNELL_PROBE_TEXELS (6 * CORNELL_PROBE_FACE_SIZE * CORNELL_PROBE_FACE_SIZE)
+
+layout(local_size_x = CORNELL_PROBE_TEXELS) in;
+
+layout(std430, binding = 15) buffer ProbeState { uvec4 probeStates[]; } probeStateData;
+
+#include "cornellRayLib.glsl"
+
+// 与 GN3d::cubemapFaceDirection 逐面一致（cornellCpuRt.cpp 的烘焙也走同一映射）。
+vec3 cornellFaceDirection(int face, float u, float v) {
+    vec3 dir = vec3(0.0, 0.0, 1.0);
+    if (face == 0) {
+        dir = vec3(1.0, -v, -u);
+    } else if (face == 1) {
+        dir = vec3(-1.0, -v, u);
+    } else if (face == 2) {
+        dir = vec3(u, 1.0, v);
+    } else if (face == 3) {
+        dir = vec3(u, -1.0, -v);
+    } else if (face == 4) {
+        dir = vec3(u, -v, 1.0);
+    } else if (face == 5) {
+        dir = vec3(-u, -v, -1.0);
+    }
+    return normalize(dir);
+}
+
+// 与 GN3d::shBasis9 同常量（低位在前，9 个系数）。
+void cornellShBasis9(vec3 n, out float basis[9]) {
+    basis[0] = 0.2820947918;
+    basis[1] = 0.4886025119 * n.y;
+    basis[2] = 0.4886025119 * n.z;
+    basis[3] = 0.4886025119 * n.x;
+    basis[4] = 1.0925484306 * n.x * n.y;
+    basis[5] = 1.0925484306 * n.y * n.z;
+    basis[6] = 0.3153915653 * (3.0 * n.z * n.z - 1.0);
+    basis[7] = 1.0925484306 * n.x * n.z;
+    basis[8] = 0.5462742153 * (n.x * n.x - n.y * n.y);
+}
+
+shared float sTexelRadiance[CORNELL_PROBE_TEXELS * 3];
+
+void main() {
+    const int faceSize = CORNELL_PROBE_FACE_SIZE;
+    const int texelsPerFace = faceSize * faceSize;
+    const uint probeIndex = uint(probe.update.x) + gl_WorkGroupID.x;
+    const vec3 counts = max(probe.spacingCounts.yzw, vec3(1.0));
+    const uint probeCount = uint(counts.x) * uint(counts.y) * uint(counts.z);
+    if (probeIndex >= probeCount) return;
+    // inactive 探针（class=2）整组跳过：age 不增、SH/深度不写（预算槽位照常占用，v1 不做压实）。
+    if (probeStateData.probeStates[probeIndex].y == 2u) return;
+
+    const int cx = int(counts.x);
+    const int cy = int(counts.y);
+    const int px = int(probeIndex) % cx;
+    const int py = (int(probeIndex) / cx) % cy;
+    const int pz = int(probeIndex) / (cx * cy);
+    const vec3 basePos = probe.origin.xyz + probe.spacingCounts.x *
+                          vec3(float(px), float(py), float(pz));
+    const vec3 probePos = basePos + probeOffsetData.probeOffsets[probeIndex].xyz;
+
+    const int localIndex = int(gl_LocalInvocationIndex);
+    const int face = localIndex / texelsPerFace;
+    const int texelIndex = localIndex % texelsPerFace;
+    const int tx = texelIndex % faceSize;
+    const int ty = texelIndex / faceSize;
+    const float uCoord = 2.0 * (float(tx) + 0.5) / float(faceSize) - 1.0;
+    const float vCoord = 2.0 * (float(ty) + 0.5) / float(faceSize) - 1.0;
+    const vec3 dir = cornellFaceDirection(face, uCoord, vCoord);
+
+    // depth moments：4 条 ±0.5 texel 抖动射线（与 cornellProbeBake 一致）。
+    const float texelStep = 2.0 / float(faceSize);
+    float depthSum = 0.0;
+    float depthSqSum = 0.0;
+    for (int j = 0; j < 4; ++j) {
+        const float ju = (j & 1) != 0 ? 0.5 : -0.5;
+        const float jv = (j & 2) != 0 ? 0.5 : -0.5;
+        const vec3 jitterDir = cornellFaceDirection(face, uCoord + ju * texelStep * 0.5,
+                                                    vCoord + jv * texelStep * 0.5);
+        const Hit depthHit = traceCornell(probePos, jitterDir, 1.0e30);
+        const float depth = depthHit.valid ? depthHit.t : 1.0e30;
+        depthSum += depth;
+        depthSqSum += depth * depth;
+    }
+    const int depthRes = int(max(probe.weight.y, 1.0));
+    const int depthIdx = ((int(probeIndex) * 6 + face) * depthRes + ty) * depthRes + tx;
+    probeDepthData.probeDepthMoments[depthIdx] = vec2(depthSum * 0.25, depthSqSum * 0.25);
+
+    // radiance：spp 条样本；seed 只依赖 (probe, face, texel, sample)，与帧号/预算无关，
+    // 这样“一次全量”与“预算分批”必然得到同一结果（parity 验收的判定依据）。
+    const int samples = max(int(probe.state.x), 1);
+    const int lightMode = int(u.cam.z);
+    const uint baseSeed = 17u + uint(px) * 1973u + uint(py) * 9277u + uint(pz) * 1299709u;
+    vec3 sum = vec3(0.0);
+    for (int s = 0; s < samples; ++s) {
+        uint rngState = baseSeed + uint(face * 131 + ty * 17 + tx * 7 + s);
+        if (rngState == 0u) rngState = 1u;
+        vec3 primaryP = vec3(0.0);
+        bool primaryHit = false;
+        sum += radiance(probePos, dir, lightMode, true, rngState, primaryP, primaryHit);
+    }
+    const vec3 texelRadiance = sum / float(samples);
+    sTexelRadiance[localIndex * 3 + 0] = texelRadiance.r;
+    sTexelRadiance[localIndex * 3 + 1] = texelRadiance.g;
+    sTexelRadiance[localIndex * 3 + 2] = texelRadiance.b;
+    barrier();
+
+    if (localIndex != 0) return;
+
+    // 组内归约：按 solid angle 加权做 SH9 投影（与 GN3d::shProjectCubemap 同口径）。
+    const float texelAngle = texelStep * texelStep;
+    vec3 sh[9];
+    for (int k = 0; k < 9; ++k) sh[k] = vec3(0.0);
+    for (int t = 0; t < CORNELL_PROBE_TEXELS; ++t) {
+        const int tFace = t / texelsPerFace;
+        const int tTexel = t % texelsPerFace;
+        const int tX = tTexel % faceSize;
+        const int tY = tTexel / faceSize;
+        const float tu = 2.0 * (float(tX) + 0.5) / float(faceSize) - 1.0;
+        const float tv = 2.0 * (float(tY) + 0.5) / float(faceSize) - 1.0;
+        float basis[9];
+        cornellShBasis9(cornellFaceDirection(tFace, tu, tv), basis);
+        const float denominator = 1.0 + tu * tu + tv * tv;
+        const float solidAngle = texelAngle / (denominator * sqrt(denominator));
+        const vec3 radianceRgb = vec3(sTexelRadiance[t * 3 + 0], sTexelRadiance[t * 3 + 1],
+                                      sTexelRadiance[t * 3 + 2]);
+        for (int k = 0; k < 9; ++k) sh[k] += radianceRgb * (basis[k] * solidAngle);
+    }
+
+    const float hysteresis = clamp(probe.update.z, 0.0, 1.0);
+    const uint age = probeStateData.probeStates[probeIndex].x;
+    const float alpha = clamp(max(1.0 / (float(age) + 1.0), 1.0 - hysteresis), 0.0, 1.0);
+    const uint maxAge = uint(max(probe.state.y, 1.0));
+    const uint base = probeIndex * 9u;
+    for (int k = 0; k < 9; ++k) {
+        const vec3 oldSh = probeData.probeSh[base + uint(k)].rgb;
+        vec3 newSh = mix(oldSh, sh[k], alpha);
+        if (any(isnan(newSh)) || any(isinf(newSh))) newSh = oldSh;
+        probeData.probeSh[base + uint(k)] = vec4(newSh, 0.0);
+    }
+    const uvec4 oldState = probeStateData.probeStates[probeIndex];
+    probeStateData.probeStates[probeIndex] =
+        uvec4(min(oldState.x + 1u, maxAge), oldState.y, oldState.z, oldState.w);
+}

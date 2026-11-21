@@ -1,0 +1,94 @@
+// gn_cornell_probe_relocation.comp — DDGI probe relocation（6 轴候选，B3b-full）
+//
+// 每个 workgroup 处理 1 个探针：6 个 invocation 各评估 1 个轴向候选（base ± axis*maxOffset）。
+// 候选分数 = 从候选点沿 6 个轴向追短射线（tMax = insideThreshold*spacing）中命中数 / 6；
+// 分数越低越“开阔”。若最优候选比当前分数好 margin 以上，就朝该轴方向移动单帧步长；
+// 否则若当前分数很高（探针困在几何内）标 inactive；其余保持原状态。
+// 写入：binding 14 = vec4[N] offset（w=1 有效），binding 15 = uvec4[N] state
+//       （x=age（移动后归零），y=class 0/1/2，z=score*1000，w=flags）。
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+layout(local_size_x = 6) in;
+
+layout(std430, binding = 15) buffer ProbeState { uvec4 probeStates[]; } probeStateData;
+
+#include "cornellRayLib.glsl"
+
+shared float sCandidateScore[6];
+
+vec3 cornellAxis(int axis) {
+    if (axis == 0) return vec3(1.0, 0.0, 0.0);
+    if (axis == 1) return vec3(-1.0, 0.0, 0.0);
+    if (axis == 2) return vec3(0.0, 1.0, 0.0);
+    if (axis == 3) return vec3(0.0, -1.0, 0.0);
+    if (axis == 4) return vec3(0.0, 0.0, 1.0);
+    return vec3(0.0, 0.0, -1.0);
+}
+
+// 从 pos 沿 6 个轴向追短射线，返回命中比例（0=开阔，1=被包住）。
+float cornellInsideScore(vec3 pos, float shortRange) {
+    float hits = 0.0;
+    for (int a = 0; a < 6; ++a) {
+        if (traceCornell(pos, cornellAxis(a), shortRange).valid) hits += 1.0;
+    }
+    return hits / 6.0;
+}
+
+void main() {
+    const uint probeIndex = uint(probe.update.x) + gl_WorkGroupID.x;
+    const vec3 counts = max(probe.spacingCounts.yzw, vec3(1.0));
+    const uint probeCount = uint(counts.x) * uint(counts.y) * uint(counts.z);
+    if (probeIndex >= probeCount) return;
+
+    const int cx = int(counts.x);
+    const int cy = int(counts.y);
+    const int px = int(probeIndex) % cx;
+    const int py = (int(probeIndex) / cx) % cy;
+    const int pz = int(probeIndex) / (cx * cy);
+    const float spacing = max(probe.spacingCounts.x, 1.0e-6);
+    const vec3 basePos = probe.origin.xyz + spacing * vec3(float(px), float(py), float(pz));
+    const vec3 oldOffset = probeOffsetData.probeOffsets[probeIndex].xyz;
+    const float maxOffset = max(probe.relocation.x, 0.0);
+    const float shortRange = max(probe.relocation.y, 0.1) * spacing;
+    const float margin = 0.1;
+    const float step = 0.25 * spacing;
+
+    const int candidateAxis = int(gl_LocalInvocationIndex);
+    const vec3 candidatePos = basePos + cornellAxis(candidateAxis) * maxOffset;
+    sCandidateScore[candidateAxis] = cornellInsideScore(candidatePos, shortRange);
+    barrier();
+
+    if (candidateAxis != 0) return;
+
+    const uvec4 oldState = probeStateData.probeStates[probeIndex];
+    const vec3 currentPos = basePos + oldOffset;
+    const float currentScore = cornellInsideScore(currentPos, shortRange);
+    int bestAxis = -1;
+    float bestScore = currentScore - margin;
+    for (int a = 0; a < 6; ++a) {
+        if (sCandidateScore[a] < bestScore) {
+            bestScore = sCandidateScore[a];
+            bestAxis = a;
+        }
+    }
+
+    vec3 newOffset = oldOffset;
+    uint newClass = oldState.y;
+    if (bestAxis >= 0) {
+        // 朝最优候选方向走单帧步长（逐轴 clamp 到 ±maxOffset，且不把探针推出网格）。
+        newOffset = oldOffset + cornellAxis(bestAxis) * step;
+        const vec3 lo = probe.origin.xyz - basePos;
+        const vec3 hi = probe.origin.xyz + spacing * (counts - vec3(1.0)) - basePos;
+        newOffset = clamp(newOffset, max(vec3(-maxOffset), lo), min(vec3(maxOffset), hi));
+        newClass = dot(newOffset, newOffset) > 1.0e-8 ? 1u : 0u; // relocated / active
+    } else if (currentScore > 0.5) {
+        newClass = 2u; // 困在几何内且没有更优候选：停用该探针
+    }
+
+    const vec3 delta = newOffset - oldOffset;
+    const uint newAge = dot(delta, delta) > 1.0e-8 ? 0u : oldState.x;
+    probeOffsetData.probeOffsets[probeIndex] = vec4(newOffset, 1.0);
+    const uint scoreMilli = uint(clamp(bestAxis >= 0 ? bestScore : currentScore, 0.0, 1.0) * 1000.0);
+    probeStateData.probeStates[probeIndex] = uvec4(newAge, newClass, scoreMilli, oldState.w);
+}

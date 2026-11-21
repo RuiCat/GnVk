@@ -119,8 +119,9 @@ void main() {
     mat3 tbn = mat3(tangent, bitangent, N);
 
     const int RAYS = 8;
-    const int STEPS = 8;
-    float stepLength = max(ssgi.params.w, 0.1) / float(STEPS);
+    // params.y 是步数（CPU 默认 8）；限制到 1..16，避免 0 除/过长循环。
+    int steps = clamp(int(ssgi.params.y), 1, 16);
+    float stepLength = max(ssgi.params.w, 0.1) / float(steps);
     vec3 environment = evalSH9(N);
     vec3 radianceSum = vec3(0.0);
     for (int r = 0; r < RAYS; ++r) {
@@ -132,7 +133,7 @@ void main() {
         vec3 dir = normalize(tbn * dirLocal);
         vec3 hit = environment; // 未命中 → 环境辐照度
         float jitter = fract(rnd * 71.0 + float(r) * 0.37);
-        for (int s = 1; s <= STEPS; ++s) {
+        for (int s = 1; s <= steps; ++s) {
             vec3 samplePos = P + dir * (float(s) + jitter) * stepLength;
             vec4 clip = ssgi.viewProj * vec4(samplePos, 1.0);
             if (clip.w <= 1e-6) break;

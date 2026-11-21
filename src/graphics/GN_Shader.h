@@ -44,6 +44,11 @@ class cSHADER_CACHE {
     // 命中则复用；成功返回模块，失败返回 VK_NULL_HANDLE
     VkShaderModule GetOrCreate(const void *spirv, size_t bytes, bool *created = 0);
 
+    // 帧号用于按帧回收；GetOrCreate 命中/新建都会刷新 aLastUsedFrame。
+    void SetFrame(uint64_t frame);
+    // 销毁 lastUsed + keepFrames < currentFrame 的模块；调用方须在帧边界且已 wait fence。
+    uint32_t CollectGarbage(uint64_t currentFrame, uint32_t keepFrames);
+
     uint32_t GetCount() const { return (uint32_t)aModules.size(); }
     uint64_t GetHitCount() const { return aHits; }
     uint64_t GetMissCount() const { return aMisses; }
@@ -52,12 +57,14 @@ class cSHADER_CACHE {
     struct sMODULE {
         uint64_t aKey;
         VkShaderModule aModule;
+        uint64_t aLastUsedFrame;
     };
 
     std::vector<sMODULE> aModules;
     VkDevice aDevice;
     uint64_t aHits;
     uint64_t aMisses;
+    uint64_t aCurrentFrame;
 };
 
 } // namespace GN3d

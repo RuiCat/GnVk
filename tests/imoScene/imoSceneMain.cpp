@@ -81,7 +81,7 @@ void initLights() {
         return;
     }
     // 房间模式走室内布光：无阴影的方向光只会把整个房间照成一片平，故不加太阳；
-    // 环境亮度由 applyRoomAmbient() 的 SH9 统一给（见 AppInit），这里只放暖色吸顶灯。
+    // 环境亮度由引擎 GN_VkSetEnvironmentLighting(INDOOR) 的 SH9 统一给（见 AppInit），这里只放暖色吸顶灯。
     if (gRoomLoaded) {
         const GNg::sVEC3 indoorAmbient = {0.30f, 0.28f, 0.25f};
         gLight->SetAmbient(indoorAmbient, 1.0f);
@@ -95,9 +95,9 @@ void initLights() {
         gLight->AddPoint(lampAboveKitchen, 8.0f, lampColor, 1.8f * lampScale);
         gLight->AddPoint(lampEntrance, 7.0f, lampColor, 1.1f * lampScale);
         // 阴影方向光：近似吸顶灯方向，给角色在木地板上落一层接触阴影。
-        // 默认关闭（IMO_SCENE_SHADOWS=1 才启用）：阴影 pass 在真机上曾触发 GPU 页错误。
+        // 默认开启（E1/E2 修复后）；IMO_SCENE_SHADOWS=0 关闭。
         gShadowsReady = imoScene::shadowAttachLight(gLight, gShadowOptions);
-        std::fprintf(stderr, "[imoScene] 阴影: %s（IMO_SCENE_SHADOWS=1 启用）\n",
+        std::fprintf(stderr, "[imoScene] 阴影: %s（IMO_SCENE_SHADOWS=0 关闭）\n",
                      gShadowsReady ? "开" : "关");
         return;
     }
@@ -283,10 +283,10 @@ GN_CALL void AppInit() {
                 const char *ambientEnv = std::getenv("IMO_SCENE_AMBIENT");
                 const float ambient =
                     (ambientEnv != 0) ? static_cast<float>(std::atof(ambientEnv)) : 0.35f;
-                imoScene::applyRoomAmbient(ambient);
+                GNg::GN_VkSetEnvironmentLighting(GN3d::eENV_LIGHTING_INDOOR_UNIFORM, ambient);
             } else {
                 // 角色模式：保留原先的 GI/IBL 取景。
-                GNg::GN_VkEnableGI(true);
+                GNg::GN_VkSetEnvironmentLighting(GN3d::eENV_LIGHTING_SKY_IBL, 0.0f);
             }
         } else {
             GNg::GN_VkEnableGI(false);

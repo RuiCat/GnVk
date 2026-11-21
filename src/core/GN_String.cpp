@@ -194,13 +194,13 @@ GN_API char *GN_StrUnSplitToData(const char **strs, unsigned int strn, char spli
 GN_API unsigned int GN_StrUnSplit(char *str_out, const char **strs, unsigned int strn, char split_key){
    #define GT_TMP_STR_UNSPLIT \
 	char *pstr = str_out;\
-	/* TODO: verify buffer size */\
+	/* 契约（B5f）：调用方缓冲区须容下拼接结果。 */\
 	strcpy(pstr, strs[0]);\
 	pstr += strlen(pstr);\
 	unsigned int i = 1;\
 	for(; i < strn; ++i){\
 		*pstr = split_key; ++pstr;\
-		/* TODO: verify buffer size */\
+		/* 契约（B5f）：同上。 */\
 		strcpy(pstr, strs[i]);\
 		pstr += strlen(pstr);\
 	}\
@@ -392,7 +392,7 @@ GN_API void GN_StrExtractFromMultiItem(char str_out[], char *str, int id, char k
 			++pstr2;
 			pstr = pstr2;
 		}else{
-		// TODO: verify buffer size
+		// 契约（B5f）：str_out 由调用方提供，须容下剩余串。
 			strcpy(str_out, pstr);
 			return;
 		}
@@ -402,6 +402,41 @@ GN_API void GN_StrExtractFromMultiItem(char str_out[], char *str, int id, char k
 	int len = pstr2 - pstr;
 	strncpy(str_out, pstr, len);
 	str_out[len] = 0;
+}
+
+GN_API unsigned int GN_StrUnSplit_s(char *dst, int cap, const char **strs, unsigned int strn, char split_key){
+	if(!dst || cap <= 0) return 0;
+	dst[0] = 0;
+	if(!strs || strn == 0) return 0;
+	unsigned int pos = 0;
+	for(unsigned int i = 0; i < strn && pos < (unsigned int)(cap - 1); ++i){
+		if(i){ dst[pos++] = split_key; if(pos >= (unsigned int)(cap - 1)) break; }
+		const char *s = strs[i] ? strs[i] : "";
+		unsigned int n = (unsigned int)strlen(s);
+		if(n > (unsigned int)(cap - 1) - pos) n = (unsigned int)(cap - 1) - pos;
+		if(n){ memcpy(dst + pos, s, (size_t)n); pos += n; }
+	}
+	dst[pos] = 0;
+	return pos;
+}
+
+GN_API int GN_StrExtractFromMultiItem_s(char *dst, int cap, const char *str, int id, char key){
+	if(!dst || cap <= 0) return -1;
+	dst[0] = 0;
+	if(!str || id < 0) return -1;
+	const char *p = str;
+	for(int i = 0; i < id; ++i){
+		while(*p && *p != key) ++p;
+		if(*p != key) return -1;
+		++p;
+	}
+	const char *start = p;
+	while(*p && *p != key) ++p;
+	int n = (int)(p - start);
+	if(n > cap - 1) n = cap - 1;
+	if(n > 0) memcpy(dst, start, (size_t)n);
+	dst[n] = 0;
+	return n;
 }
 GN_API bool GN_StrHasName(const char *name,const char *str,char split_key){
     char *pstr = (char*)str, *_name;
@@ -582,6 +617,15 @@ GN_API inline char* GN_StrCopySegmentToData(const char *str,char start_key,char 
     *size_out = 0;
 	return 0;
 }
+GN_API int GN_StrCopyToLimit(char *dst,int cap,const char *src){
+	if(!dst || cap <= 0) return 0;
+	if(!src) src = "";
+	int n = (int)strlen(src);
+	if(n > cap - 1) n = cap - 1;
+	if(n > 0) memcpy(dst, src, (size_t)n);
+	dst[n] = 0;
+	return n;
+}
 GN_API int GN_StrRemoveSegment(char *str_in_out,char split_key,const char *inc_str, int sn, bool ck_first){
 	if(*str_in_out == split_key)++str_in_out;
 	char *pstr = str_in_out, *pos0 = 0, *pos1 = 0;
@@ -600,13 +644,13 @@ GN_API int GN_StrRemoveSegment(char *str_in_out,char split_key,const char *inc_s
 				++dn;
 				while(*pstr && *pstr != split_key)++pstr; if(!(*pstr)){ *pos0 = 0; break; }
 			    while(*pstr && *pstr == split_key)++pstr; if(!(*pstr)){ *pos0 = 0; break; }
-			// TODO: verify buffer size
-			if(dn >= sn){ strcpy(pos0, pstr); break; }
+			// 已核（B5f）：pos0/pstr 同缓冲区且 dest≤src，memmove 长度=尾部长度+1，不越界。
+			if(dn >= sn){ memmove(pos0, pstr, strlen(pstr) + 1u); break; }
 
 		}else if(pos0){ //找到非尾段的一段要删除
                 if(!pos1)pos1 = pstr;
-				while(*pstr && *pstr != split_key)++pstr; if(!(*pstr)){ /* TODO: verify buffer size */ strcpy(pos0, pos1); break; }
-				while(*pstr && *pstr == split_key)++pstr; if(!(*pstr)){ /* TODO: verify buffer size */ strcpy(pos0, pos1); break; }
+				while(*pstr && *pstr != split_key)++pstr; if(!(*pstr)){ memmove(pos0, pos1, strlen(pos1) + 1u); break; }
+				while(*pstr && *pstr == split_key)++pstr; if(!(*pstr)){ memmove(pos0, pos1, strlen(pos1) + 1u); break; }
 			}else{
 			    while(*pstr && *pstr != split_key)++pstr; if(!(*pstr))break;
 			    while(*pstr && *pstr == split_key)++pstr; if(!(*pstr))break;
@@ -630,13 +674,13 @@ GN_API int GN_StrRemoveSegment(char *str_in_out,char split_key,const char *inc_s
 				++dn;
 				while(*pstr && *pstr != split_key)++pstr; if(!(*pstr)){ *pos0 = 0; break; }
 			    while(*pstr && *pstr == split_key)++pstr; if(!(*pstr)){ *pos0 = 0; break; }
-				// TODO: verify buffer size
-			if(dn >= sn){ strcpy(pos0, pstr); break; }
+				// 已核（B5f）：pos0/pstr 同缓冲区且 dest≤src，memmove 长度=尾部长度+1，不越界。
+			if(dn >= sn){ memmove(pos0, pstr, strlen(pstr) + 1u); break; }
                 pos1 = pstr;
 
 			}else{ //检索结束
-			// TODO: verify buffer size
-			    if(pos0)strcpy(pos0, pos1);
+			// 已核（B5f）：同一缓冲区内的前向/重叠拷贝，memmove 语义安全。
+			    if(pos0)memmove(pos0, pos1, strlen(pos1) + 1u);
 				break;
 			}
 		}
@@ -657,7 +701,7 @@ GN_API void GN_StrInsertSegment(char **ppstr, const char *sub_str, short inpos, 
 		}
 	}else{
 		char *pstr2 = new char[inpos+sub_len+strlen(pstr+inpos)+1];
-		// TODO: verify buffer size
+		// 已核（B5f）：new char[inpos+sub_len+尾部+1]，三处写入恰好填满。
 		strncpy(pstr2, pstr, inpos); strncpy(pstr2+inpos, sub_str, sub_len); strcpy(pstr2+inpos+sub_len, pstr+inpos);
 		delete [] pstr;
 		*ppstr = pstr2;
@@ -891,10 +935,10 @@ GN_API P<char> GN_StrToPrintFmt(const char *str, short fn,  float *dec_out){
 	_fmt[0] = '%';
 	_fmt[1] = (_c ==' ' || _c =='#')? '#' : '0';
 	_fmt += 2;
-	// TODO: verify buffer size
+	// 已核（B5f）：分配 fn+4+n_n+ulen，最后一次写入落在 S-1，不越界。
 	strcpy(_fmt, n_str); _fmt += n_n;
 	*_fmt = dn? 'f': 'd';
-	// TODO: verify buffer size
+	// 已核（B5f）：_unit 长度已计入分配（+ulen）。
     strcpy(_fmt + 1, _unit);
     return fmt;
 }

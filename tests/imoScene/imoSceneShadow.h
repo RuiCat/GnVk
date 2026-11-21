@@ -12,7 +12,7 @@
 
 namespace imoScene {
 
-// 阴影配置：IMO_SCENE_SHADOWS=0 关闭；强度/方向可用环境变量微调。
+// 阴影配置：默认开启；IMO_SCENE_SHADOWS=0 关闭（调试/回退）。强度/方向可用环境变量微调。
 struct sShadowOptions {
     bool aEnabled;
     float aIntensity;

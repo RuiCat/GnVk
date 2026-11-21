@@ -4,6 +4,7 @@
 #include "vkInternal.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <vector>
@@ -52,15 +53,25 @@ void VkCheck(VkResult err, const char *msg) {
             msg ? msg : "(no message)", errStr, (int)err);
 }
 
-GN_VK_INTERNAL uint32_t FindMemType(uint32_t f, VkMemoryPropertyFlags p) {
+GN_VK_INTERNAL uint32_t FindMemType(uint32_t f, VkMemoryPropertyFlags p,
+                                     bool preferCached) {
     VkPhysicalDeviceMemoryProperties mp;
     vkGetPhysicalDeviceMemoryProperties(GN_Vk.physicalDevice, &mp);
+    if(preferCached) {
+        for(uint32_t i = 0; i < mp.memoryTypeCount; i++) {
+            const VkMemoryPropertyFlags flags = mp.memoryTypes[i].propertyFlags;
+            if((f & (1 << i)) && (flags & p) == p &&
+               (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0)
+                return i;
+        }
+    }
     for(uint32_t i = 0; i < mp.memoryTypeCount; i++)
         if((f & (1 << i)) && (mp.memoryTypes[i].propertyFlags & p) == p) return i;
     return 0;
 }
 
-GN_VK_INTERNAL void CreateBuf(VkDeviceSize sz, VkBufferUsageFlags u, VkMemoryPropertyFlags p, VkBuffer &b, VkDeviceMemory &m) {
+GN_VK_INTERNAL void CreateBuf(VkDeviceSize sz, VkBufferUsageFlags u, VkMemoryPropertyFlags p, VkBuffer &b, VkDeviceMemory &m,
+                              bool preferCached) {
     VkBufferCreateInfo ci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     ci.size = sz;
     ci.usage = u;
@@ -72,7 +83,7 @@ GN_VK_INTERNAL void CreateBuf(VkDeviceSize sz, VkBufferUsageFlags u, VkMemoryPro
     vkGetBufferMemoryRequirements(GN_Vk.device, b, &r);
     VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = r.size;
-    ai.memoryTypeIndex = FindMemType(r.memoryTypeBits, p);
+    ai.memoryTypeIndex = FindMemType(r.memoryTypeBits, p, preferCached);
     res = vkAllocateMemory(GN_Vk.device, &ai, 0, &m);
     VkCheck(res, "vkAllocateMemory in CreateBuf");
     if(res != VK_SUCCESS) return;
@@ -92,6 +103,42 @@ GN_VK_INTERNAL VkImageView MakeImageView(VkImage img, VkFormat fmt) {
     VkResult res = vkCreateImageView(GN_Vk.device, &ci, 0, &v);
     VkCheck(res, "vkCreateImageView in MakeImageView");
     return v;
+}
+
+} // namespace GNg
+
+namespace GNg {
+
+namespace {
+bool presentModeEnvWantsVsync() {
+    const char *value = std::getenv("GN_VSYNC");
+    if (!value) return true;
+    return !(value[0] == '0' && value[1] == '\0');
+}
+} // namespace
+
+GN_VK_INTERNAL VkPresentModeKHR ChoosePresentMode(VkPhysicalDevice physical,
+                                                  VkSurfaceKHR surface) {
+    uint32_t count = 0;
+    if (vkGetPhysicalDeviceSurfacePresentModesKHR(physical, surface, &count, nullptr) !=
+            VK_SUCCESS ||
+        count == 0) {
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+    std::vector<VkPresentModeKHR> modes(count);
+    if (vkGetPhysicalDeviceSurfacePresentModesKHR(physical, surface, &count, modes.data()) !=
+        VK_SUCCESS) {
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+    if (!presentModeEnvWantsVsync()) {
+        for (uint32_t i = 0; i < count; ++i) {
+            if (modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) return VK_PRESENT_MODE_IMMEDIATE_KHR;
+        }
+        for (uint32_t i = 0; i < count; ++i) {
+            if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) return VK_PRESENT_MODE_MAILBOX_KHR;
+        }
+    }
+    return VK_PRESENT_MODE_FIFO_KHR;
 }
 
 } // namespace GNg

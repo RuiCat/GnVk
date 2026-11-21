@@ -107,9 +107,6 @@ void refreshPBRTextureSets() {
 
 } // namespace
 
-// 定义在 vk3dShutdown.cpp：延迟释放扩容时退休的 3D 动态缓冲（避免同帧已录制命令引用已释放显存）。
-void ReleaseRetired3DBuffers();
-
 // P10：最近一次 PBR 绘制提交的 indexCount（诊断/验收钩子）。
 namespace {
 uint32_t s_last3DIndexCount = 0;
@@ -121,10 +118,9 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                       const void *lightUBO, uint32_t lightUBOSize) {
     if(!GN_Vk.initialized || s_in3DPass) return;
 
-    // ★ 重置缓冲偏移 (每个 3D Pass 内各 draw call 使用独立区域)
-    s_vtxOfs3D = 0;
-    s_idxOfs3D = 0;
-    ReleaseRetired3DBuffers(); // 上一帧已完成，回收扩容时退休的旧缓冲
+    // 偏移不按 pass 归零：同一帧可能先录 4 级 shadow pass，归零会覆盖其顶点数据
+    // （已录制命令在提交时才读取缓冲）。帧首由 GN_VkBeginFrame 归零，
+    // 扩容退休的旧缓冲也只在那里（fence 之后）释放。
     refreshPBRTextureSets();   // 同步各纹理描述符集里的场景/光照/环境绑定
 
     // 刷新当前 2D 批次

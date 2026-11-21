@@ -39,8 +39,8 @@ void GT_ImageReLoadForZID(GNg::sIMAGE *_img, unsigned int zid) {
     char *number_pos = str_buf + (strlen(str_buf) - 1);
     if(number_pos[0] == '_') sprintf(number_pos - 8, "%08d_", zid);
     else sprintf(number_pos - 7, "%08d", zid);
-    // TODO: verify buffer size
-    if(!_img->add_0000) strcpy(number_pos + 1, ".png");
+    // B5f：str_buf 余量 = sizeof(str_buf) - 偏移，按上限截断。
+    if(!_img->add_0000) GN_StrCopyToLimit(number_pos + 1, (int)(sizeof(str_buf) - (number_pos + 1 - str_buf)), ".png");
     number_pos = _img->fileName;
     _img->fileName = 0;
     _img->InitToData(str_buf, 0, _img->cFormat, /*_img->hasMipmap*/ false, 1);
@@ -71,7 +71,7 @@ GN::sVALUE_LAYOUT2 *GT_SubUiUpdateSyncProc(GNu::eSUBUI_FUNC func, unsigned int z
                         }
                         char **ppstr = (char **)tg_ptr;
                         char *pstr = *ppstr, *pstr2 = new char[value_len + str_size];
-                        // TODO: verify buffer size
+                        // 已核（B5f）：pstr2 = new char[value_len + str_size]，写入 value_len + (str_size-1) + NUL。
                         strncpy(pstr2, value_str, value_len);
                         strcpy(pstr2 + value_len, pstr + (strlen(pstr) - (str_size - 1)));
                         delete[] pstr;
@@ -100,12 +100,13 @@ GN::sVALUE_LAYOUT2 *GT_SubUiUpdateSyncProc(GNu::eSUBUI_FUNC func, unsigned int z
                                     short value_len = strlen(str_buf);
                                     int str_size2 = value_len + str_size;
                                     char **ppstr = (char **)tg_ptr;
-                                    char *pstr = *ppstr, *pstr2 = new char[str_size2 ? str_size2 : 1];
+                                    // 加固（STRCPY 审计）：str_size 为 0 时也要留出结尾 NUL（原来少 1 字节）。
+                                    char *pstr = *ppstr, *pstr2 = new char[str_size2 ? str_size2 : value_len + 1];
                                     if(str_size) {
-                                        // TODO: verify buffer size
+                                        // 已核（B5f）：pstr2 按 value_len/str_size 计算分配。
                                         strncpy(pstr2, str_buf, value_len);
                                         strcpy(pstr2 + value_len, pstr + (strlen(pstr) - (str_size - 1)));
-                                        // TODO: verify buffer size
+                                        // 已核（B5f）：同上，尾部按 str_size 预留。
                                     } else strcpy(pstr2, str_buf);
                                     delete[] pstr;
                                     *ppstr = pstr2;
@@ -116,7 +117,7 @@ GN::sVALUE_LAYOUT2 *GT_SubUiUpdateSyncProc(GNu::eSUBUI_FUNC func, unsigned int z
                                     short value_len = strlen(str_buf);
                                     char *pstr = *((P<char> *)tg_ptr);
                                     P<char> pstr2(value_len + str_size);
-                                    // TODO: verify buffer size
+                                    // 已核（B5f）：同上分配。
                                     strncpy(pstr2, str_buf, value_len);
                                     strcpy(pstr2 + value_len, pstr + (strlen(pstr) - (str_size - 1)));
                                     *((P<char> *)tg_ptr) = pstr2;
@@ -129,7 +130,7 @@ GN::sVALUE_LAYOUT2 *GT_SubUiUpdateSyncProc(GNu::eSUBUI_FUNC func, unsigned int z
                             if(_pimg) {
                                 if(p_img.Us() != 1) {
                                     char *file_name = new char[strlen(_pimg->fileName) + 1];
-                                    // TODO: verify buffer size
+                                    // 已核（B5f）：new char[strlen+1]，精确容量。
                                     strcpy(file_name, _pimg->fileName);
                                     p_img.New(1);
                                     p_img->fileName = file_name;

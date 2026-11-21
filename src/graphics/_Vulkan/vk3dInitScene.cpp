@@ -687,7 +687,8 @@ void init3DDeferredLight() {
         dai.pSetLayouts = &GN_Vk.deferredLightDescriptorLayout;
         vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.deferredLightDescriptorSet);
         VkDescriptorBufferInfo dbi0 = {GN_Vk.uniformBuffer3D, 0, sizeof(VkSceneUBO)};
-        VkDescriptorBufferInfo dbi7 = {GN_Vk.lightBuffer3D, 0, 1024};
+        // 与 sLIGHT_UBO 的 static_assert(976) 对齐；range 不能超过 buffer 大小。
+        VkDescriptorBufferInfo dbi7 = {GN_Vk.lightBuffer3D, 0, sizeof(GN3d::sLIGHT_UBO)};
         VkDescriptorImageInfo sii = {GN_Vk.shadowSampler, GN_Vk.shadowView, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo cii = {GN_Vk.skyboxSampler, GN_Vk.skyboxView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorBufferInfo dbi8 = {atmosphereFogBuffer(), 0, atmosphereFogRange()};

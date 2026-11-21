@@ -502,6 +502,11 @@ bool GT_cVIDEO::InitToData(const char *filename, int loop, bool sync_time, bool 
             GT_cVIDEO::zAV_Register = false;
         }
 #endif
+        // 加固（STRCPY 审计）：zFileName 是固定 384 字节成员缓冲。
+        if(!filename || strlen(filename) >= sizeof(zFileName)) {
+            GN_Log("打开媒体文件路径为空或过长!\n");
+            return false;
+        }
         zClose();
         strcpy(zFileName, filename);
         zpFile = GNf::Open(zFileName, "rb");

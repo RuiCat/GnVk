@@ -55,7 +55,27 @@ GN_VK_INTERNAL extern VkFramebuffer *s_framebuffers3D;
 GN_VK_INTERNAL extern VkDeviceSize s_vtxOfs3D;
 GN_VK_INTERNAL extern VkDeviceSize s_idxOfs3D;
 
+// 3D 动态缓冲退休表：扩容时旧缓冲先入表，只在 GN_VkBeginFrame 的 vkWaitForFences
+// 之后释放。CSM 4 级在同一 command buffer 内录制，pass 内释放会让已录制的 draw
+// 引用已销毁显存（真机表现为 amdgpu gfxhub page fault → GPU reset）。
+GN_VK_INTERNAL void releaseRetired3DBuffers();
+
+// 阴影 light VP：4 级各自独立的 UBO 槽（每级 64 B 矩阵，槽距 256 B），
+// 单槽会被最后一级覆盖，导致 4 级 cascade 全部用同一矩阵。
+// 写入走初始化期建立的常驻映射：vkMapMemory 的 offset 还必须满足
+// minMemoryMapAlignment（部分驱动 4096），不能按槽偏移临时映射。
+GN_VK_INTERNAL VkDescriptorSet shadowCascadeDescriptorSet(uint32_t cascadeIndex);
+GN_VK_INTERNAL void writeShadowCascadeLightVP(uint32_t cascadeIndex, const float *matrix16);
+GN_VK_INTERNAL void releaseShadowCascadeUbo();
+
 GN_VK_INTERNAL void BatchSwitch(VkDescriptorSet ds);
+// 交换链 present mode：GN_VSYNC=0 时优先 IMMEDIATE/MAILBOX，缺省 FIFO。
+GN_VK_INTERNAL VkPresentModeKHR ChoosePresentMode(VkPhysicalDevice physical, VkSurfaceKHR surface);
+// sIMAGE::DataFill 的持久上传缓存：Begin 返回映射写指针，End 提交并等待。
+GN_VK_INTERNAL unsigned char *BeginImageUpload(VkDeviceSize bytes);
+GN_VK_INTERNAL bool EndImageUpload(VkImage image, uint32_t width, uint32_t height,
+                                   int32_t offsetX, int32_t offsetY, bool fromUndefined);
+GN_VK_INTERNAL void DestroyImageUploadCache();
 GN_VK_INTERNAL void FlushBatchIfScissorDirty();
 GN_VK_INTERNAL void GrowVBufIfNeeded(uint32_t need);
 GN_VK_INTERNAL void FlushVertexBatch();
@@ -103,6 +123,7 @@ GN_VK_INTERNAL void destroy3DSsgi();
 GN_VK_INTERNAL void recreate3DSsgiTargets(); // resize：半分辨率目标/fb/管线 + 描述符重写
 GN_VK_INTERNAL bool isSsgiEnabled();         // 读 GI UBO envParams.w（0=关）
 GN_VK_INTERNAL void updateSsgiUniforms(const sMAT44 &viewProj);
+GN_VK_INTERNAL void setSsgiEnabled(float strength); // 同步 SSGI UBO 的 shader 开关位
 GN_VK_INTERNAL void recordSsgiPasses(VkCommandBuffer cb);
 GN_VK_INTERNAL void init3DProbes(); // G5b-2：9× 3D 探针纹理 + probe UBO（固定尺寸）
 GN_VK_INTERNAL void destroy3DProbes();
@@ -162,9 +183,11 @@ GN_VK_INTERNAL std::vector<uint32_t> LoadSPIRVFile(const char *path);
 // 初始化期一次性命令（帧外上传用）：分配/开始 + 结束/提交/等待/释放。
 GN_VK_INTERNAL VkCommandBuffer beginOnceCommand();
 GN_VK_INTERNAL bool submitOnceCommand(VkCommandBuffer cb);
-GN_VK_INTERNAL uint32_t FindMemType(uint32_t f, VkMemoryPropertyFlags p);
+GN_VK_INTERNAL uint32_t FindMemType(uint32_t f, VkMemoryPropertyFlags p,
+                                    bool preferCached = false);
 GN_VK_INTERNAL void CreateBuf(VkDeviceSize sz, VkBufferUsageFlags u,
-                              VkMemoryPropertyFlags p, VkBuffer &b, VkDeviceMemory &m);
+                              VkMemoryPropertyFlags p, VkBuffer &b, VkDeviceMemory &m,
+                              bool preferCached = false);
 GN_VK_INTERNAL VkImageView MakeImageView(VkImage img, VkFormat fmt);
 void VkCheck(VkResult err, const char *msg);
 

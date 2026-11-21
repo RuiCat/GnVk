@@ -19,9 +19,19 @@ struct sVkBuffer {
 };
 
 inline uint32_t findMemoryType(VkPhysicalDevice physical, uint32_t typeBits,
-                               VkMemoryPropertyFlags required) {
+                               VkMemoryPropertyFlags required,
+                               VkMemoryPropertyFlags preferred = 0) {
     VkPhysicalDeviceMemoryProperties props;
     vkGetPhysicalDeviceMemoryProperties(physical, &props);
+    if (preferred != 0) {
+        for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
+            const VkMemoryPropertyFlags flags = props.memoryTypes[i].propertyFlags;
+            if ((typeBits & (1u << i)) && (flags & required) == required &&
+                (flags & preferred) == preferred) {
+                return i;
+            }
+        }
+    }
     for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
         if ((typeBits & (1u << i)) &&
             (props.memoryTypes[i].propertyFlags & required) == required) {
@@ -33,7 +43,7 @@ inline uint32_t findMemoryType(VkPhysicalDevice physical, uint32_t typeBits,
 
 inline bool createVkBuffer(VkDevice device, VkPhysicalDevice physical, VkDeviceSize size,
                            VkBufferUsageFlags usage, VkMemoryPropertyFlags required,
-                           bool mapMemory, sVkBuffer *out) {
+                           bool mapMemory, sVkBuffer *out, bool preferCached = false) {
     if (!out) return false;
     *out = sVkBuffer{VK_NULL_HANDLE, VK_NULL_HANDLE, nullptr};
     VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
@@ -43,7 +53,8 @@ inline bool createVkBuffer(VkDevice device, VkPhysicalDevice physical, VkDeviceS
     if (vkCreateBuffer(device, &bci, nullptr, &out->aBuffer) != VK_SUCCESS) return false;
     VkMemoryRequirements req;
     vkGetBufferMemoryRequirements(device, out->aBuffer, &req);
-    const uint32_t type = findMemoryType(physical, req.memoryTypeBits, required);
+    const uint32_t type = findMemoryType(physical, req.memoryTypeBits, required,
+                                         preferCached ? VK_MEMORY_PROPERTY_HOST_CACHED_BIT : 0);
     if (type == UINT32_MAX) return false;
     VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     mai.allocationSize = req.size;

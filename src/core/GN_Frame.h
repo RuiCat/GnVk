@@ -150,6 +150,8 @@ class GN_API cFRAME_RC : public sAM_CTRL //★★★ 正规动画图筐 这个�
 
     //从另一个筐里复制数据而不共享指针(复制源)
     void CopyData(const cFRAME_RC &src);
+    //逐字段复制全部成员(复制源) !新增成员必须同步加进实现 tests/unit/testFrameCopy.cpp 会逐字段校验
+    void zCopyFields(const cFRAME_RC &src);
 
     //保管外部连接对象 调用后 zPlay_obj zFEvent zSubFrame zTexIndex zSouObj 等外部对象数据不必在外释放了
     void KeepExternObjs() { zObjsKeep.New(1); }
@@ -637,6 +639,7 @@ class GN_API cLENS_FLARE //★★镜头光环效果
 
     uint8 *zDataSave(uint8 *wpos, char *imgexp_path = 0); //保存该对象的2进制数据(当前写入位置, 式样图导出路径 默认0不导出图文件)返回最后的写完位置
     uint8 *zDataLoad(uint8 *rpos, char *load_path_); //读取该对象的2进制数据(当前读取位置, 当前读取路径 当有读取到图片时会在尾部续上图片名)返回最后的读完位置
+    uint8 *zDataLoad(uint8 *rpos, char *load_path_, int load_path_cap); //同上，显式给出 load_path_ 的容量（B5i）
 };
 struct GN_API cLENS_FLARE_OBJ //★★镜头光环效果对象
 {

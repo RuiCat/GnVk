@@ -6,7 +6,8 @@
 
 namespace GN3d {
 
-cSHADER_CACHE::cSHADER_CACHE() : aDevice(VK_NULL_HANDLE), aHits(0), aMisses(0) {}
+cSHADER_CACHE::cSHADER_CACHE()
+    : aDevice(VK_NULL_HANDLE), aHits(0), aMisses(0), aCurrentFrame(0) {}
 
 // 析构即 Release：调用方必须在销毁 VkDevice 之前销毁缓存（或提前显式 Release）。
 cSHADER_CACHE::~cSHADER_CACHE() { Release(); }
@@ -16,6 +17,7 @@ void cSHADER_CACHE::Init(VkDevice device) {
     aDevice = device;
     aHits = 0;
     aMisses = 0;
+    aCurrentFrame = 0;
 }
 
 void cSHADER_CACHE::Release() {
@@ -30,6 +32,7 @@ void cSHADER_CACHE::Release() {
     aDevice = VK_NULL_HANDLE;
     aHits = 0;
     aMisses = 0;
+    aCurrentFrame = 0;
 }
 
 VkShaderModule cSHADER_CACHE::GetOrCreate(const void *spirv, size_t bytes, bool *created) {
@@ -42,6 +45,7 @@ VkShaderModule cSHADER_CACHE::GetOrCreate(const void *spirv, size_t bytes, bool 
     for (size_t i = 0; i < aModules.size(); ++i) {
         if (aModules[i].aKey == key) {
             ++aHits;
+            aModules[i].aLastUsedFrame = aCurrentFrame;
             if (created) *created = false;
             return aModules[i].aModule;
         }
@@ -73,9 +77,35 @@ VkShaderModule cSHADER_CACHE::GetOrCreate(const void *spirv, size_t bytes, bool 
     sMODULE entry;
     entry.aKey = key;
     entry.aModule = module;
+    entry.aLastUsedFrame = aCurrentFrame;
     aModules.push_back(entry);
     if (created) *created = true;
     return module;
+}
+
+void cSHADER_CACHE::SetFrame(uint64_t frame) {
+    if (frame > aCurrentFrame) aCurrentFrame = frame;
+}
+
+uint32_t cSHADER_CACHE::CollectGarbage(uint64_t currentFrame, uint32_t keepFrames) {
+    SetFrame(currentFrame);
+    if (aDevice == VK_NULL_HANDLE) return 0;
+    uint32_t destroyed = 0;
+    size_t i = 0;
+    while (i < aModules.size()) {
+        const uint64_t last = aModules[i].aLastUsedFrame;
+        const bool old = last < aCurrentFrame && (aCurrentFrame - last) > keepFrames;
+        if (!old) {
+            ++i;
+            continue;
+        }
+        if (aModules[i].aModule != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(aDevice, aModules[i].aModule, 0);
+        }
+        aModules.erase(aModules.begin() + static_cast<std::ptrdiff_t>(i));
+        ++destroyed;
+    }
+    return destroyed;
 }
 
 } // namespace GN3d

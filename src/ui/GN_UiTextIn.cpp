@@ -27,11 +27,6 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 #include "GN_Def.h"
 #ifdef _GN_UITEXTIN_H_
 /***************************************************** 文本输入 *************************************************************/
-extern bool GT_ImeOn;
-extern bool GT_ImeOnRecv;
-extern uint8 GT_ImeCount;
-extern char GT_ImeChar[];
-
 GNu::cTEXT_INPUT *GNu::cTEXT_INPUT::zCurIn = 0;
 uint8 GNu::cTEXT_INPUT::zBackAlpha = 0;
 unsigned short GNu::cTEXT_INPUT::aMaxCancelNum = 128;
@@ -899,7 +894,7 @@ void GNu::cTEXT_INPUT::UpdateRun(unsigned int updatetime) {
     zLastMK = GN::Mouse[GM_LEFT];
 
     if(zImeIn) { /*-------------------------------------------------------------------------------------------------------------------------------------*/
-        GT_ImeOn = (!aLock || GN::GetTouchMaxNum() < 2);
+        GN::GetImeContext().aImeOn = (!aLock || GN::GetTouchMaxNum() < 2);
         if(zMoveTextFrame) {
             if(!GN::Mouse[GM_RIGHT]) zKeyOnDown = false;
             if(GN::Mouse1[GM_RIGHT] && IsMouseFocus()) zKeyOnDown = true;
@@ -993,7 +988,7 @@ void GNu::cTEXT_INPUT::UpdateRun(unsigned int updatetime) {
             zBid2 = zBid;
         }
         /*--------------------------------------------------------------------------------------*/
-        if(GT_ImeCount) InputText(GT_ImeChar, GT_ImeCount); //处理文字输入
+        if(GN::GetImeContext().aImeCount) InputText(GN::GetImeContext().aImeChar, GN::GetImeContext().aImeCount); //处理文字输入
         if(zArgText) {
             zArrangeText();
             zArgText = false;

@@ -1,6 +1,7 @@
 // VkPipeline 缓存：图形/计算管线的创建、按内容键复用与销毁，内部复用 cSHADER_CACHE。
 #include "GN_Pipeline.h"
 
+#include <cstddef>
 #include <cstring>
 
 namespace GN3d {
@@ -82,6 +83,25 @@ void FillVertexInput(const sVERTEX_LAYOUT &layout, VkVertexInputBindingDescripti
     info.pVertexAttributeDescriptions = attrs;
 }
 
+// 特殊化常量：sPIPELINE_SPEC_CONST 数组按 id/value 映射到 SPIR-V 的 SpecId；
+// pData 指向描述里的 aSpec，offset 指向 aValue，dataSize 覆盖到最后一个 value。
+void FillSpecializationInfo(const sPIPELINE_DESC &desc, VkSpecializationMapEntry *entries,
+                            VkSpecializationInfo &info) {
+    info = VkSpecializationInfo();
+    const uint32_t count = desc.aSpecCount < 8u ? desc.aSpecCount : 8u;
+    if (count == 0u) return;
+    for (uint32_t i = 0; i < count; ++i) {
+        entries[i].constantID = desc.aSpec[i].aId;
+        entries[i].offset = i * sizeof(sPIPELINE_SPEC_CONST) +
+                            offsetof(sPIPELINE_SPEC_CONST, aValue);
+        entries[i].size = sizeof(uint32_t);
+    }
+    info.mapEntryCount = count;
+    info.pMapEntries = entries;
+    info.dataSize = count * sizeof(sPIPELINE_SPEC_CONST);
+    info.pData = desc.aSpec;
+}
+
 VkPipeline CreateGraphicsPipeline(VkDevice device, const sPIPELINE_DESC &desc,
                                   VkShaderModule vertModule, VkShaderModule fragModule,
                                   const char **error) {
@@ -98,6 +118,14 @@ VkPipeline CreateGraphicsPipeline(VkDevice device, const sPIPELINE_DESC &desc,
         stages[1].module = fragModule;
         stages[1].pName = "main";
         stageCount = 2;
+    }
+
+    VkSpecializationMapEntry specEntries[8];
+    VkSpecializationInfo specInfo;
+    FillSpecializationInfo(desc, specEntries, specInfo);
+    if (specInfo.mapEntryCount > 0u) {
+        stages[0].pSpecializationInfo = &specInfo;
+        if (stageCount > 1u) stages[1].pSpecializationInfo = &specInfo;
     }
 
     VkVertexInputBindingDescription binding = {};
@@ -198,6 +226,11 @@ VkPipeline CreateComputePipeline(VkDevice device, const sPIPELINE_DESC &desc,
     info.stage.pName = "main";
     info.layout = desc.aLayout;
 
+    VkSpecializationMapEntry specEntries[8];
+    VkSpecializationInfo specInfo;
+    FillSpecializationInfo(desc, specEntries, specInfo);
+    if (specInfo.mapEntryCount > 0u) info.stage.pSpecializationInfo = &specInfo;
+
     VkPipeline pipeline = VK_NULL_HANDLE;
     const VkResult result =
         vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &info, 0, &pipeline);
@@ -211,7 +244,7 @@ VkPipeline CreateComputePipeline(VkDevice device, const sPIPELINE_DESC &desc,
 } // namespace
 
 cPIPELINE_CACHE::cPIPELINE_CACHE()
-    : aDevice(VK_NULL_HANDLE), aHits(0), aMisses(0), aLastError("") {}
+    : aDevice(VK_NULL_HANDLE), aHits(0), aMisses(0), aCurrentFrame(0), aLastError("") {}
 
 // 析构即 Release：调用方必须在销毁 VkDevice 之前销毁缓存（或提前显式 Release）。
 cPIPELINE_CACHE::~cPIPELINE_CACHE() { Release(); }
@@ -222,6 +255,7 @@ void cPIPELINE_CACHE::Init(VkDevice device) {
     aShaders.Init(device);
     aHits = 0;
     aMisses = 0;
+    aCurrentFrame = 0;
     aLastError = "";
 }
 
@@ -238,6 +272,7 @@ void cPIPELINE_CACHE::Release() {
     aDevice = VK_NULL_HANDLE;
     aHits = 0;
     aMisses = 0;
+    aCurrentFrame = 0;
     aLastError = "";
 }
 
@@ -258,6 +293,7 @@ VkPipeline cPIPELINE_CACHE::GetOrCreate(const sPIPELINE_DESC &desc, bool *create
     for (size_t i = 0; i < aEntries.size(); ++i) {
         if (aEntries[i].aKey == key) {
             ++aHits;
+            aEntries[i].aLastUsedFrame = aCurrentFrame;
             aLastError = "";
             return aEntries[i].aPipeline;
         }
@@ -303,9 +339,37 @@ VkPipeline cPIPELINE_CACHE::GetOrCreate(const sPIPELINE_DESC &desc, bool *create
     sENTRY entry;
     entry.aKey = key;
     entry.aPipeline = pipeline;
+    entry.aLastUsedFrame = aCurrentFrame;
     aEntries.push_back(entry);
     if (created) *created = true;
     return pipeline;
+}
+
+void cPIPELINE_CACHE::SetFrame(uint64_t frame) {
+    if (frame > aCurrentFrame) aCurrentFrame = frame;
+    aShaders.SetFrame(frame);
+}
+
+uint32_t cPIPELINE_CACHE::CollectGarbage(uint64_t currentFrame, uint32_t keepFrames) {
+    SetFrame(currentFrame);
+    if (aDevice == VK_NULL_HANDLE) return 0;
+    uint32_t destroyed = 0;
+    size_t i = 0;
+    while (i < aEntries.size()) {
+        const uint64_t last = aEntries[i].aLastUsedFrame;
+        const bool old = last < aCurrentFrame && (aCurrentFrame - last) > keepFrames;
+        if (!old) {
+            ++i;
+            continue;
+        }
+        if (aEntries[i].aPipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(aDevice, aEntries[i].aPipeline, 0);
+        }
+        aEntries.erase(aEntries.begin() + static_cast<std::ptrdiff_t>(i));
+        ++destroyed;
+    }
+    aShaders.CollectGarbage(currentFrame, keepFrames);
+    return destroyed;
 }
 
 } // namespace GN3d

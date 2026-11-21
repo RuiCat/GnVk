@@ -501,11 +501,17 @@ GN_API uint8 *GT_WriteImageNameToBuffer(uint8 *wpos, GNg::sIMAGE *_img, char *im
 		while(pimg_name1 != pimg_name && *pimg_name1 != '/' && *pimg_name1 != '\\'){ pimg_name1--; num++; }
         if(pimg_name1 != pimg_name){ pimg_name1++; num--; }  /*排除目录名 找到斋文件名*/
         num+=1;
-		strcpy(img_name,pimg_name1);
-		if(_img->add_0000){
-            strcat(img_name,"0000");
-			num += 4;
-		}
+        // 加固（STRCPY 审计）：img_name 是 64 字节契约缓冲（GN_Frame.cpp:2817 与本文件 tmp_str[64]）。
+        // 超长文件名按容量截断，num 与实际写入字节数保持一致（>59 字符的名字本来就无法回读）。
+        {
+            const int img_name_cap = 64;
+            const int copied = GN_StrCopyToLimit(img_name, img_name_cap, pimg_name1);
+            num = (unsigned int)copied + 1;
+            if(_img->add_0000 && (int)num + 4 <= img_name_cap) {
+                strcat(img_name, "0000");
+                num += 4;
+            }
+        }
         memcpy(wpos, &num, 4); wpos += 4; /*写入图象名长度到缓冲*/
         memcpy(wpos, img_name, num); wpos += num; /*写入图象名*/
 		if(texn_out){
@@ -588,11 +594,27 @@ GN_API void GT_WriteInFrameSubObjDataToFile(unsigned int *rc_pos/*[5]*/, uint8 *
 	num = list_keep_obj.size();
     GNf::Write((char*)&num , 4, 1, fp);
 }
-//转换图像名为适合读取的名(读取名输出, 图像名, 图像长度)
+//转换图像名为适合读取的名(读取名输出, 输出容量, 图像名, 图像长度)返回写入长度
+// 加固（STRCPY 审计 B5i）：按 cap 截断，最多写 cap-1 字节 + NUL；容量不足时不越界。
+GN_API int GT_ConvertImageNameForLoad_s(char *img_name_out, int cap, const char *img_name, unsigned int name_len){
+    if(!img_name_out || cap <= 0) return 0;
+    img_name_out[0] = 0;
+    if(!img_name) return 0;
+    int n = (int)strlen(img_name);
+    if(n > cap - 1) n = cap - 1;
+    if(n > 0) memcpy(img_name_out, img_name, (size_t)n);
+    img_name_out[n] = 0;
+    int strip = ((int)name_len <= n) ? (int)name_len : n;
+    if(strip > 3 && !strcmp(img_name_out + (strip - 4), "0000")) img_name_out[strip - 4] = 0;
+    else if(n + 4 <= cap - 1) {
+        memcpy(img_name_out + n, ".png", 4);
+        img_name_out[n + 4] = 0;
+    }
+    return (int)strlen(img_name_out);
+}
+//转换图像名为适合读取的名(读取名输出, 图像名, 图像长度)!!旧 ABI：输出缓冲须 >= name_len+5
 GN_API void GT_ConvertImageNameForLoad(char *img_name_out, const char *img_name, unsigned int name_len){
-	strcpy(img_name_out, img_name);
-	if(name_len > 3 && !strcmp(img_name_out+(name_len-4),"0000"))img_name_out[name_len-4] = 0;
-	else strcpy(img_name_out+name_len, ".png");
+    GT_ConvertImageNameForLoad_s(img_name_out, 0x7fffffff, img_name, name_len);
 }
 //读取各个动画筐数据(缓冲读取位置, 动画筐列表, 所有在动画图筐里的共享引用对象)返回最后的读完位置
 GN_API uint8 *GT_ReadFrames(uint8 *rpos, P< GNg::cFRAME* > &p_frames, GNg::cFRAME_RC::sREF_OBJSR *_frame_ref_objs){
@@ -662,6 +684,11 @@ GN_API void GT_ReadInFrameSubObjData(unsigned int *rc_pos/*[5]*/, uint8 *fbuf, P
 //从文件缓冲里读取2D场景共享引用对象集数据(2D场景共享引用对象集, 各种对象数据在文件的位置, 2D场景路径文件名, 文件缓冲, 返回读取进度)
 void GT_Scene2DLoadShareObjData(GT_sSCENE2D_SHARE_OBJS_R &ref_objs, unsigned int *data_pos, const char *file_name, char *fbuf, float &progress){
     char file_path[384];
+    // 加固（STRCPY 审计）：路径超长会让后面的 _filename 指针越界，直接报错退出。
+    if(!file_name || strlen(file_name) >= sizeof(file_path)) {
+        GN_Log("2D 场景路径为空或过长, 放弃读取!\n");
+        return;
+    }
 	strcpy(file_path, file_name);
 	char *_filename = file_path + (GN_StrGetFileName(file_name) - file_name);
 
@@ -684,7 +711,7 @@ void GT_Scene2DLoadShareObjData(GT_sSCENE2D_SHARE_OBJS_R &ref_objs, unsigned int
 					*(_load_imgs[si]) = *(GN::RunRec.aGV_Point32);\
 					rpos += str_size;\
 				}else{\
-					GT_ConvertImageNameForLoad(_filename, (char*)rpos, str_size-1);\
+					GT_ConvertImageNameForLoad_s(_filename, (int)(sizeof(file_path) - (_filename - file_path)), (char*)rpos, str_size-1);\
 					if(!GNg::ImageLoad(file_path, *((unsigned short*)(rpos+str_size)), _load_imgs[si], (GNg::COLOR_FORMAT)(*((unsigned short*)(rpos+(str_size+2)))))){\
 						if(strcmp((char*)rpos, GT_SYS_FontDefName)){\
 							FAIL_IMG ;\
@@ -707,7 +734,7 @@ void GT_Scene2DLoadShareObjData(GT_sSCENE2D_SHARE_OBJS_R &ref_objs, unsigned int
 		for(si = 0; si < num; ++si){
 			*_filename = 0;
 			ref_objs.pflares[si].New(1);
-			rpos = ref_objs.pflares[si]->zDataLoad(rpos, file_path);
+			rpos = ref_objs.pflares[si]->zDataLoad(rpos, file_path, (int)sizeof(file_path));
 	}	}
 	GNg::cFRAME_RC::sREF_OBJSR *_fm_ref_objs = &(ref_objs.frame_ref_objs);
 	GT_ReadInFrameSubObjData(data_pos+2, (uint8*)fbuf, ref_objs.pkeep_objs, _fm_ref_objs); //读取动画图框里引用到的对象数据
@@ -784,9 +811,11 @@ void GT_Scene2DSaveShareObjData(GT_sSCENE2D_SHARE_OBJS &share_objs, GN::sLIST<GN
 	
 	if(fontmaps)share_objs.in_frame_objs.pimgs.splice(share_objs.in_frame_objs.pimgs.end(), *fontmaps);  //加入字图到筐图像里一起写入
 
-	char exp_path[384], tmp_str[64];
+	char exp_path[384] = {0}, tmp_str[64];
 	if(exp_pathfile){
-		strcpy(exp_path, exp_pathfile);
+		// 加固（STRCPY 审计）：导出路径超长会写穿 exp_path；超长时忽略导出路径（不写穿）。
+		if(strlen(exp_pathfile) < sizeof(exp_path)) strcpy(exp_path, exp_pathfile);
+		else GN_Log("2D 场景导出路径过长, 忽略导出路径!\n");
 		char *_filename = GN_StrGetFileName(exp_path);
 		if(_filename > exp_path)*(_filename-1) = 0;
 	}

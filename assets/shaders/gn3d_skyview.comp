@@ -100,7 +100,8 @@ vec3 computeSkyRadiance(vec3 viewDir, vec3 sunDir) {
         // 太阳可见性：从该点向太阳做透射率查表（与 evalTransmittanceLut 的参数化一致）。
         float sunMu = dot(p, s) / max(r, EPSILON);
         float height01 = clamp(height / atmosphereThickness, 0.0, 1.0);
-        vec3 sunTransmittance = texture(transmittanceLut, vec2(sunMu * 0.5 + 0.5, height01)).rgb;
+        // compute 阶段没有可靠的隐式 LOD，必须显式 textureLod。
+        vec3 sunTransmittance = textureLod(transmittanceLut, vec2(sunMu * 0.5 + 0.5, height01), 0.0).rgb;
 
         vec3 scatter = a.rayleigh.xyz * dR * phaseR + a.mie.x * dM * phaseM;
         radiance += viewTransmittance * scatter * sunTransmittance * a.sunDirection.w * stepLen;

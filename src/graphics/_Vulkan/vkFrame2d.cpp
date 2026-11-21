@@ -112,10 +112,15 @@ void GrowVBufIfNeeded(uint32_t need) {
 
 bool GN_VkBeginFrame() {
     if(!GN_Vk.initialized) return false;
-    // TODO: 处理pass内延迟的纹理上传 (临时禁用排查崩溃)
-    // for(int i=0;i<s_pendingUploadCnt;i++){ ... }
-    // 注意: 必须在vkWaitForFences之后处理, 否则GPU还在用旧帧资源!
+    // pass 内延迟纹理上传：必须在 vkWaitForFences 之后处理，否则 GPU 还在用旧帧资源。
     vkWaitForFences(GN_Vk.device, 1, &GN_Vk.inFlightFence, VK_TRUE, UINT64_MAX);
+    // 3D 动态缓冲退休表：只有在这里（上一帧 fence 已完成）释放才安全。
+    // CSM 4 级在同一 command buffer 内录制，pass 内释放会命中同帧 UAF。
+    releaseRetired3DBuffers();
+    // 3D 绘制偏移按帧单调追加（阴影 4 级 + 主 pass），帧首归零。
+    // 旧实现在每个 pass 开头归零，4 级 cascade 的 draw 会在提交前互相覆盖顶点数据。
+    s_vtxOfs3D = 0;
+    s_idxOfs3D = 0;
     // 处理pass内延迟的纹理上传 (必须在vkWaitForFences之后)
     for(int i = 0; i < s_pendingUploadCnt; i++) {
         if(s_pendingUploads[i].img && s_pendingUploads[i].data) {

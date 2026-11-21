@@ -22,7 +22,7 @@ layout(binding = 2, set = 0) uniform POST_UBO {
     float ev;              // 曝光 EV（仅记录）
     int   tonemapMode;     // 0=NONE / 1=Reinhard / 2=ACES
     float fxaa;            // 0=关 / 1=开（L2a）
-    float pad1;
+    float srgbEncode;      // 0=交换链是 sRGB（硬件编码）/ 1=composite 显式编码
 } post;
 
 layout(binding = 3, set = 0) uniform sampler2D bloomTex; // L1d：Bloom mip 链 level0（已曝光/阈值/上采样）
@@ -50,9 +50,11 @@ float lumaOf(vec3 color) {
     return dot(color, vec3(0.299, 0.587, 0.114));
 }
 
-// FXAA 邻域样本：线性 HDR × 曝光 → tonemap，与中心同色彩域。
+// FXAA 邻域样本：线性 HDR × 曝光 + Bloom → tonemap，与中心同色彩域。
+// S-26：旧版只取 hdr、不含 bloom，亮边不参与抗锯齿；这里与中心路径保持一致。
 vec3 tonemappedSample(vec2 uv, float exposure) {
     vec3 hdr = texture(hdrSampler, uv).rgb * exposure;
+    hdr += texture(bloomTex, uv).rgb * max(post.bloomIntensity, 0.0);
     return tonemapColor(hdr, post.tonemapMode);
 }
 
@@ -100,6 +102,12 @@ void main() {
         color = applyFxaa(fragUV, texelSize, color, exposure);
     }
 
-    // swapchain 为 SRGB 格式：硬件自动编码 Gamma，这里只输出线性值。
+    // sRGB 交换链：硬件自动编码，这里输出线性值；非 sRGB 交换链（UNORM/float）：
+    // 由后端置 srgbEncode=1，这里补一次精确 sRGB 传递函数，避免“线性值被当 sRGB 显示”。
+    if(post.srgbEncode > 0.5) {
+        const vec3 low = color * 12.92;
+        const vec3 high = 1.055 * pow(max(color, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
+        color = mix(high, low, step(color, vec3(0.0031308)));
+    }
     outColor = vec4(color, 1.0);
 }

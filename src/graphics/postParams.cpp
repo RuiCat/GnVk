@@ -56,7 +56,7 @@ bool validatePostUbo(const sPOST_UBO& ubo, sPOST_UBO* corrected) {
     fixed.bloomKnee = clampFloat(finiteOr(ubo.bloomKnee, 0.3f), 0.0f, 10.0f);
     fixed.ev = clampFloat(finiteOr(ubo.ev, 0.0f), -10.0f, 10.0f);
     fixed.fxaa = clampFloat(finiteOr(ubo.fxaa, 0.0f), 0.0f, 1.0f);
-    fixed.pad1 = 0.0f;
+    fixed.srgbEncode = clampFloat(finiteOr(ubo.srgbEncode, 0.0f), 0.0f, 1.0f);
 
     if(ubo.tonemapMode < eTONEMAP_NONE || ubo.tonemapMode > eTONEMAP_ACES) {
         fixed.tonemapMode = eTONEMAP_ACES;

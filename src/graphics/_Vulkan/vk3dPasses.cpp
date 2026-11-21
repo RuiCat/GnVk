@@ -7,9 +7,6 @@
 
 namespace GNg {
 
-// 定义在 vk3dShutdown.cpp：延迟释放扩容时退休的 3D 动态缓冲（避免同帧已录制命令引用已释放显存）。
-void ReleaseRetired3DBuffers();
-
 bool s_inShadowPass = false;
 
 namespace {
@@ -27,9 +24,12 @@ static bool s_hasDeferredViewProj = false;
 void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
     if(!GN_Vk.initialized || !GN_Vk.shadowPipeline || s_inShadowPass) return;
     if(s_in3DPass) return;
-    s_vtxOfs3D = 0;
-    s_idxOfs3D = 0;
-    ReleaseRetired3DBuffers();
+    // 描述符集分配失败时跳过本 pass（不绑非法 set）；阴影降级而非崩溃。
+    VkDescriptorSet cascadeSet = shadowCascadeDescriptorSet(cascadeIndex);
+    if(cascadeSet == VK_NULL_HANDLE) return;
+    // 不重置 3D 绘制偏移、也不释放退休缓冲：4 级 cascade 在同一个 command buffer
+    // 内录制，重置偏移会让前一级的 draw 在提交后读到后一级写入的顶点/索引；
+    // 偏移由 GN_VkBeginFrame 每帧归零，退休缓冲只在该处 fence 之后释放。
 
     // 刷新 2D 批次并结束当前渲染通道
     if(gVCnt > 0) {
@@ -57,13 +57,9 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
         s_inRenderPass = false;
     }
 
-    // 上传 light VP
-    {
-        void *d;
-        vkMapMemory(GN_Vk.device, GN_Vk.shadowUBOMemory, 0, 64, 0, &d);
-        memcpy(d, lightViewProj->m, 64);
-        vkUnmapMemory(GN_Vk.device, GN_Vk.shadowUBOMemory);
-    }
+    // 写入本级的 light VP 槽（每级 64 B，槽距 256 B；常驻映射，逐级不互相覆盖）。
+    // 旧实现只有 64 B 单槽：4 级录制期间反复覆盖同一槽，提交后所有级都读到最后一级矩阵。
+    writeShadowCascadeLightVP(cascadeIndex, lightViewProj->m);
 
     VkClearValue cv;
     cv.depthStencil = {1.0f, 0};
@@ -76,8 +72,9 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
     rpi.pClearValues = &cv;
     vkCmdBeginRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame], &rpi, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.shadowPipeline);
+    // 每级绑定自己的描述符集（指向本级 UBO 槽）；单集会再次退化为“所有级同一矩阵”。
     vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            GN_Vk.shadowPipelineLayout, 0, 1, &GN_Vk.shadowDescriptorSet, 0, 0);
+                            GN_Vk.shadowPipelineLayout, 0, 1, &cascadeSet, 0, 0);
     s_inShadowPass = true;
     s_inRenderPass = true; // 阴影渲染通道活跃
 }
@@ -217,9 +214,8 @@ void GN_VkDrawSkybox(const sMAT44 *viewProj) {
 void GN_VkBegin3DPassPBR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                          const void *lightUBO, uint32_t lightUBOSize) {
     if(!GN_Vk.initialized || s_in3DPass) return;
-    s_vtxOfs3D = 0;
-    s_idxOfs3D = 0;
-    ReleaseRetired3DBuffers();
+    // 偏移不按 pass 归零：同一帧可能先录 4 级 shadow pass，归零会覆盖其顶点数据
+    // （已录制命令在提交时才读取缓冲）。帧首由 GN_VkBeginFrame 归零。
     // 刷新 2D 批次 (与 GN_VkBegin3DPass 相同逻辑)
     if(gVCnt > 0) {
         void *d;
@@ -320,9 +316,7 @@ void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     if(!GN_Vk.initialized || s_in3DPass || !GN_Vk.gBufferPipeline) return;
     s_deferredViewProj = *viewProj;
     s_hasDeferredViewProj = true;
-    s_vtxOfs3D = 0;
-    s_idxOfs3D = 0;
-    ReleaseRetired3DBuffers();
+    // 同 PBR 路径：偏移按帧单调追加，帧首归零（避免覆盖同帧阴影 pass 的顶点数据）。
     // 刷新 2D 批次
     if(gVCnt > 0) {
         void *d;

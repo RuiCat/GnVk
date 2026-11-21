@@ -40,7 +40,11 @@ void main() {
     // ── 法线计算 (法线贴图优先, 否则用插值法线) ────
     vec3 N = normalize(fragNormal);
     vec3 texN = texture(normalSampler, fragUV).rgb;
-    if (length(texN) > 0.01) {
+    // 默认 1×1 白图 (1,1,1) 不是合法切线空间法线：解码后 normalize(1,1,1) 会把法线整体偏 45°。
+    // 这里把纯白视为“没有法线贴图”，避免无 normal map 的网格（MMD/OBJ 等）被改坏。
+    if (all(greaterThan(texN, vec3(0.999)))) {
+        // 保持顶点法线
+    } else if (length(texN) > 0.01) {
         // 法线贴图: [0,1]→[-1,1] 解码, TBN 变换到世界空间
         texN = normalize(texN * 2.0 - 1.0);
         N = normalize(fragTBN * texN);

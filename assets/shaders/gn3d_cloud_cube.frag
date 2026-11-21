@@ -99,7 +99,16 @@ void main() {
     const vec3 ray = normalize(vWorldPos - cameraPos);
 
     // 射线-盒求交（slab）：近交点 tn、远交点 tf。
-    const vec3 invRay = 1.0 / ray;
+    // 轴对齐射线的分量为 0：1/0 会得到 inf，若分子也为 0 则 0*inf=NaN。
+    // 用 1e30 代替 inf，并对“相机在该轴上已在盒外”的情况直接丢弃。
+    vec3 invRay;
+    invRay.x = abs(ray.x) < 1.0e-8 ? 1.0e30 : 1.0 / ray.x;
+    invRay.y = abs(ray.y) < 1.0e-8 ? 1.0e30 : 1.0 / ray.y;
+    invRay.z = abs(ray.z) < 1.0e-8 ? 1.0e30 : 1.0 / ray.z;
+    if(any(lessThan(abs(ray), vec3(1.0e-8))) &&
+       (any(lessThan(cameraPos, vBoxMin)) || any(greaterThan(cameraPos, vBoxMax)))) {
+        discard; // 射线平行于某个轴且相机已在该轴的盒外，不可能命中
+    }
     const vec3 t0 = (vBoxMin - cameraPos) * invRay;
     const vec3 t1 = (vBoxMax - cameraPos) * invRay;
     const vec3 tMin = min(t0, t1);

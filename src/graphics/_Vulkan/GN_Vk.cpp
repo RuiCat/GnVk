@@ -30,6 +30,30 @@ static VkFramebuffer *s_framebuffers2DOverlay = nullptr;
 static VkRenderPass s_rtRenderPass = VK_NULL_HANDLE;
 static VkFramebuffer s_rtFramebuffer = VK_NULL_HANDLE;
 
+// 交换链格式选择：优先 8-bit sRGB（硬件负责 linear→sRGB），否则退回驱动给出的
+// 第一个格式；非 sRGB 格式由 composite 的 srgbEncode 分支显式编码。
+static bool isSrgbSwapchainFormat(VkFormat format) {
+    return format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
+}
+
+static VkFormat chooseSwapchainFormat(const VkSurfaceFormatKHR *formats, uint32_t count) {
+    if(!formats || count == 0) return VK_FORMAT_B8G8R8A8_SRGB;
+    const VkFormat preferred[] = {VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_SRGB};
+    for(uint32_t p = 0; p < 2; ++p) {
+        for(uint32_t i = 0; i < count; ++i) {
+            if(formats[i].format == preferred[p]) return preferred[p];
+        }
+    }
+    for(uint32_t i = 0; i < count; ++i) {
+        if(formats[i].format != VK_FORMAT_UNDEFINED) return formats[i].format;
+    }
+    return VK_FORMAT_B8G8R8A8_SRGB;
+}
+
+bool GN_VkSwapchainIsSrgb() {
+    return isSrgbSwapchainFormat(GN_Vk.swapchainFormat);
+}
+
 // ── RenderTarget 状态（帧循环/批状态见 vkFrame2d.cpp） ──
 
 // ViewCur 定义在 core（GN_RunRec.cpp 等），本文件不涉及
@@ -206,9 +230,10 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     vkGetPhysicalDeviceSurfaceFormatsKHR(GN_Vk.physicalDevice, GN_Vk.surface, &fmtCount, 0);
     VkSurfaceFormatKHR *fmts = new VkSurfaceFormatKHR[fmtCount];
     vkGetPhysicalDeviceSurfaceFormatsKHR(GN_Vk.physicalDevice, GN_Vk.surface, &fmtCount, fmts);
-    GN_Vk.swapchainFormat = fmts[0].format;
+    GN_Vk.swapchainFormat = chooseSwapchainFormat(fmts, fmtCount);
     delete[] fmts;
-    if(GN_Vk.swapchainFormat == VK_FORMAT_UNDEFINED) GN_Vk.swapchainFormat = VK_FORMAT_B8G8R8A8_SRGB;
+    fprintf(stderr, "[GN_Vk] swapchain format=%d (%s)\n", (int)GN_Vk.swapchainFormat,
+            isSrgbSwapchainFormat(GN_Vk.swapchainFormat) ? "sRGB" : "non-sRGB");
     VkSwapchainCreateInfoKHR sci = {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     sci.surface = GN_Vk.surface;
     sci.minImageCount = 2;
@@ -220,8 +245,10 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     sci.preTransform = caps.currentTransform;
     sci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    sci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    sci.presentMode = ChoosePresentMode(GN_Vk.physicalDevice, GN_Vk.surface);
     sci.clipped = VK_TRUE;
+    fprintf(stderr, "[GN_Vk] present mode=%d (GN_VSYNC=0 时优先 IMMEDIATE/MAILBOX)\n",
+            (int)sci.presentMode);
     VkCheck(vkCreateSwapchainKHR(GN_Vk.device, &sci, 0, &GN_Vk.swapchain), "vkCreateSwapchainKHR");
     vkGetSwapchainImagesKHR(GN_Vk.device, GN_Vk.swapchain, &GN_Vk.swapchainImageCount, 0);
     GN_Vk.swapchainImages = new VkImage[GN_Vk.swapchainImageCount];
@@ -604,6 +631,7 @@ void GN_VkShutdown() {
         s_rtRenderPass = VK_NULL_HANDLE;
     }
     vkDestroyRenderPass(GN_Vk.device, GN_Vk.renderPass, 0);
+    DestroyImageUploadCache();
     vkDestroyDevice(GN_Vk.device, 0);
     vkDestroySurfaceKHR(GN_Vk.instance, GN_Vk.surface, 0);
     vkDestroyInstance(GN_Vk.instance, 0);
@@ -895,9 +923,10 @@ void GN_VkResize(int w, int h) {
     vkGetPhysicalDeviceSurfaceFormatsKHR(GN_Vk.physicalDevice, GN_Vk.surface, &fmtCount, 0);
     VkSurfaceFormatKHR *fmts = new VkSurfaceFormatKHR[fmtCount];
     vkGetPhysicalDeviceSurfaceFormatsKHR(GN_Vk.physicalDevice, GN_Vk.surface, &fmtCount, fmts);
-    GN_Vk.swapchainFormat = fmts[0].format;
+    GN_Vk.swapchainFormat = chooseSwapchainFormat(fmts, fmtCount);
     delete[] fmts;
-    if(GN_Vk.swapchainFormat == VK_FORMAT_UNDEFINED) GN_Vk.swapchainFormat = VK_FORMAT_B8G8R8A8_SRGB;
+    fprintf(stderr, "[GN_Vk] swapchain format=%d (%s)\n", (int)GN_Vk.swapchainFormat,
+            isSrgbSwapchainFormat(GN_Vk.swapchainFormat) ? "sRGB" : "non-sRGB");
     VkSwapchainCreateInfoKHR sci = {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     sci.surface = GN_Vk.surface;
     sci.minImageCount = 2;
@@ -909,8 +938,9 @@ void GN_VkResize(int w, int h) {
     sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     sci.preTransform = caps.currentTransform;
     sci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    sci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    sci.presentMode = ChoosePresentMode(GN_Vk.physicalDevice, GN_Vk.surface);
     sci.clipped = VK_TRUE;
+    fprintf(stderr, "[GN_Vk] present mode=%d (resize)\n", (int)sci.presentMode);
     VkCheck(vkCreateSwapchainKHR(GN_Vk.device, &sci, 0, &GN_Vk.swapchain), "vkCreateSwapchainKHR(resize)");
     vkGetSwapchainImagesKHR(GN_Vk.device, GN_Vk.swapchain, &GN_Vk.swapchainImageCount, 0);
     GN_Vk.swapchainImages = new VkImage[GN_Vk.swapchainImageCount];

@@ -8,7 +8,7 @@
 
 namespace GNg {
 
-sIMAGE::sIMAGE() : width(128), height(128), uRange(1), vRange(1), texnum(0), fileName(0), hasMipmap(false), add_0000(false), cloneImg(false), vkImage(VK_NULL_HANDLE), vkImageMemory(VK_NULL_HANDLE), vkImageView(VK_NULL_HANDLE), vkSampler(VK_NULL_HANDLE), vkDescriptorSet(VK_NULL_HANDLE), vkIsLinear(false), skipDefer(false), z__attrb(0) {}
+sIMAGE::sIMAGE() : width(128), height(128), uRange(1), vRange(1), texnum(0), fileName(0), hasMipmap(false), add_0000(false), cloneImg(false), vkImage(VK_NULL_HANDLE), vkImageMemory(VK_NULL_HANDLE), vkImageView(VK_NULL_HANDLE), vkSampler(VK_NULL_HANDLE), vkDescriptorSet(VK_NULL_HANDLE), vkIsLinear(false), vkSrgb(false), vkWrapU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE), vkWrapV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE), skipDefer(false), z__attrb(0) {}
 sIMAGE::~sIMAGE() {
     Release();
 }
@@ -27,6 +27,9 @@ sIMAGE &sIMAGE::operator=(const sIMAGE &src) {
         texnum = src.texnum;
         cFormat = src.cFormat;
         add_0000 = src.add_0000;
+        vkSrgb = src.vkSrgb;
+        vkWrapU = src.vkWrapU;
+        vkWrapV = src.vkWrapV;
     }
     return *this;
 }

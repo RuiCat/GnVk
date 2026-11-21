@@ -320,15 +320,16 @@ imoSceneAssets: imoSceneAsset imoRoomAsset
 CORNELL_SRC   := tests/cornellBox/main.cpp tests/cornellBox/cornellScene.cpp \
                  tests/cornellBox/cornellCamera.cpp tests/cornellBox/cornellHud.cpp \
                  tests/cornellBox/cornellGeometry.cpp tests/cornellBox/cornellCapture.cpp \
-                 tests/cornellBox/cornellCpuRt.cpp tests/cornellBox/cornellGpuRt.cpp \
+                 tests/cornellBox/cornellCpuRt.cpp tests/cornellBox/cornellProbeBake.cpp \
+                 tests/cornellBox/cornellGpuRt.cpp \
                  tests/cornellBox/cornellRtAs.cpp tests/cornellBox/cornellRtDevice.cpp
 CORNELL_BIN   := build/cornellBox
 CORNELL_FLAGS := -O2 -std=c++11 -pthread -fpermissive $(DEFINES) $(INCLUDES)
 CORNELL_SHADERS := assets/shaders/gn_cornell_rt.comp.spv assets/shaders/gn_cornell_rq.comp.spv
 
-assets/shaders/gn_cornell_rt.comp.spv: assets/shaders/gn_cornell_rt.comp
+assets/shaders/gn_cornell_rt.comp.spv: assets/shaders/gn_cornell_rt.comp assets/shaders/cornellRayLib.glsl
 	@echo "$(YELLOW)🔧 编译 Cornell compute RT 着色器...$(RESET)"
-	glslangValidator -V $< -o $@
+	glslangValidator -V -Iassets/shaders $< -o $@
 
 assets/shaders/gn_cornell_rq.comp.spv: assets/shaders/gn_cornell_rq.comp
 	@echo "$(YELLOW)🔧 编译 Cornell ray-query 着色器...$(RESET)"
@@ -478,7 +479,7 @@ SHADER_OUT  := $(SHADER_SRC:=.spv)
 shaders:
 	@echo "$(YELLOW)🔧 编译 GLSL → SPIR-V...$(RESET)"
 	@c=0; for f in $(SHADER_SRC); do \
-		glslangValidator -V "$$f" -o "$$f.spv" 2>/dev/null && c=$$((c+1)); \
+		glslangValidator -V -I$(SHADER_DIR) "$$f" -o "$$f.spv" 2>/dev/null && c=$$((c+1)); \
 	done; \
 	glslangValidator -V --target-env vulkan1.2 $(SHADER_DIR)/gn_cornell_rq.comp -o $(SHADER_DIR)/gn_cornell_rq.comp.spv 2>/dev/null && c=$$((c+1)); \
 	echo "$(GREEN)✅ $$c 个着色器$(RESET)"

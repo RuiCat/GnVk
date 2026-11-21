@@ -8,6 +8,21 @@
 
 namespace GNg {
 
+namespace {
+// sIMAGE 的采样寻址只接受 glTF 用到的三种；其余（含未初始化值）回退 CLAMP_TO_EDGE，
+// 与旧实现固定 CLAMP 的 2D/UI 行为一致。
+VkSamplerAddressMode imageWrapMode(VkSamplerAddressMode mode) {
+    switch(mode) {
+    case VK_SAMPLER_ADDRESS_MODE_REPEAT:
+    case VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT:
+    case VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE:
+        return mode;
+    default:
+        return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    }
+}
+} // namespace
+
 void sIMAGE::InitToData(char *filename, unsigned short imgnum, int fmt, bool mip, unsigned char lv) {
     Release();
     ImageLoad(filename, imgnum, this, fmt);
@@ -31,7 +46,7 @@ void sIMAGE::CreateEmptyToData(int w, int h, unsigned short imgnum, int fmt,
     if(!GN_Vk.initialized || w <= 0 || h <= 0) return;
     Release();
 
-    VkFormat vkFmt = VK_FORMAT_R8G8B8A8_UNORM;
+    VkFormat vkFmt = vkSrgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
     VkDeviceSize sz = (VkDeviceSize)w * (VkDeviceSize)h * 4;
 
     // Create image
@@ -84,8 +99,8 @@ void sIMAGE::CreateEmptyToData(int w, int h, unsigned short imgnum, int fmt,
         VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
         sci.magFilter = VK_FILTER_LINEAR;
         sci.minFilter = VK_FILTER_LINEAR;
-        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sci.addressModeU = imageWrapMode(vkWrapU);
+        sci.addressModeV = imageWrapMode(vkWrapV);
         VkResult res = vkCreateSampler(GN_Vk.device, &sci, 0, &vkSampler);
         VkCheck(res, "vkCreateSampler in CreateEmptyToData");
     }
@@ -202,13 +217,8 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         }
         VkDeviceSize srcSz = (VkDeviceSize)w * (VkDeviceSize)h * srcBpp;
         VkDeviceSize dstSz = (VkDeviceSize)w * (VkDeviceSize)h * 4;
-        VkBuffer stagingBuf;
-        VkDeviceMemory stagingMem;
-        CreateBuf(dstSz, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  stagingBuf, stagingMem);
-        void *d;
-        vkMapMemory(GN_Vk.device, stagingMem, 0, dstSz, 0, &d);
+        void *d = BeginImageUpload(dstSz);
+        if(!d) return;
         if(expandRGBA || srcBpp == 3) {
             uint8_t *dst8 = (uint8_t *)d;
             for(int i = 0; i < w * h; i++) {
@@ -245,69 +255,9 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
             s_pendingUploads[s_pendingUploadCnt].h = h;
             s_pendingUploads[s_pendingUploadCnt].fmt = CR_RGBA; // staging已展开为RGBA
             s_pendingUploadCnt++;
-            vkUnmapMemory(GN_Vk.device, stagingMem);
-            vkDestroyBuffer(GN_Vk.device, stagingBuf, 0);
-            vkFreeMemory(GN_Vk.device, stagingMem, 0);
             return;
         }
-        vkUnmapMemory(GN_Vk.device, stagingMem);
-
-        {
-            VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-            ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            ai.commandPool = GN_Vk.commandPool;
-            ai.commandBufferCount = 1;
-            VkCommandBuffer cb;
-            VkResult res = vkAllocateCommandBuffers(GN_Vk.device, &ai, &cb);
-            VkCheck(res, "vkAllocateCommandBuffers in DataFill(sub-region)");
-            VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-            bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-            vkBeginCommandBuffer(cb, &bi);
-            VkImageMemoryBarrier b1 = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-            b1.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            b1.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            b1.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b1.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b1.image = vkImage;
-            b1.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            b1.subresourceRange.levelCount = 1;
-            b1.subresourceRange.layerCount = 1;
-            b1.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            b1.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &b1);
-            VkBufferImageCopy rgn = {};
-            rgn.bufferOffset = 0;
-            rgn.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            rgn.imageSubresource.layerCount = 1;
-            rgn.imageOffset = {offset_x, offset_y, 0};
-            rgn.imageExtent = {(uint32_t)w, (uint32_t)h, 1};
-            vkCmdCopyBufferToImage(cb, stagingBuf, vkImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
-            VkImageMemoryBarrier b2 = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-            b2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            b2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            b2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b2.image = vkImage;
-            b2.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            b2.subresourceRange.levelCount = 1;
-            b2.subresourceRange.layerCount = 1;
-            b2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            b2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &b2);
-            vkEndCommandBuffer(cb);
-            VkFence f;
-            VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            vkCreateFence(GN_Vk.device, &fci, 0, &f);
-            VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-            si.commandBufferCount = 1;
-            si.pCommandBuffers = &cb;
-            vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, f);
-            vkWaitForFences(GN_Vk.device, 1, &f, VK_TRUE, UINT64_MAX);
-            vkDestroyFence(GN_Vk.device, f, 0);
-            vkFreeCommandBuffers(GN_Vk.device, GN_Vk.commandPool, 1, &cb);
-        }
-        vkDestroyBuffer(GN_Vk.device, stagingBuf, 0);
-        vkFreeMemory(GN_Vk.device, stagingMem, 0);
+        EndImageUpload(vkImage, (uint32_t)w, (uint32_t)h, offset_x, offset_y, false);
         return;
     }
 
@@ -335,21 +285,15 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         case CR_RGB: srcBpp = 4; break; // stored as RGBA
         default: srcBpp = 4; break;
     }
-    VkFormat vkFmt = VK_FORMAT_R8G8B8A8_UNORM;
+    VkFormat vkFmt = vkSrgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
     VkDeviceSize srcSz = (VkDeviceSize)w * (VkDeviceSize)h * srcBpp;
     VkDeviceSize dstSz = (VkDeviceSize)w * (VkDeviceSize)h * 4;
 
     // Release any previous Vulkan resources
     Release();
 
-    // Create staging buffer
-    VkBuffer stagingBuf;
-    VkDeviceMemory stagingMem;
-    CreateBuf(dstSz, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-              stagingBuf, stagingMem);
-    void *d;
-    vkMapMemory(GN_Vk.device, stagingMem, 0, dstSz, 0, &d);
+    void *d = BeginImageUpload(dstSz);
+    if(!d) return;
     if(expandToRGBA) {
         // Expand narrow format to RGBA in staging
         uint8_t *dst = (uint8_t *)d;
@@ -391,9 +335,6 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         s_pendingUploads[s_pendingUploadCnt].h = h;
         s_pendingUploads[s_pendingUploadCnt].fmt = CR_RGBA;
         s_pendingUploadCnt++;
-        vkUnmapMemory(GN_Vk.device, stagingMem);
-        vkDestroyBuffer(GN_Vk.device, stagingBuf, 0);
-        vkFreeMemory(GN_Vk.device, stagingMem, 0);
         width = w;
         height = h;
         uRange = 1.0f;
@@ -401,8 +342,6 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         texnum = 1;
         return;
     }
-    vkUnmapMemory(GN_Vk.device, stagingMem);
-
     // Create destination image
     {
         VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
@@ -436,73 +375,8 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         vkIsLinear = false;
     }
 
-    // One-time command: transition → copy → transition
-    {
-        VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        ai.commandPool = GN_Vk.commandPool;
-        ai.commandBufferCount = 1;
-        VkCommandBuffer cb;
-        VkResult res = vkAllocateCommandBuffers(GN_Vk.device, &ai, &cb);
-        VkCheck(res, "vkAllocateCommandBuffers in DataFill");
-        {
-            VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-            bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-            vkBeginCommandBuffer(cb, &bi);
-        }
-        {
-            VkImageMemoryBarrier b1 = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-            b1.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            b1.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            b1.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b1.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b1.image = vkImage;
-            b1.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            b1.subresourceRange.levelCount = 1;
-            b1.subresourceRange.layerCount = 1;
-            b1.srcAccessMask = 0;
-            b1.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &b1);
-        }
-        {
-            VkBufferImageCopy rgn = {};
-            rgn.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            rgn.imageSubresource.layerCount = 1;
-            rgn.imageExtent = {(uint32_t)w, (uint32_t)h, 1};
-            vkCmdCopyBufferToImage(cb, stagingBuf, vkImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
-        }
-        {
-            VkImageMemoryBarrier b2 = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-            b2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            b2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            b2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            b2.image = vkImage;
-            b2.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            b2.subresourceRange.levelCount = 1;
-            b2.subresourceRange.layerCount = 1;
-            b2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            b2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &b2);
-        }
-        vkEndCommandBuffer(cb);
-        {
-            VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            VkFence uploadFence;
-            vkCreateFence(GN_Vk.device, &fci, 0, &uploadFence);
-            VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-            si.commandBufferCount = 1;
-            si.pCommandBuffers = &cb;
-            vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, uploadFence);
-            vkWaitForFences(GN_Vk.device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
-            vkDestroyFence(GN_Vk.device, uploadFence, 0);
-        }
-        vkFreeCommandBuffers(GN_Vk.device, GN_Vk.commandPool, 1, &cb);
-    }
+    EndImageUpload(vkImage, (uint32_t)w, (uint32_t)h, 0, 0, true);
 
-    // Cleanup staging
-    vkDestroyBuffer(GN_Vk.device, stagingBuf, 0);
-    vkFreeMemory(GN_Vk.device, stagingMem, 0);
 
     // Create image view
     vkImageView = MakeImageView(vkImage, vkFmt);
@@ -512,8 +386,8 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
         sci.magFilter = VK_FILTER_LINEAR;
         sci.minFilter = VK_FILTER_LINEAR;
-        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sci.addressModeU = imageWrapMode(vkWrapU);
+        sci.addressModeV = imageWrapMode(vkWrapV);
         VkResult res = vkCreateSampler(GN_Vk.device, &sci, 0, &vkSampler);
         VkCheck(res, "vkCreateSampler in DataFill");
     }

@@ -22,6 +22,28 @@
   用于区分「变蓝/变亮」与「崩溃」两类问题。
 - 待真机复测：默认构建是否稳定；稳定后再单独开 `IMO_SCENE_SHADOWS=1` 验证阴影。
 
+## 2026-11-21 — 更细探针网格 24×22×24 + 4×4 depth（资产 12MB/份）
+
+- 网格由 20×18×20@0.275m 提升到 **24×22×24@0.228m**（12672 探针）。
+- depth moments 由 8×8 降为 **4×4/面**，每探针 SH9 + 6×4×4×2 float；
+  单份资产约 **12MB**（原来 23MB），sun/point 共 23MB。
+- 资产换成 `cornell_probe_0/1_24x22x24_4x16.bin`；加载 asset hit 正常，
+  K 切光 point→sun 两次 upload ok。
+- 更细网格改善空间细节，数据量反而下降；画面仍受 SH9 低频限制。
+- 默认无 `CORNELL_PROBES` 路径正常。
+
+## 2026-11-21 — K 切光照热切换探针资产
+
+- `main.cpp` 探针缓存改为按 lightMode 的 `gProbeBake[2]` / `gProbeBakeValid[2]`，
+  新增 `uploadProbesForLight(int)`：首次加载 asset，之后复用内存，上传对应 SSBO。
+- `ensureRtBackend` 初始化后上传当前 light mode 的探针；K 键 `rebuildLights` 后立即
+  切到另一份探针并上传。
+- `gpuRtUploadProbes` 在替换旧 buffer 前 `vkDeviceWaitIdle`，避免 K 切换时有 pending 帧
+  仍在用旧 buffer；上传后置 `aHistoryValid=false`、`aAccumTotal=0`，时域历史重置。
+- 测试钩子 `CORNELL_AUTO_LIGHT_SWITCH=1`：第 3 帧自动 point→sun，验证 asset hit/upload；
+  llvmpipe 日志显示 point asset → sun asset 两次 `probe upload ok`。
+- 仍默认关闭（`CORNELL_PROBES` 未设置时不加载）。
+
 ## 2026-11-21 — imoScene 房间阴影（方向光 CSM，只投角色）
 
 - 新增 `tests/imoScene/imoSceneShadow.h/.cpp`：每帧按相机拟合 4 级 CSM（2048²、λ=0.5、texel snapping），
@@ -35,6 +57,35 @@
 - 已知边界：`cMODEL::DrawShadow` 跳过非 OPAQUE 网格（角色 22/32 OPAQUE、10 MASK），MASK 部件不投影。
 - 验证：`make imoScene` 0 error；`IMO_SCENE_INSPECT=1/room` 回归不变；本机无 Vulkan 设备，
   **阴影画面待真机确认**。
+
+## 2026-11-21 — 探针 GPV4 资产化（sun/point）
+
+- 新增 `assets/probes/cornell_probe_<light>_20x18x20_8x16.bin`：
+  sun/point 两份，各约 23MB，共 45MB。
+- `cornellProbeBake` 加载顺序改为 **assets/probes → .local → 重烘**；
+  命中 asset 时 point 约 20.6ms、sun 约 11.0ms，无烘焙。
+- 新增 `assets/probes/README.md` 说明格式、生成命令、lightMode 约定。
+- 运行时若资产缺失仍会烘焙并写 `.local`；`CORNELL_PROBE_CACHE=0` 跳过缓存。
+
+## 2026-11-21 — 探针 depth moments（GPV4）
+
+- 烘焙每个 cubemap texel 用 4 条抖动主射线记录 `mean` / `mean²`（每 texel 2 float）；
+  `aDepth` 大小 7200×6×8×8×2 float。
+- 缓存升级 GPV4：SH9 + depth moments；缓存约 **23MB**；二次启动 cache hit ~14ms。
+- 上传 probe depth moments SSBO（binding 13，`vec2`）；UBO `weight.y=depthRes`。
+- RT shader 双线性插值 mean/mean²，`var=max(mean²-mean²,eps)`，
+  `dist>mean` 时用 Chebyshev `var/(var+(dist-mean)²)` 作为可见性权重（不再硬切 0/1）。
+- 7200 探针 bake 约 **10.1s**；画面与上一版一致、无回归；默认路径正常。
+
+## 2026-11-21 — 探针逐 texel 深度可见性（GPV3）
+
+- `bakeProbeCubemap` 由“每面平均深度”升级为**每探针 6 面 × 8×8 主命中深度**；
+  `aDepth` 大小 7200×6×8×8 float（约 11MB）。
+- 缓存升级 GPV3：SH9 + 逐 texel depth；缓存约 12MB；二次启动 cache hit 3.7ms。
+- 上传 probe depth SSBO（binding 13）；UBO `weight.y=depthRes`。
+- RT shader 按探针→表面方向做 cubemap 面选择 + 双线性深度采样，
+  `dist > sampleDepth*1.25+0.05` 丢弃角点并归一化；比每面平均深度更贴近 DDGI 可见性。
+- 画面与上一版基本一致、无回归；probe bake 7200 约 9.7s；默认路径正常。
 
 ## 2026-11-21 — imoScene 直接运行（rpath 指向仓库根）
 
@@ -55,6 +106,16 @@
 - 验证：`make imoScene` 0 error；Blender CPU 近似布光预览 `.local/imoScene/render_room_engine_light.png`；
   真机画面待用户确认。
 
+## 2026-11-20 — DDGI-lite：探针面平均深度可见性
+
+- 烘焙 `bakeProbeCubemap` 额外记录每探针 6 面平均主命中距离（`aDepth`，6 float/probe）。
+- 缓存升级 GPV2：SH9 + depth 一起写/读；首次 bake 后二次启动仍 0.6ms。
+- 上传新增 probe depth SSBO（binding 13）；RT shader 插值 8 个角点前，按“探针→表面”
+  方向选面，`dist > faceDepth*1.25+0.05` 时丢弃该角点，权重归一化。
+- 这是 DDGI 可见性的粗粒度版（每面 1 个深度，不是 8×8 深度矩），用于压跨墙串色；
+  画面基本不变，未见回归。
+- 描述符池 storage 22、绑定 14；llvmpipe probe cache hit/默认路径均通过。
+
 ## 2026-11-20 — imoScene 接入游戏场景房间背景（room.glb）
 
 - 新增场景导出：`.unity-extract/pipeline/sceneExport.py` 从游戏数据 level1 取可见静态网格
@@ -73,6 +134,109 @@
 - Makefile 新增 `imoRoomAsset` / `imoSceneAssets`（外部 UnityPy 管线路径可覆盖）。
 - 验证：`make imoScene` 0 error；`IMO_SCENE_INSPECT=room` → 66 网格 / 76,694 顶点 / 47,586 三角形 / 59 贴图；
   Blender CPU 预览 `.local/imoScene/render_room_default2.png`；真机画面待有 GPU 的机器确认。
+
+## 2026-11-20 — 修复真机 RT 初始化失败（AS descriptor pool）+ 初始化分步诊断
+
+用户真机在 probe bake/upload 后报 `[cornellGpuRt] Vulkan 资源创建失败` / `backend=0`。
+
+- 根因候选：descriptor layout 从 4/8 扩到 13 binding 后，解析路径虽不使用 binding 4（AS），
+  但 layout 仍声明它；此前解析路径的 descriptor pool 把 AS count 设为 0，
+  部分驱动会在 `vkAllocateDescriptorSets` 直接失败。现改为**始终预留 2 个 AS descriptor**。
+- `initGpuRt` 拆成分步日志：`createPipeline` / `createCommandAndFence` /
+  `createDescriptorsAndBuffers` 各自失败会打印；buffer 分配失败也打印具体类型。
+- llvmpipe 下 `CORNELL_PROBES=1`（cache hit）再次跑通：bake 8ms、upload ok、截图正常。
+- 真机需重跑确认；若仍失败，按新日志定位到具体阶段。
+
+## 2026-11-20 — 探针烘焙缓存（二次启动 0.6ms）
+
+- `cornellProbeBake.cpp` 增加二进制缓存：`.local/cornellbox/probe_cache_<light>_<gx>x<gy>x<gz>_<face>x<spp>.bin`，
+  含 magic/counts/origin/spacing/faceSize/samples/lightMode + SH9 floats。
+- `CORNELL_PROBE_CACHE=0` 可禁用；缓存不匹配/损坏则回退重烘。
+- 实测：first run bake ~22.6s（受负载影响；此前约 9.7s），第二次 cache hit **0.6ms**。
+- 缓存落 `.local/`，不进版本库；生产应离线烘到 `assets/` 并随资产加载。
+
+## 2026-11-20 — 探针改“只烘间接光” + SH9 空间平滑
+
+- CPU bake 的 `radiance` 增加 `indirectOnly`：探针烘焙在首个漫反射命中跳过直接光，
+  只累计后续弹射；运行时 RT shader 保留直接光，再加探针间接（`albedo/π × E`）。
+- 烘焙后对 SH9 做 3×3×3 盒式平滑，压掉逐探针烘焙噪声（块状色斑消失，画面变软）。
+- 结果：`CORNELL_PROBES=1` 的 point 画面干净、直接光保留；7200 探针/8×8×16 约 9.7s。
+- 默认路径（无 `CORNELL_PROBES`）不受影响；`CORNELL_PROBES_CONST=1` 仅调试用。
+
+## 2026-11-20 — 探针烘焙 2a+2b 原型（CPU bake + SSBO + RT shader 采样）
+
+- 新增 `cornellProbeBake.*`：逐探针 6 面 CPU 路径追踪 + `shProjectCubemap` 投 SH9；
+  网格 20×18×20（0.275m）、8×8 面、16spp，7200 探针约 11s。
+- `gpuRtUploadProbes`：SH9 上传为 SSBO（7200×36 float）+ 48B probe UBO；
+  两个 history descriptor set 都写 binding 11/12。
+- `gn_cornell_rt.comp` / `gn_cornell_rq.comp`：首个漫反射命中查探针 SH9，
+  加 `albedo/π × E` 后跳过第 2/3 次弹射；金属保留 1 次反射。
+- 开关 `CORNELL_PROBES=1`，默认关闭；llvmpipe 下 bake/upload/渲染通过。
+- 质量警告：当前 7200 探针画面偏软、有块状色斑；SH9 低频 + 全量烘焙直接光 + 探针采样
+  噪声，尚未达到游戏级；后续走 DDGI/深度权重/离线缓存。启动 bake 11s 仅实验用。
+
+## 2026-11-20 — 光追预览时域重投影 + history（移动档去麻点）
+
+按“游戏式”方案给 Cornell RT 预览加了相机-only 时域重投影：
+
+- RT shader 输出主命中点，按上一帧相机基重投影到上一帧屏幕；双 history 缓冲
+  （color vec4 + depth float，ping-pong）与 2 个 descriptor set。
+- 时域混合：静止 `alpha=1/(count+1)` 累积（到 1024 停）；移动 `alpha=0.15`；
+  用主命中深度拒绝 disocclusion；首帧/换光照 history 无效则 `alpha=1`。
+- 移动档样本数 4→16（HW RT 4→8）；llvmpipe 实测移动画面不再有 4spp 麻点，
+  静止仍累积到 1024，`rt` 仍 ~0.1ms、readback/upload ~0.1ms。
+- 测试入口：`CORNELL_AUTO_MOVE=1`（每帧转一点相机）、`CORNELL_HW_RT=1`
+  （配合 `CORNELL_RT_CAPTURE` 抓 HW 路径）。
+- 验证：`make shaders` 45/0；`make cornellBox`；llvmpipe 静止/移动/HW 三组窗口截图；
+  无真机 GPU 移动档 FPS 实测。
+
+## 2026-11-20 — 相机静止判定 epsilon + host cached 内存（readback/upload 3ms → ~0.15ms）
+
+真机 profile：`frame=16.00ms fps=62.5 rt=3.19ms (readback=3.00) upload=3.08ms spp=6 accum=4`。
+两个问题：
+
+- **accum=4**：`cameraChanged` 用 `memcmp` 精确比较，相机静止时 cCAMERA 每帧重算的浮点末位抖动
+  被误判为移动，累积永远 reset。改为逐分量 epsilon（1e-5）。
+- **readback/upload ~3ms**：1MB host-visible buffer 未优先 `HOST_CACHED`。`createVkBuffer`
+  与 `CreateBuf` 增加 `preferCached`，RT 输出缓冲与上传 staging 使用 cached 内存。
+
+llvmpipe 复测（point/静止）：
+`rt=0.12ms (readback=0.15) upload=0.14ms spp=16 accum=932` → `accum=1028` 后
+`rt=0 upload=0`（收敛停止），`frame=16.00ms/fps=62.5` 仍是 FIFO 上限。
+真机需用 `GN_VSYNC=0` 复测 present mode 与 readback/upload；cached 内存在独显上可能改变
+GPU 写 host 内存的代价，需以真机数据为准。
+
+## 2026-11-20 — 无 GPU 会话下的运行时验证入口（llvmpipe + Wayland 截图）
+
+- `tests/cornellBox` 新增测试用环境变量：
+  - `CORNELL_RT_CAPTURE=1`：启动即进 GPU RT 预览，第 8 帧 F12 截图，第 12 帧退出；
+  - `CORNELL_RT_HOLD=1`：截图后不退出，供外部 `grim` 抓窗口；
+  - `CORNELL_LIGHT=point`：启动即切 point 光照（默认 sun）。
+- 用 `.local/probes/lvp_icd.json`（Mesa llvmpipe）实际跑通：
+  `swapchain format=50 (sRGB)`、point 模式窗口曝光正常（不再纯白）、HUD 可读、
+  `DataFill` 持久缓存下纹理显示正常；llvmpipe 只提供 `FIFO`，不能代表真机 FPS/upload。
+- 验证命令见 `docs/CORNELL_RT_EXPOSURE_FIX.md` §9。
+
+## 2026-11-20 — `DataFill` 持久上传缓存（去掉每调用 Vulkan 对象分配）
+
+- 新增 `src/graphics/_Vulkan/vkImageUpload.cpp`：复用一条 host-visible staging buffer、
+  一个专用 command pool / command buffer / fence；`BeginImageUpload` 返回映射写指针，
+  `EndImageUpload` 记录 layout barrier + copy + submit + wait。
+- `sIMAGE::DataFill` 的子区域更新与首次创建两条路径都改用它，去掉每次调用的
+  `CreateBuf` / `vkAllocateCommandBuffers` / `vkCreateFence` / `vkDestroy*`；同步语义与
+  `UNDEFINED/SHADER_READ_ONLY → TRANSFER_DST → SHADER_READ_ONLY` 的 layout 转换不变。
+- `GN_VkShutdown` 调用 `DestroyImageUploadCache`（在 `vkDeviceWaitIdle` 之后）。
+- 验证：`make -j8` / `make cornellBox` / `make unit`（396/0）/ lint 0；本会话无 GPU，
+  上传耗时未实测，预期减少的是驱动对象分配开销，不是 copy 带宽。
+
+## 2026-11-20 — `GN_VSYNC=0` 交换链 present mode 测量开关
+
+- `vkDevice.cpp` 新增 `ChoosePresentMode`：缺省/`GN_VSYNC=1` 仍为 `FIFO`；`GN_VSYNC=0` 优先
+  `IMMEDIATE`（真正不锁刷新率，可能撕裂），不支持时退回 `MAILBOX`，再退回 `FIFO`。
+- 两处交换链创建（初始化 / resize）都走该函数，并在启动日志打印 `present mode=N`。
+- 目的：先确认 60fps 是否是 FIFO 上限，再决定是否投入上传/光追优化。
+- 验证：`make -j8` 通过；`lintCodeModularity`（GN_Vk.cpp / vkDevice.cpp / vkInternal.h）0 违规；
+  本会话无 GPU，未实测 present mode 支持情况。
 
 ## 2026-11-20 — imo_chan 单角色场景程序（glTF 资产 + CPU 蒙皮烘焙）
 
@@ -181,6 +345,53 @@
   便于在整机死机前定位卡点（此前只提示「启动即桌面退出」，无法区分引擎初始化/贴图上传/首帧/present）。
 - 背景：真机运行 `./build/imoScene` 出现桌面退出/死机，本机无 `/dev/dri` 无法复现；已暂停任何窗口启动，
   只保留编译与 `IMO_SCENE_INSPECT` 自检验证。
+
+## 2026-11-20 — Cornell 点光过曝 / RT 图像二次 sRGB 编码修复
+
+针对 HW RT 预览截图（point 模式）的过曝与 HUD 低对比度：
+
+- **点光强度 14 → 3**：`tests/cornellBox/cornellCpuRt.cpp`、`assets/shaders/gn_cornell_rt.comp`、`assets/shaders/gn_cornell_rq.comp`、`tests/cornellBox/cornellScene.cpp` 四路一致。CPU 参考（pose 0, 640×400, 8 spp）均值从 236 降到 194，与 sun 模式（197）一致；金属球在 CPU 参考里是正常的镜面反射（红/绿墙 + 白色高光），不是几何缺陷。
+- **RT 图像 sRGB 上传**：`sIMAGE` 增加 `vkSrgb`；`DataFill` / `CreateEmptyToData` 在交换链为 sRGB 时用 `VK_FORMAT_R8G8B8A8_SRGB` 创建 RT 图像。2D 采样由硬件解码为线性，再输出到 sRGB 交换链，避免「gamma 字节 → UNORM 采样 → sRGB 再编码」的二次编码；非 sRGB 交换链保持 UNORM 直通。`GN_VkSwapchainIsSrgb()` 暴露格式判断。
+- **HUD 对比度**：`cornellHud.cpp` 每行加深色阴影再画主色，过曝/浅色背景下仍可读。
+- 验证：`make shaders` 45 个 0 错误；`make -j8` 重建 `libGN_mini.so`；`make cornellBox` / `cornellGpuRtProbe` / `cornellHwRtProbe` 通过；`lintCodeModularity`（改动文件）0 违规。本会话无 GPU，窗口效果未实测；以 CPU 参考 PNG 与静态格式检查为准。
+
+## 2026-11-20 — Cornell Box 光追预览 Stage 0/1：帧统计、自适应 spp、收敛即停、单帧重叠
+
+范围仅 `tests/cornellBox/`，不改引擎与 shader。
+
+- `cornellGpuRt` 增加 `sGpuRtStats`（submit / wait / readback / 累积样本 / 帧序号）、`gpuRtCameraMoved`、`gpuRtCollect` / `gpuRtSubmit`。交互路径改为 collect（等上一帧）→ 上传纹理 → submit（本帧），不再提交后立刻 fence 等待；同步 `renderGpuRt` 保留给一次性自检。
+- 自适应样本：相机移动 4 spp、静止 16 spp；静止累积到 `CORNELL_RT_TARGET`（默认 1024）后停止 dispatch 与回读。
+- 只有新帧序号才 `DataFill`；收敛后不再每帧上传 640×400 纹理。
+- HUD 增加 FPS / 帧时间 / RT 等待 / 上传 / spp；`CORNELL_PROFILE=1` 每 60 帧打印平均耗时与累积样本。
+- 验证：`make cornellBox`、`make cornellGpuRtProbe`、`make cornellHwRtProbe` 编译通过；`cornellGpuRtProbe` 无设备时 SKIP；`lintCodeModularity`（tests/cornellBox）0 违规。本会话无 GPU，FPS 未实测。
+
+## 2026-11-03（晚） — 着色器审计后的 P0/P1 修复：SSGI 参数链、默认法线、TBN、sRGB、SSGI/SSR/PCSS
+
+依据 `docs/SHADER_AUDIT_2026-11-03.md` 的 Phase 0/1 与低风险 P2 实施；不改变公开函数/管线接口。`sPOST_UBO` 的保留字段新增 `srgbEncode` 别名（旧名 `pad1` 仍可编译）。
+
+**P0**
+- **SSGI 参数链**：`GN_VkSetSsgiStrength` 现在同时写 GI UBO `envParams[3]`（pass 开关/合成权重）与 `sSSGI_UBO.params[0]`（shader 开关位）；此前 shader 永远 early-out 输出黑色，开启 SSGI 反而用黑色 `mix` 掉 SH9 漫反射。
+  `src/graphics/_Vulkan/vkGi.cpp`、`vkSsgi.cpp`、`vkInternal.h`。
+- **默认法线**：`gn3d_gbuffer.frag` / `gn3d_pbr.frag` 把纯白 `(1,1,1)` normal 采样视为“无 normal map”（默认 1×1 白图不再被解码成 45° 伪法线）。
+- **TBN 退化**：`gn3d_gbuffer.vert` / `gn3d_pbr.vert` 改为“先投影、再检查退化”，零切线/切线∥法线/零法线都有回退，不再产生 NaN；顺带对零法线兜底。
+
+**P1 / 低风险 P2**
+- 交换链优先选择 8-bit sRGB 格式；非 sRGB 格式由 `gn3d_composite.frag` 的 `srgbEncode` 分支显式做精确 sRGB 编码，`sPOST_UBO.pad1` 改为 `srgbEncode`（`GN_Vk.cpp`、`vkPostProcess.cpp`、`postParams.*`）。
+- 法线改用逆转置矩阵（`gn3d_gbuffer.vert` / `gn3d_pbr.vert` / `gn3d.vert` / `gn3d_skinned*.vert`）；均匀/非均匀缩放都正确。
+- SSGI 的 G-Buffer 深度/法线/albedo 改用独立 NEAREST sampler（半分辨率 pass 不再跨边缘线性混合）。
+- SSR：`textureLod` 替换循环内 `texture`；`roughness >= 0.6` 早退；命中色 `/π`。
+- PCSS：前向 PBR 在 `NdotL <= 0` 时于阴影之前早退；延迟路径因保留 wrap diffuse 不做该早退；点/聚光使用 `attenuation.w` range 早退；PCSS 采样从 16 blocker + 16 PCF 降为 **12 + 8**（待真机 A/B，噪点明显时升回 12/12）。
+- SSGI 的 `params.y` 现在真正控制步数（1..16，默认 8），不再被忽略；为后续半分辨率降步数/时域调参留出口。
+- 天空盒反向 `smoothstep` 改为等价的正向写法；云块 slab 求交对轴对齐射线做 0 分量保护；sky-view compute 用 `textureLod`。
+- `GN_VkReadBack` 按 swapchain 格式读取：RGBA16F 走 half→8-bit 量化，B8G8R8A8 交换链重排为 RGBA；不再固定 4 B/px 截断/错色。
+- PBR 片元把 albedo/normal 采样提到 `discard` 之前并缓存，消除 discard 后的隐式 LOD 未定义与重复采样。
+- 延迟光照 LightUBO 描述符 range 1024→`sizeof(sLIGHT_UBO)`（976），消除越界描述符。
+
+**验证**
+- `make shaders`：45 个；`spirv-val`：45/45。
+- `make unit` / `./build/unit_tests`：396 cases / 0 failed。
+- `lintCodeModularity`（改动文件）：0 违规 / 0 告警。
+- 本会话无 GPU（`/dev/dri` 不存在），`gpuCheck` 与桌面画质复验未执行。Phase 2 中 PCSS 降 tap/SSGI 步数参数/readback 已落地；SSGI 时域、探针/AP 降采样、G-Buffer 打包与 Phase 3 ray-query 仍按审计报告后续推进。
 
 ## 2026-11-01（日·晚） — 云改为独立立方体云块；删除两条旧云路径；雾/降水缺陷修复
 

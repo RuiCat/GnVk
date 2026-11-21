@@ -174,7 +174,7 @@ void rebuildLights(int lightMode) {
         const GNg::sVEC3 pointPos = {ROOM_WIDTH * 0.5f, ROOM_HEIGHT - 0.2f,
                                      ROOM_DEPTH * 0.5f};
         const GNg::sVEC3 pointColor = {1.0f, 0.95f, 0.9f};
-        gLight->AddPoint(pointPos, 9.0f, pointColor, 14.0f);
+        gLight->AddPoint(pointPos, 9.0f, pointColor, 3.0f);
     }
 }
 

@@ -5,6 +5,7 @@
 #include "GN_Vk.h"
 #include "vkInternal.h"
 #include "giParams.h"
+#include "GN_Environment.h"
 
 #include <cstdio>
 #include <cstring>
@@ -12,6 +13,10 @@
 
 namespace GNg {
 namespace {
+
+// G1b：烘焙得到的 GI UBO 快照（SKY 预设恢复用）。
+GN3d::sGI_UBO sBakedGiUbo;
+bool sHasBakedGiUbo = false;
 
 // 烘焙分辨率：128²×6。任务允许降到 64² 以省启动时间；先按 128 实现并在风险里登记
 // CPU 预滤波（约 25M 次重要性采样）可能拖慢启动。mip 级数与 giParams 默认 envParams 一致。
@@ -634,6 +639,8 @@ bool createGiUbo(const float sh[GN3d::SH9_FLOAT_COUNT]) {
     GN3d::sGI_UBO ubo = GN3d::makeDefaultGiUbo();
     memcpy(ubo.sh, sh, sizeof(ubo.sh));
     ubo.envParams[1] = (float)ENV_MIP_COUNT; // 预滤波 mip 数
+    sBakedGiUbo = ubo;
+    sHasBakedGiUbo = true;
     void *mapped = nullptr;
     vkMapMemory(GN_Vk.device, GN_Vk.giUBOMemory, 0, sizeof(GN3d::sGI_UBO), 0, &mapped);
     memcpy(mapped, &ubo, sizeof(ubo));
@@ -810,6 +817,20 @@ void GN_VkSetGI(const GN3d::sGI_UBO &ubo) {
         memcpy(mapped, &ubo, sizeof(ubo));
         vkUnmapMemory(GN_Vk.device, GN_Vk.giUBOMemory);
     }
+}
+
+// G1b：引擎侧环境光照预设。INDOOR 写均匀暖灰 SH9（室内不让天空 IBL 洗蓝）；
+// SKY 恢复烘焙环境（未烘过则保留当前值）。GI UBO 不存在时由 GN_VkSetGI 静默忽略。
+void GN_VkSetEnvironmentLighting(GN3d::eENV_LIGHTING mode, float ambientScale) {
+    if(mode == GN3d::eENV_LIGHTING_INDOOR_UNIFORM) {
+        GN3d::sGI_UBO ubo;
+        if(!GN3d::buildEnvironmentGi(mode, ambientScale, &ubo)) return;
+        GN_VkEnableGI(true);
+        GN_VkSetGI(ubo);
+        return;
+    }
+    GN_VkEnableGI(true);
+    if(sHasBakedGiUbo) GN_VkSetGI(sBakedGiUbo);
 }
 
 } // namespace GNg

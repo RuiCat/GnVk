@@ -209,6 +209,8 @@ GN_SYS_API void GN_StrToSysCode(char *out, const char *in);
 
 //把字符串表示的文件路径按打开模式来转为文件系统适用的文件路径(用来装输出文件路径的数组[size:384+], 原文件路径, 打开模式, 原文件路径是否已经是全局路径) !!因为某些操作系统下有磁盘访问限制或要求必须使用全局路径访问等问题存在 该函数用于正确的把原文件路径跳转为对应的能访问的文件路径
 GN_SYS_API void GN_StrToSysFilePath(char des[], const char *src, const char *open_mode, bool is_g_dir);
+// 带容量上限版本：结果最多写 cap-1 字节并补 NUL（cap<=0 不写）。
+GN_SYS_API void GN_StrToSysFilePath_s(char des[], int cap, const char *src, const char *open_mode, bool is_g_dir);
 
 //把指定的字符串转为文件系统所用的编码字符串(临时处理缓冲, 字符串)返回转好的字符串指针 当系统无需转换直接返回原字符串指针 否则返回的是临时处理缓冲
 GN_SYS_API char *GN_StrToSysCode2(char *buf /*[384]*/, const char *in);
@@ -251,9 +253,11 @@ GN_SYS_API void GF_AppCurPathChange(char *app_path, char *doc_path = 0);
 
 //获得正在运行应用程序当前工作目录(目录输出) 返回目录字符串长度
 GN_SYS_API int GT_GetAppCurPath(char dir_out[] /*[256]*/);
+GN_SYS_API int GT_GetAppCurPath_s(char *dir_out, int cap); //带容量上限版本
 
 //获得正在运行的应用程序全局路径文件名(全局路径文件名输出) 返回目录字符串长度
 GN_SYS_API void GT_GetAppFileName(char name_out[] /*[256]*/);
+GN_SYS_API void GT_GetAppFileName_s(char *name_out, int cap); //带容量上限版本
 
 //列举系统的几个常用目录() 返回目录指针列表
 GN_SYS_API P<P<char>> GT_EnumSystemDirectory();
@@ -402,6 +406,7 @@ GN_SYS_API void GN_SysProc(unsigned int nTime); //挂起处理系统相关的一
 
 GN_SYS_API char *const GN_GetInerfaceInfoSys(); //获得系统模块信息 如: "Windows 7" , "Mac OS X 10.5" , "Linux" , "WinCE 6" , "Android 2.3" , "IOS 4" , ...等
 GN_SYS_API void GN_GetDeviceInfoCpu(char *info /*[64]*/); //获得硬件CPU厂商型号主频信息(信息输出缓冲 需先分配好空间)
+GN_SYS_API void GN_GetDeviceInfoCpu_s(char *info, int cap); //带容量上限版本
 GN_SYS_API void GN_GetDeviceInfoRam(char *info /*[64]*/); //获得硬件内存大小信息(信息输出缓冲 需先分配好空间)
 
 #endif //endif _GN_SYS_H_

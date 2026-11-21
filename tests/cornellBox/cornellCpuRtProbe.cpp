@@ -75,5 +75,25 @@ int main() {
         std::fprintf(stderr, "[cornellRtProbe] 图像几乎全黑\n");
         return 1;
     }
+
+    // 回归：point 模式过曝。intensity=14 时 pose 2 的均值约 225；intensity=3 约 176。
+    // 阈值 205 能抓住“把点光强度调回去/调大”的回归，同时不依赖 GPU。
+    std::vector<unsigned char> pointRgba;
+    if (!Cornell::renderCpuRt(320, 200, eye, fwd, right, up, 45.0f, 1, &pointRgba)) {
+        std::fprintf(stderr, "[cornellRtProbe] point renderCpuRt 失败\n");
+        return 1;
+    }
+    double pointSum = 0.0;
+    for (int i = 0; i < pixels; ++i) {
+        const unsigned char *p = &pointRgba[static_cast<size_t>(i) * 4u];
+        pointSum += p[0] + p[1] + p[2];
+    }
+    const double pointMean = pointSum / (static_cast<double>(pixels) * 3.0);
+    std::printf("[cornellRtProbe] point mean=%.1f (阈值 205)\n", pointMean);
+    Cornell::writeRgbPng(".local/cornellbox/cpu-rt-probe-point.png", pointRgba, 320, 200);
+    if (pointMean > 205.0) {
+        std::fprintf(stderr, "[cornellRtProbe] point 模式过曝：mean=%.1f > 205\n", pointMean);
+        return 1;
+    }
     return 0;
 }

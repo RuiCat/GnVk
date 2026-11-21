@@ -90,6 +90,8 @@ GN_API unsigned int GN_StrUnSplit(char *str_out, const char **strs, unsigned int
 
 //把多个字符串连成一个(装填连好的字符串 需预先分配好空间, 多个字符串的数组, 连接添加到字符串间的分隔符)返回连好的字符串长度
 GN_API unsigned int GN_StrUnSplit(char *str_out, const P<P<char>> &strs, char split_key = ' ');
+// 带容量上限的拼接：最多写 cap-1 字节并补 NUL，返回写入字节数（不含 NUL）。
+GN_API unsigned int GN_StrUnSplit_s(char *dst, int cap, const char **strs, unsigned int strn, char split_key = ' ');
 
 //获得字符串所表示的数组里的各个数据(接收数据的数组指针 必需先分配好足够空间 至少一个, 单个数据大小字节, 字符串, 提取数据的格式符 类似C函数scanf的"%d"等, 数据分格符, 默认值指针 用于填补某个数据获取失败)返回获取数 如果有指定默认值必定会返回完整的获取数 反之获取数有可能因格式不对失败而变少了
 GN_API unsigned int GN_StrGetArray(uint8 *p_data, unsigned int em_size, const char *str, const char *fmt = "%d", char split_key = ',', uint8 *p_default = 0);
@@ -114,6 +116,8 @@ GN_API P<P<char>> GN_StrExtractToData(const char *str, char key = '<', char key2
 
 //从多项名的字符串中提取出指定序号的名(用于装填提取内容的字符缓冲 需分配好大于各个项名的长度, 多项名的字符串如"name0,name1,name2", 需提取名的序号, 分隔符) !如果 id 索取超出项名数则会返回最后一项
 GN_API void GN_StrExtractFromMultiItem(char str_out[], char *str, int id, char key = ',');
+// 带容量上限的取段：返回写入字节数（不含 NUL）；非法输入或段不存在返回 -1。
+GN_API int GN_StrExtractFromMultiItem_s(char *dst, int cap, const char *str, int id, char key = ',');
 
 //查找字符串里有没有指定的名称(名称, 字符串, 分割符)
 GN_API bool GN_StrHasName(const char *name, const char *str, char split_key = ' ');
@@ -168,6 +172,10 @@ GN_API inline bool GN_StrGetSegment(const char *str, char start_key, char end_ke
 GN_API inline char *GN_StrCopySegmentToData(const char *str, char start_key, char end_key, int *size_out);
 
 //从字符串中删除多段含指定内容的段落( 字符串的地址, 段分隔符, 删除段中包含的字符串, 最多删除多少段, 是否只扫描每段的首部作比较) 返回共删除了多少段 返回0表示没找到符合条件的段  返回-1表示内容已经全清了
+// 带容量上限的安全拷贝：最多写 cap-1 字节并补 NUL；cap<=0 或 dst 为空返回 0 不写。
+// 返回实际写入的字符数；src 为空时写入空串。用于把用户输入/路径拷进固定缓冲的调用点。
+GN_API int GN_StrCopyToLimit(char *dst, int cap, const char *src);
+
 GN_API int GN_StrRemoveSegment(char *str_in_out, char split_key, const char *include_str, int sn = 1, bool check_first = true);
 
 //在字符串指定位置或连续空段中插入子字符串(指向字符串的指针 插入后如字符串增长了 该指针将指向新的字符串, 子字符串, 插入位置偏移 当值小与0时 就自动查找到空段里插入 值-1:空段里靠前 -2:靠后 -3:居中, 连续空段的标记字符)

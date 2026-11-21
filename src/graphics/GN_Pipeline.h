@@ -32,6 +32,15 @@ enum ePIPELINE_BLEND {
     eBLEND_MULTIPLY = 3 // 乘法混合
 };
 
+// 管线键版本：绑定契约/描述语义变更时递增；进缓存键，避免旧键误命中。
+const uint32_t kPipelineKeyVersion = 2;
+
+// SPIR-V 特殊化常量（v1 只支持 32 位标量；float 用位模式）。
+struct sPIPELINE_SPEC_CONST {
+    uint32_t aId;
+    uint32_t aValue;
+};
+
 // 单 binding 交错顶点属性；location 与着色器 layout(location=?) 对应
 struct sVERTEX_ATTR {
     uint32_t aLocation;
@@ -106,6 +115,12 @@ struct sPIPELINE_DESC {
     VkBlendFactor aBlendSrcAlpha;
     VkBlendFactor aBlendDstAlpha;
 
+    // 特殊化常量：只影响管线创建，必须进缓存键。
+    uint32_t aSpecCount;
+    sPIPELINE_SPEC_CONST aSpec[8];
+    // 键版本（必须非 0）；与 kPipelineKeyVersion 不同的旧键不再命中。
+    uint32_t aKeyVersion;
+
     sPIPELINE_DESC(); // 默认：图形管线 + 深度测试 + 背面剔除 + 无混合 + 三角形列表 + 动态 viewport/scissor
 };
 
@@ -139,6 +154,11 @@ class cPIPELINE_CACHE {
     // 管线生命周期归缓存所有，须在 VkDevice 销毁前 Release/析构。
     VkPipeline GetOrCreate(const sPIPELINE_DESC &desc, bool *created = 0);
 
+    // 帧号用于按帧回收；GetOrCreate 命中/新建都会刷新 aLastUsedFrame。
+    void SetFrame(uint64_t frame);
+    // 销毁 lastUsed + keepFrames < currentFrame 的管线；调用方须在帧边界且已 wait fence。
+    uint32_t CollectGarbage(uint64_t currentFrame, uint32_t keepFrames);
+
     uint32_t GetCount() const { return (uint32_t)aEntries.size(); }
     uint64_t GetHitCount() const { return aHits; }
     uint64_t GetMissCount() const { return aMisses; }
@@ -148,6 +168,7 @@ class cPIPELINE_CACHE {
     struct sENTRY {
         uint64_t aKey;
         VkPipeline aPipeline;
+        uint64_t aLastUsedFrame;
     };
 
     std::vector<sENTRY> aEntries;
@@ -155,6 +176,7 @@ class cPIPELINE_CACHE {
     VkDevice aDevice;
     uint64_t aHits;
     uint64_t aMisses;
+    uint64_t aCurrentFrame;
     const char *aLastError;
 };
 

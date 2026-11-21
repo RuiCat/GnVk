@@ -30,25 +30,36 @@ layout(location = 1) out vec3 fragNormal;     // 世界空间法线
 layout(location = 2) out vec2 fragUV;         // 纹理坐标
 layout(location = 3) out mat3 fragTBN;        // TBN 矩阵 (切线空间→世界空间)
 
+// 非均匀缩放必须用逆转置矩阵变换法线；det≈0 时退回单位矩阵，避免 inverse(0) 产生 NaN。
+mat3 normalMatrix(mat4 model) {
+    mat3 linear = mat3(model);
+    float det = determinant(linear);
+    return abs(det) > 1.0e-8 ? transpose(inverse(linear)) : mat3(1.0);
+}
+
 void main() {
     // ── 世界空间变换 ─────────────────────────────────
     vec4 worldPos = pc.model * vec4(inPos, 1.0);
     gl_Position = scene.viewProj * worldPos;     // 裁剪空间
     fragWorldPos = worldPos.xyz;
 
-    // ── 世界空间法线 (mat3 变换, 正确处理非均匀缩放) ──
-    vec3 N = normalize(mat3(pc.model) * inNormal);
+    // ── 世界空间法线（逆转置，正确处理非均匀缩放）────
+    vec3 N = normalMatrix(pc.model) * inNormal;
+    if (dot(N, N) < 1.0e-12) N = vec3(0.0, 0.0, 1.0);
+    N = normalize(N);
     fragNormal = N;
 
     // ── TBN 矩阵 (Gram-Schmidt 正交化) ───────────────
-    // 用于片元着色器中法线贴图的切线空间→世界空间变换
+    // 用于片元着色器中法线贴图的切线空间→世界空间变换。
+    // 注意：回退必须放在“投影之后”。原始切线与 N 平行时，投影结果同样为零，
+    // 只检查原始切线（旧实现）仍会在 normalize(0) 处产生 NaN。
     vec3 T = mat3(pc.model) * inTangent;
-    // 程序化网格可能没有切线（inTangent=0）：normalize(0) 会得到 NaN，污染 TBN 与法线。
-    // 此时任取一个不平行于 N 的轴，再 Gram-Schmidt 正交化。
+    T -= N * dot(T, N);
     if (dot(T, T) < 1.0e-8) {
-        T = abs(N.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        vec3 axis = abs(N.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        T = cross(axis, N);
     }
-    T = normalize(T - dot(T, N) * N);   // 确保 T ⊥ N
+    T = normalize(T);
     vec3 B = cross(N, T);               // 副法线
     fragTBN = mat3(T, B, N);            // 列主序: [T, B, N]
 

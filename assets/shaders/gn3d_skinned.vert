@@ -35,6 +35,13 @@ layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec2 fragUv;
 layout(location = 2) out vec3 fragWorldPos;
 
+// 非均匀缩放必须用逆转置矩阵变换法线；det≈0 时退回单位矩阵。
+mat3 normalMatrix(mat4 model) {
+    mat3 linear = mat3(model);
+    float det = determinant(linear);
+    return abs(det) > 1.0e-8 ? transpose(inverse(linear)) : mat3(1.0);
+}
+
 void main() {
     vec3 skinnedPosition = vec3(0.0);
     vec3 skinnedNormal = vec3(0.0);
@@ -51,15 +58,20 @@ void main() {
     }
 
     vec3 localPosition = inPos;
-    vec3 localNormal = normalize(inNormal);
+    vec3 localNormal = inNormal;
+    if(dot(localNormal, localNormal) < 1.0e-12) localNormal = vec3(0.0, 0.0, 1.0);
+    localNormal = normalize(localNormal);
     if(weightSum > 1e-6) {
         localPosition = skinnedPosition / weightSum;
-        localNormal = normalize(skinnedNormal);
+        // 权重和为 0 或各关节法线互相抵消时保持原法线，避免 normalize(0)=NaN。
+        if(dot(skinnedNormal, skinnedNormal) > 1.0e-12) localNormal = normalize(skinnedNormal);
     }
 
     vec4 worldPosition = pc.model * vec4(localPosition, 1.0);
     gl_Position = scene.viewProj * worldPosition;
     fragWorldPos = worldPosition.xyz;
-    fragNormal = normalize(mat3(pc.model) * localNormal);
+    vec3 n = normalMatrix(pc.model) * localNormal;
+    if(dot(n, n) < 1.0e-12) n = vec3(0.0, 0.0, 1.0);
+    fragNormal = normalize(n);
     fragUv = inUv;
 }

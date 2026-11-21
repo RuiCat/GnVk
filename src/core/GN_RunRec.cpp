@@ -685,13 +685,12 @@ void GT_cRUN_REC::DrawFrame(int x, int y, int w, int h, unsigned int color) {
 static void GT_TextRecCopyToBuf255(GNg::sTEXT_SET *_tod, char *text, unsigned short count) {
     _tod->count = count;
     if(!count) count = strlen(text);
-    if(_tod->text) {
-        if(count > 255) {
-            GN_DeleteArray(_tod->text);
-            _tod->text = new char[count + 1];
-        }
-    } else _tod->text = new char[(count > 255 ? count : 255) + 1];
-    strcpy(_tod->text, text);
+    // 加固（STRCPY 审计）：按 max(count,255)+1 精确分配并限量拷贝。原实现复用旧缓冲，
+    // 旧缓冲可能小于替换文本长度，随后 strcpy 整条 text 会越界。
+    const int cap = (int)(count > 255 ? count : 255) + 1;
+    GN_DeleteArray(_tod->text);
+    _tod->text = new char[cap];
+    GN_StrCopyToLimit(_tod->text, cap, text);
     _tod->text[count] = 0;
 }
 void GT_cRUN_REC::OutText(char *text, unsigned short count, int x, int y, int w, int h, unsigned int color, unsigned short blendmode, int text_offset_x, int text_offset_y) {

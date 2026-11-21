@@ -474,8 +474,11 @@ GN_API int GNf::FindFileDirInfoData(const char *path, bool g_dir, GN::sLIST<P<sF
     if(g_dir) {
         int g_len = (int)(GN_StrGetFileName(path) - path);
         do { //把所有文件指针都先保存到连表中
-            strncpy(p_file->global_filename, path, g_len);
-            strcpy(p_file->global_filename + g_len, p_file->name);
+            // 加固（STRCPY 审计）：global_filename 固定 384 字节；超长路径退化为只存文件名，避免写穿。
+            if(g_len + (int)strlen(p_file->name) + 1 <= (int)sizeof(p_file->global_filename)) {
+                strncpy(p_file->global_filename, path, g_len);
+                strcpy(p_file->global_filename + g_len, p_file->name);
+            } else GN_StrCopyToLimit(p_file->global_filename, (int)sizeof(p_file->global_filename), p_file->name);
             if(p_file->attrib & _A_SUBDIR) dirs_out->push_back(p_file);
             else files_out->push_back(p_file);
             p_file.New(1);
@@ -495,6 +498,8 @@ GN_API int GNf::FindFile_Num(const char *filename_, void *ph) {
     char t_path_name[384], tmp_buf[384];
     char *_fname = GN_StrGetFileName(filename_);
     unsigned int len = _fname - filename_;
+    // 加固（STRCPY 审计）：目录段 + "/*.*" 必须装进 tmp_buf[384]，超长直接失败。
+    if(len + 4 > sizeof(tmp_buf)) return -1;
     strncpy(tmp_buf, filename_, len);
     strcpy(tmp_buf + len, "*.*");
     len = strlen(_fname);

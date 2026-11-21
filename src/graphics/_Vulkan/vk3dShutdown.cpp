@@ -19,33 +19,40 @@ namespace {
 // 3D 动态缓冲扩容时，旧缓冲可能仍被“当前帧已录制的命令”引用；
 // 立即 vkDestroyBuffer/vkFreeMemory 会让 GPU 在提交后读到已释放的显存
 // （实测表现为 imoScene 首帧 gfx ring 页错误 → GPU reset → 合成器崩溃）。
-// 因此旧缓冲先进入退休表，并在后续 3D pass 里延迟释放。
+// 因此旧缓冲先进入退休表，并且只在 GN_VkBeginFrame 的 vkWaitForFences 之后
+// （上一帧提交已全部完成）释放；任何 3D pass 内都不释放。
+//
+// 旧实现按“pass 序号 +2 的余量”在 3D pass 开头释放：4 级 CSM 在同一个 command
+// buffer 里逐级 Begin/DrawShadow，第 1 级扩容退休的缓冲会被第 3/4 级的 Begin
+// 释放掉，而第 1 级已录制的 draw 仍引用它 ⇒ 同帧 UAF（真机 GPU 页错误）。
 struct sRETIRED_3D_BUFFER {
     VkBuffer aBuffer;
     VkDeviceMemory aMemory;
-    uint64_t aPassSerial;
+    uint64_t aRetireTick; // 退休时的帧同步点序号
 };
 
 std::vector<sRETIRED_3D_BUFFER> s_retired3DBuffers;
-uint64_t s_3DPassSerial = 0;
+uint64_t s_3DRetireTick = 0;
 } // namespace
 
-static void Retire3DBuffer(VkBuffer buffer, VkDeviceMemory memory) {
+static void retire3DBuffer(VkBuffer buffer, VkDeviceMemory memory) {
     if(buffer == VK_NULL_HANDLE && memory == VK_NULL_HANDLE) return;
     sRETIRED_3D_BUFFER entry;
     entry.aBuffer = buffer;
     entry.aMemory = memory;
-    entry.aPassSerial = s_3DPassSerial;
+    entry.aRetireTick = s_3DRetireTick;
     s_retired3DBuffers.push_back(entry);
 }
 
-void ReleaseRetired3DBuffers() {
-    ++s_3DPassSerial; // 新 pass 开始（上一帧已在 BeginFrame 的 fence 处完成）
+// 只在 GN_VkBeginFrame 的 vkWaitForFences 之后调用。
+// 释放上一帧（及更早）退休的缓冲；本帧退休的条目留到下一帧首，保证
+// “已录制但未完成”的命令永远不会读到已释放显存。
+void releaseRetired3DBuffers() {
+    ++s_3DRetireTick;
     size_t kept = 0;
     for(size_t i = 0; i < s_retired3DBuffers.size(); ++i) {
         const sRETIRED_3D_BUFFER &entry = s_retired3DBuffers[i];
-        // 多留一个 pass 的余量，覆盖“同一帧阴影 pass + 主 pass”两次退役的情况。
-        if(entry.aPassSerial + 2 < s_3DPassSerial) {
+        if(entry.aRetireTick < s_3DRetireTick) {
             if(entry.aBuffer != VK_NULL_HANDLE) {
                 vkDestroyBuffer(GN_Vk.device, entry.aBuffer, nullptr);
             }
@@ -66,7 +73,7 @@ void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize) {
     VkDeviceSize needIdx = s_idxOfs3D + idxSize;
     // 顶点缓冲
     if(needVtx > s_vtxCap3D) {
-        Retire3DBuffer(GN_Vk.vertexBuffer3D, GN_Vk.vertexMemory3D);
+        retire3DBuffer(GN_Vk.vertexBuffer3D, GN_Vk.vertexMemory3D);
         GN_Vk.vertexBuffer3D = VK_NULL_HANDLE;
         GN_Vk.vertexMemory3D = VK_NULL_HANDLE;
         // 按 2x 扩容减少重分配次数
@@ -78,7 +85,7 @@ void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize) {
     }
     // 索引缓冲
     if(needIdx > s_idxCap3D) {
-        Retire3DBuffer(GN_Vk.indexBuffer3D, GN_Vk.indexMemory3D);
+        retire3DBuffer(GN_Vk.indexBuffer3D, GN_Vk.indexMemory3D);
         GN_Vk.indexBuffer3D = VK_NULL_HANDLE;
         GN_Vk.indexMemory3D = VK_NULL_HANDLE;
         VkDeviceSize allocIdx = needIdx * 2;
@@ -170,6 +177,8 @@ void GN_VkShutdown3D() {
         vkDestroyDescriptorSetLayout(GN_Vk.device, GN_Vk.shadowDescriptorLayout, 0);
         GN_Vk.shadowDescriptorLayout = VK_NULL_HANDLE;
     }
+    // L3c：释放 4 级 shadow UBO 的常驻映射（必须先于 vkFreeMemory）。
+    releaseShadowCascadeUbo();
     if(GN_Vk.shadowUBOBuffer) {
         vkDestroyBuffer(GN_Vk.device, GN_Vk.shadowUBOBuffer, 0);
         GN_Vk.shadowUBOBuffer = VK_NULL_HANDLE;

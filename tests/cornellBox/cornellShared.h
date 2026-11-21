@@ -52,6 +52,14 @@ extern bool gCpuRtPreview;
 extern bool gGpuRtPreview;
 extern bool gHwRtPreview;
 
+// 帧统计（main.cpp 写入，HUD 读取）：FPS / 帧时间 / 光追等待 / 纹理上传 / 本帧样本。
+extern float gFps;
+extern float gFrameMs;
+extern float gRtWaitMs;
+extern float gUploadMs;
+extern int gRtSamples;
+extern unsigned int gRtAccum;
+
 void initHud();
 void releaseHud();
 void drawHud();

@@ -147,11 +147,13 @@ void writeSsgiDescriptors() {
     VkDescriptorBufferInfo ubo = {GN_Vk.ssgiUBOBuffer, 0, sizeof(GN3d::sSSGI_UBO)};
     VkDescriptorBufferInfo giUbo = {GN_Vk.giUBOBuffer, 0, sizeof(GN3d::sGI_UBO)};
     VkDescriptorBufferInfo lightUbo = {GN_Vk.lightBuffer3D, 0, sizeof(GN3d::sLIGHT_UBO)};
-    VkDescriptorImageInfo normal = {GN_Vk.ssgiSampler, GN_Vk.gNormalRoughView,
+    // G-Buffer 是全分辨率、SSGI 是半分辨率：深度/法线/albedo 必须 NEAREST，
+    // 否则半分辨率像素会跨物体边界线性混合深度，产生假命中/漏光。
+    VkDescriptorImageInfo normal = {GN_Vk.ssgiNearestSampler, GN_Vk.gNormalRoughView,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkDescriptorImageInfo depth = {GN_Vk.ssgiSampler, GN_Vk.gDepthView,
+    VkDescriptorImageInfo depth = {GN_Vk.ssgiNearestSampler, GN_Vk.gDepthView,
                                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
-    VkDescriptorImageInfo albedo = {GN_Vk.ssgiSampler, GN_Vk.gAlbedoMetalView,
+    VkDescriptorImageInfo albedo = {GN_Vk.ssgiNearestSampler, GN_Vk.gAlbedoMetalView,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorImageInfo raw = {GN_Vk.ssgiSampler, GN_Vk.ssgiRawView,
                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -277,13 +279,20 @@ bool createSsgiLayouts() {
            VK_SUCCESS;
 }
 
-bool createSsgiSampler() {
+bool createSsgiSamplerWithFilter(VkFilter filter, VkSampler *out) {
     VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-    sci.magFilter = VK_FILTER_LINEAR;
-    sci.minFilter = VK_FILTER_LINEAR;
+    sci.magFilter = filter;
+    sci.minFilter = filter;
+    sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    return vkCreateSampler(GN_Vk.device, &sci, 0, &GN_Vk.ssgiSampler) == VK_SUCCESS;
+    sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    return vkCreateSampler(GN_Vk.device, &sci, 0, out) == VK_SUCCESS;
+}
+
+bool createSsgiSampler() {
+    if(!createSsgiSamplerWithFilter(VK_FILTER_LINEAR, &GN_Vk.ssgiSampler)) return false;
+    return createSsgiSamplerWithFilter(VK_FILTER_NEAREST, &GN_Vk.ssgiNearestSampler);
 }
 
 bool createSsgiUbo() {
@@ -369,6 +378,7 @@ void destroy3DSsgi() {
     if(GN_Vk.ssgiUBOBuffer) vkDestroyBuffer(GN_Vk.device, GN_Vk.ssgiUBOBuffer, 0);
     if(GN_Vk.ssgiUBOMemory) vkFreeMemory(GN_Vk.device, GN_Vk.ssgiUBOMemory, 0);
     if(GN_Vk.ssgiSampler) vkDestroySampler(GN_Vk.device, GN_Vk.ssgiSampler, 0);
+    if(GN_Vk.ssgiNearestSampler) vkDestroySampler(GN_Vk.device, GN_Vk.ssgiNearestSampler, 0);
     GN_Vk.ssgiRenderPass = VK_NULL_HANDLE;
     GN_Vk.ssgiDenoiseRenderPass = VK_NULL_HANDLE;
     GN_Vk.ssgiPipelineLayout = VK_NULL_HANDLE;
@@ -380,6 +390,7 @@ void destroy3DSsgi() {
     GN_Vk.ssgiUBOBuffer = VK_NULL_HANDLE;
     GN_Vk.ssgiUBOMemory = VK_NULL_HANDLE;
     GN_Vk.ssgiSampler = VK_NULL_HANDLE;
+    GN_Vk.ssgiNearestSampler = VK_NULL_HANDLE;
 }
 
 void recreate3DSsgiTargets() {
@@ -406,6 +417,21 @@ bool isSsgiEnabled() {
         vkUnmapMemory(GN_Vk.device, GN_Vk.giUBOMemory);
     }
     return intensity > 0.0f;
+}
+
+// 把 SSGI shader 的开关位写进 sSSGI_UBO.params[0]（0=关，1=开）。
+// GI UBO.envParams.w 仍负责“是否执行 pass + 合成权重”；两份 UBO 必须在
+// GN_VkSetSsgiStrength 里同步，否则 shader 会永远 early-out。
+void setSsgiEnabled(float strength) {
+    if(GN_Vk.ssgiUBOMemory == VK_NULL_HANDLE) return;
+    const float enabled = (strength > 0.0f) ? 1.0f : 0.0f;
+    void *mapped = nullptr;
+    vkMapMemory(GN_Vk.device, GN_Vk.ssgiUBOMemory, 0, sizeof(GN3d::sSSGI_UBO), 0, &mapped);
+    if(mapped) {
+        GN3d::sSSGI_UBO *ubo = (GN3d::sSSGI_UBO *)mapped;
+        ubo->params[0] = enabled;
+        vkUnmapMemory(GN_Vk.device, GN_Vk.ssgiUBOMemory);
+    }
 }
 
 void updateSsgiUniforms(const sMAT44 &viewProj) {

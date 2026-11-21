@@ -153,6 +153,11 @@ void GNg::cVIEW2D::SaveToFile(const char *filename, short vx, short vy, short vw
     if(vy + vh > ViewCur->viewH) vh = ViewCur->viewH - vy
 
     char fn[384];
+    // 加固（STRCPY 审计）：留出 ".png" + NUL，避免超长文件名写穿 fn。
+    if(!filename || strlen(filename) + 5 > sizeof(fn)) {
+        GN_Log("cVIEW2D::SaveToFile 文件名过长!!\n");
+        return;
+    }
     strcpy(fn, filename);
     char *extname = GN_StrGetExtName(fn);
     if(!extname) {
@@ -355,6 +360,8 @@ uint8 *GNg::sIMAGE_OBJ::zDataLoad(uint8 *rpos, P<P<sIMAGE>> &imgs_ref) {
 }
 GN_API GNg::eIMG_FILE_TYPE GNg::CheckHasImgFmtTypeFromImgPath(const sIMAGE *img, void *ph) {
     char filename[384];
+    // 加固（STRCPY 审计）：留出 "0000"+"."+扩展名+NUL，超长或空名直接判未知格式。
+    if(!img->fileName || strlen(img->fileName) + 16 > sizeof(filename)) return eIMG_FILE_UNKNOWN;
     strcpy(filename, img->fileName);
     char *pstr = filename + strlen(filename), *pstr1;
     if(img->add_0000) {
@@ -386,6 +393,8 @@ GN_API P<char> GNg::ExportImageFile(const char *exp_path, GNg::sIMAGE *img) {
     if(img->fileName) {
         char img_path[384];
         unsigned int fnlen = strlen(img->fileName);
+        // 加固（STRCPY 审计）：留出 "0000"+"."+扩展名+NUL，超长文件名放弃导出。
+        if(fnlen + 16 > sizeof(img_path)) return save_path;
         strncpy(img_path, img->fileName, fnlen);
         char *p_ext_name = img_path + fnlen;
         if(img->add_0000) {
@@ -425,6 +434,11 @@ GN_API bool GNg::SaveImageToFile(const char *filename, sIMAGE *img, short x, sho
     }
 #endif
     char fn[384];
+    // 加固（STRCPY 审计）：留出 "%04d.png" + NUL，超长文件名直接失败。
+    if(!filename || strlen(filename) + 10 > sizeof(fn)) {
+        GN_Log("调用 SaveImageToFile 文件名过长!\n");
+        return false;
+    }
     strcpy(fn, filename);
     char *_name = GN_StrGetExtName(fn);
     if(_name) --_name;

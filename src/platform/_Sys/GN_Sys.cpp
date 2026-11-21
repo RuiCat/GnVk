@@ -460,7 +460,7 @@ GN_SYS_API void GN_StrToSysFilePath(char des[], const char *src, const char *ope
     if(ret == src) {
         strncpy(des, ret, 383);
         des[383] = 0;
-    } // TODO: verify buffer size, assumed 384
+    } // 契约（B5f）：调用方缓冲区 ≥384 字节。
 }
 #if defined(_WIN32_) || defined(_WIN32_WCE)
 #include <windows.h>
@@ -948,7 +948,7 @@ GN_SYS_API void GF_AppCurPathChange(char *app_path, char *doc_path) {
 }
 GN_SYS_API int GT_GetAppCurPath(char dir_out[]) {
     if(GT_CurAppDir[0]) {
-        // TODO: verify buffer size - assumed 256
+        // 契约（B5f）：dir_out 缓冲区 ≥256 字节。
         strncpy(dir_out, GT_CurAppDir, 255);
         dir_out[255] = 0;
         dir_out[GT_CurAppDirLen - 1] = 0;
@@ -971,7 +971,7 @@ GN_SYS_API void GT_GetAppFileName(char name_out[]) {
     GetModuleFileName(0, name_out, 256);
 #elif _WIN32_WCE
 #else
-    // TODO: verify buffer size - assumed 256
+    // 契约（B5f）：name_out 缓冲区 ≥256 字节。
     strncpy(name_out, GT_CurAppDir, 255);
     name_out[255] = 0;
 #ifdef GT_USING_ANDROID_JNI
@@ -1618,7 +1618,7 @@ GN_SYS_API void GN_GetDeviceInfoCpu(char *info) {
         : "eax", "ebx", "ecx", "edx");
 #endif
 #elif defined GT_USING_ANDROID_JNI || defined GT_USING_ANDROID
-    // TODO: verify buffer size - info is char* parameter
+    // 契约（B5f）：info 缓冲区 ≥256 字节（char* 参数，容量由调用方保证）。
     strncpy(info, "?.??GHz", 255);
     info[255] = 0;
 #elif defined _MAC_ || defined GT_USING_IOS

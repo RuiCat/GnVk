@@ -64,11 +64,11 @@ void main() {
     }
 
     // ── 阴天：天空整体压灰 + 太阳隐没 ────────────────
-    // 天气系统在阴雨时会把 sunIntensity 调低（CLEAR 1.0 / CLOUDY 0.55 / RAIN 0.30 / STORM 0.15、
-    // SNOW 0.40），这里用它当"阴天程度"的代理：越高越接近地平线→天顶的灰色渐变，太阳圆盘按平方
-    // 衰减到看不见。否则即使云盖铺满，画面里仍然挂着一个亮太阳，读起来还是晴天。
-    // 1.4 倍是标定：SNOW(0.40) 要走到 ~0.84，不能只灰一半。
-    float overcast = clamp((1.0 - sunIntensity) * 1.4, 0.0, 1.0);
+    // S-27：不要再用 sunIntensity 当阴天代理——夜间 sunIntensity≈0 会被误判为全阴天，
+    // 天空被压成灰色。天气系统已经把云覆盖度写进 horizonColor.w（VkSkyParams.cloudCoverage），
+    // 用它作为“阴天程度”；太阳圆盘仍单独按 sunIntensity² 衰减。
+    float cloudCoverage = clamp(skybox.horizonColor.w, 0.0, 1.0);
+    float overcast = clamp(cloudCoverage * 1.2, 0.0, 1.0);
     {
         float upAmount = clamp(dir.y, 0.0, 1.0);
         vec3 flatSky = mix(skybox.horizonColor.rgb, skybox.zenithColor.rgb, pow(upAmount, 0.55));
@@ -86,7 +86,8 @@ void main() {
     // ── 云已由 L5 体积云（gn3d_cloud_vol）接管：本 shader 不再绘制 FBM 云 ──
 
     // ── 地平线雾霭 / 地平线以下压暗 ────────────────
-    float haze = smoothstep(0.18, -0.02, dir.y) * 0.55;
+    // edge0 < edge1：反向 smoothstep 在 GLSL 规范里结果未定义。
+    float haze = (1.0 - smoothstep(-0.02, 0.18, dir.y)) * 0.55;
     sky = mix(sky, skybox.horizonColor.rgb, haze);
     vec3 below = mix(vec3(0.25, 0.26, 0.28), skybox.horizonColor.rgb,
                      smoothstep(-0.5, 0.0, dir.y));

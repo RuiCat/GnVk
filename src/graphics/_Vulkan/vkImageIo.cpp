@@ -153,10 +153,16 @@ bool ImageLoadEx(const char *fn, sIMAGE *out, int w, int h) {
 
 // 从内存 PNG 载入纹理：解码复用 GN_3Dtexture 的 PNG 解码器（含 setjmp 错误回收），
 // 再走 CreateEmptyToData/DataFill 的延迟上传路径。
-bool ImageLoadFromMem(const void *data, int len, sIMAGE *out) {
+// srgb/wrapU/wrapV 必须在 CreateEmptyToData 之前写入 sIMAGE：格式（SRGB/UNORM）
+// 与采样器都在创建时定型（旧 API 没有这两个参数，3D albedo 只能以 UNORM 上传）。
+bool ImageLoadFromMem(const void *data, int len, sIMAGE *out, bool srgb,
+                      VkSamplerAddressMode wrapU, VkSamplerAddressMode wrapV) {
     if(!data || len <= 0 || !out) return false;
     GN3d::sTEXTURE_IMAGE image;
     if(!GN3d::decodePngMemory(data, (size_t)len, image)) return false;
+    out->vkSrgb = srgb;
+    out->vkWrapU = wrapU;
+    out->vkWrapV = wrapV;
     out->CreateEmptyToData((int)image.aWidth, (int)image.aHeight, 1, 0, 1, false, false);
     out->DataFill(image.aPixels.data(), CR_RGBA, (int)image.aWidth, (int)image.aHeight, 0, 0, 0,
                   false);
@@ -229,7 +235,22 @@ uint8_t *GN_VkReadBack(int x, int y, int w, int h, int *size_out) {
     if(x + w > (int)sw) w = sw - x;
     if(y + h > (int)sh) h = sh - y;
     if(w <= 0 || h <= 0) return nullptr;
-    VkDeviceSize sz = (VkDeviceSize)w * h * 4;
+    // 按实际 swapchain 格式决定源字节数；输出统一为 RGBA8（PNG/调用方约定）。
+    uint32_t srcBpp = 0;
+    switch(GN_Vk.swapchainFormat) {
+    case VK_FORMAT_R16G16B16A16_SFLOAT: srcBpp = 8; break;
+    case VK_FORMAT_B8G8R8A8_UNORM:
+    case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_R8G8B8A8_UNORM:
+    case VK_FORMAT_R8G8B8A8_SRGB: srcBpp = 4; break;
+    default: break;
+    }
+    if(srcBpp == 0) {
+        fprintf(stderr, "[GN_Vk] GN_VkReadBack: 不支持的 swapchain 格式 %d\n",
+                (int)GN_Vk.swapchainFormat);
+        return nullptr;
+    }
+    VkDeviceSize sz = (VkDeviceSize)w * h * srcBpp;
     // Create staging buffer
     VkBuffer stagingBuf;
     VkDeviceMemory stagingMem;
@@ -299,15 +320,47 @@ uint8_t *GN_VkReadBack(int x, int y, int w, int h, int *size_out) {
         vkQueueWaitIdle(GN_Vk.graphicsQueue);
     }
     vkFreeCommandBuffers(GN_Vk.device, GN_Vk.commandPool, 1, &cb);
-    // Read back
-    uint8_t *result = new uint8_t[sz];
-    void *d;
+    // Read back：8-bit 交换链按 RGBA/BGRA 重排；RGBA16F 交换链先 half→float 再量化。
+    const size_t pixels = (size_t)w * (size_t)h;
+    uint8_t *result = new uint8_t[pixels * 4u];
+    void *d = nullptr;
     vkMapMemory(GN_Vk.device, stagingMem, 0, sz, 0, &d);
-    memcpy(result, d, sz);
+    if(!d) {
+        delete[] result;
+        vkDestroyBuffer(GN_Vk.device, stagingBuf, 0);
+        vkFreeMemory(GN_Vk.device, stagingMem, 0);
+        return nullptr;
+    }
+    const uint8_t *src = (const uint8_t *)d;
+    if(srcBpp == 8) {
+        const auto quantize = [](float value) -> uint8_t {
+            if(!(value > 0.0f)) return 0;
+            if(value > 1.0f) value = 1.0f;
+            return (uint8_t)(value * 255.0f + 0.5f);
+        };
+        for(size_t i = 0; i < pixels; ++i) {
+            uint16_t words[4] = {0, 0, 0, 0};
+            memcpy(words, src + i * 8u, sizeof(words));
+            result[i * 4u + 0u] = quantize(GN_ValueHalfToFloat(words[0]));
+            result[i * 4u + 1u] = quantize(GN_ValueHalfToFloat(words[1]));
+            result[i * 4u + 2u] = quantize(GN_ValueHalfToFloat(words[2]));
+            result[i * 4u + 3u] = quantize(GN_ValueHalfToFloat(words[3]));
+        }
+    } else {
+        const bool bgra = GN_Vk.swapchainFormat == VK_FORMAT_B8G8R8A8_UNORM ||
+                          GN_Vk.swapchainFormat == VK_FORMAT_B8G8R8A8_SRGB;
+        for(size_t i = 0; i < pixels; ++i) {
+            const uint8_t *p = src + i * 4u;
+            result[i * 4u + 0u] = bgra ? p[2] : p[0];
+            result[i * 4u + 1u] = p[1];
+            result[i * 4u + 2u] = bgra ? p[0] : p[2];
+            result[i * 4u + 3u] = p[3];
+        }
+    }
     vkUnmapMemory(GN_Vk.device, stagingMem);
     vkDestroyBuffer(GN_Vk.device, stagingBuf, 0);
     vkFreeMemory(GN_Vk.device, stagingMem, 0);
-    if(size_out) *size_out = (int)sz;
+    if(size_out) *size_out = (int)(pixels * 4u);
     return result;
 }
 

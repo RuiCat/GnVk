@@ -18,8 +18,14 @@ VkDeviceMemory s_postMemory = VK_NULL_HANDLE;
 void *s_postMapped = 0;
 GN3d::sPOST_UBO s_postUbo = GN3d::makeDefaultPostUbo();
 
+bool isSrgbSwapchainFormat(VkFormat format) {
+    return format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
+}
+
 void writePostUbo() {
     if(!s_postMapped) return;
+    // sRGB 交换链由硬件编码；非 sRGB（UNORM/float）由 composite 显式编码。
+    s_postUbo.srgbEncode = isSrgbSwapchainFormat(GN_Vk.swapchainFormat) ? 0.0f : 1.0f;
     std::memcpy(s_postMapped, &s_postUbo, sizeof(s_postUbo));
 }
 

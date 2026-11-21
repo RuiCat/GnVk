@@ -284,6 +284,8 @@ void bakeTextures(const GN3d::sASSET &asset, sModelData &out) {
         sTextureData &texture = out.aTextures[index];
         texture.aName = source.aName;
         texture.aBytes = source.aImageBytes;
+        texture.aWrapS = source.aWrapS;
+        texture.aWrapT = source.aWrapT;
         measureTextureAlpha(source, texture);
     }
 }
@@ -409,7 +411,8 @@ sMaterialData::sMaterialData()
     aDiffuse[0] = aDiffuse[1] = aDiffuse[2] = 0.8f;
 }
 
-sTextureData::sTextureData() : aHasAlpha(false), aPartialAlphaRatio(0.0f) {}
+sTextureData::sTextureData()
+    : aHasAlpha(false), aPartialAlphaRatio(0.0f), aWrapS(10497), aWrapT(10497) {}
 
 sModelData::sModelData()
     : aVertexCount(0), aTriangleCount(0), aZeroWeightVertices(0), aSkippedPrimitives(0),

@@ -7,7 +7,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <vector>
 
 namespace imoScene {
 
@@ -15,6 +17,17 @@ namespace {
 
 // 网格名缓冲长度与 sMESH::aName 一致。
 const size_t MESH_NAME_MAX = 128;
+
+// glTF sampler wrap 枚举 → Vulkan 寻址模式；缺省/未知按 REPEAT（glTF 规范默认）。
+VkSamplerAddressMode wrapModeFromGl(int32_t wrap) {
+    if (wrap == 33071) {
+        return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    }
+    if (wrap == 33648) {
+        return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+    }
+    return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+}
 
 // 贴图下标 → sIMAGE；越界/解码失败返回 nullptr（材质按无贴图处理）。
 GNg::sIMAGE *textureAt(const sSceneModel &model, int32_t index) {
@@ -85,14 +98,33 @@ bool uploadSceneModel(const sModelData &data, sSceneModel &out, std::string &err
     }
 
     out.aTextures.assign(data.aTextures.size(), static_cast<GNg::sIMAGE *>(0));
+    // 按材质用途决定贴图颜色空间：baseColor 是 sRGB 编码，normal 等其它通道是线性。
+    // 同一张图若同时被两种用途引用，按线性处理（normal 用错颜色空间比 albedo 更明显）。
+    std::vector<unsigned char> albedoSrgb(data.aTextures.size(), 0);
+    std::vector<unsigned char> normalLinear(data.aTextures.size(), 0);
+    for (size_t index = 0; index < data.aMaterials.size(); ++index) {
+        const sMaterialData &material = data.aMaterials[index];
+        if (material.aAlbedoTexture >= 0 &&
+            static_cast<size_t>(material.aAlbedoTexture) < albedoSrgb.size()) {
+            albedoSrgb[static_cast<size_t>(material.aAlbedoTexture)] = 1;
+        }
+        if (material.aNormalTexture >= 0 &&
+            static_cast<size_t>(material.aNormalTexture) < normalLinear.size()) {
+            normalLinear[static_cast<size_t>(material.aNormalTexture)] = 1;
+        }
+    }
+    const char *srgbEnv = std::getenv("IMO_SCENE_SRGB");
+    const bool srgbEnabled = !(srgbEnv != 0 && srgbEnv[0] == '0');
     for (size_t index = 0; options.aLoadTextures && index < data.aTextures.size(); ++index) {
         const sTextureData &source = data.aTextures[index];
         if (source.aBytes.empty()) {
             continue;
         }
         GNg::sIMAGE *image = new GNg::sIMAGE();
+        const bool srgb = srgbEnabled && albedoSrgb[index] != 0 && normalLinear[index] == 0;
         if (!GNg::ImageLoadFromMem(source.aBytes.data(), static_cast<int>(source.aBytes.size()),
-                                   image)) {
+                                   image, srgb, wrapModeFromGl(source.aWrapS),
+                                   wrapModeFromGl(source.aWrapT))) {
             std::fprintf(stderr, "[imoScene] 贴图解码失败（下标 %zu）\n", index);
             delete image;
             continue;

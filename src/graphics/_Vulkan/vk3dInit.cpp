@@ -415,7 +415,7 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
               GN_Vk.uniformBuffer3D, GN_Vk.uniformMemory3D);
 
     // ── 3D 光照 UBO ──────────────────────────────────
-    // L3c：含 4 级 CSM 矩阵与分割数据，长度 = sizeof(GN3d::sLIGHT_UBO)（1744 B）。
+    // L3c：含 4 级 CSM 矩阵与分割数据，长度 = sizeof(GN3d::sLIGHT_UBO)（976 B）。
     CreateBuf(sizeof(GN3d::sLIGHT_UBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
               GN_Vk.lightBuffer3D, GN_Vk.lightMemory3D);
@@ -546,11 +546,39 @@ namespace {
 const uint32_t kShadowCascadeCount = 4;
 VkFramebuffer s_shadowCascadeFramebuffers[kShadowCascadeCount] = {};
 VkImageView s_shadowCascadeViews[kShadowCascadeCount] = {};
+
+// 每级 light VP 独立 UBO 槽：64 B 矩阵，槽距 256 B（覆盖所有驱动
+// minUniformBufferOffsetAlignment 的上限；单槽会被最后一级覆盖）。
+const uint32_t kShadowUBOSlotSize = 64;
+const uint32_t kShadowUBOSlotStride = 256;
+VkDescriptorSet s_shadowCascadeSets[kShadowCascadeCount] = {};
+// 常驻映射（初始化期 vkMapMemory 一次）：每级只写自己的槽，避免逐级 map/unmap。
+void *s_shadowUBOMapped = nullptr;
 } // namespace
 
 VkFramebuffer shadowFramebufferForCascade(uint32_t cascadeIndex) {
     if(cascadeIndex >= kShadowCascadeCount) cascadeIndex = 0;
     return s_shadowCascadeFramebuffers[cascadeIndex];
+}
+
+VkDescriptorSet shadowCascadeDescriptorSet(uint32_t cascadeIndex) {
+    if(cascadeIndex >= kShadowCascadeCount) cascadeIndex = 0;
+    return s_shadowCascadeSets[cascadeIndex];
+}
+
+// 把一帧某一级的 light VP 写进该级独立 UBO 槽（槽距 256 B，常驻映射）。
+void writeShadowCascadeLightVP(uint32_t cascadeIndex, const float *matrix16) {
+    if(!s_shadowUBOMapped || !matrix16) return;
+    if(cascadeIndex >= kShadowCascadeCount) cascadeIndex = 0;
+    memcpy((char *)s_shadowUBOMapped + (size_t)cascadeIndex * kShadowUBOSlotStride, matrix16, 64);
+}
+
+// 释放常驻映射（GN_VkShutdown3D 在销毁 shadowUBOMemory 之前调用）。
+void releaseShadowCascadeUbo() {
+    if(s_shadowUBOMapped) {
+        vkUnmapMemory(GN_Vk.device, GN_Vk.shadowUBOMemory);
+        s_shadowUBOMapped = nullptr;
+    }
 }
 
 uint32_t GN_VkShadowCascadeCount() { return kShadowCascadeCount; }
@@ -696,26 +724,55 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &GN_Vk.shadowPipelineLayout);
     }
 
-    // Shadow UBO
-    CreateBuf(64, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+    // Shadow UBO：每级一个独立槽（64 B 矩阵，槽距 256 B）。
+    // 旧实现只有 64 B / 单槽：4 级 cascade 每级写同一位置，提交后全部读到最后一级矩阵。
+    CreateBuf(kShadowCascadeCount * kShadowUBOSlotStride, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
               GN_Vk.shadowUBOBuffer, GN_Vk.shadowUBOMemory);
-
-    // Shadow descriptor set
+    // 常驻映射（offset 0 一定满足 minMemoryMapAlignment）；逐级只写自己的槽。
     {
+        void *mapped = nullptr;
+        if(vkMapMemory(GN_Vk.device, GN_Vk.shadowUBOMemory, 0, VK_WHOLE_SIZE, 0, &mapped) != VK_SUCCESS) {
+            mapped = nullptr;
+        }
+        s_shadowUBOMapped = mapped;
+    }
+
+    // Shadow descriptor sets：每级一份，各自绑定本级的 64 B 槽。
+    {
+        for(uint32_t c = 0; c < kShadowCascadeCount; ++c) {
+            s_shadowCascadeSets[c] = VK_NULL_HANDLE;
+        }
+        VkDescriptorSetLayout layouts[kShadowCascadeCount];
+        for(uint32_t c = 0; c < kShadowCascadeCount; ++c) {
+            layouts[c] = GN_Vk.shadowDescriptorLayout;
+        }
         VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         dai.descriptorPool = GN_Vk.descriptorPool;
-        dai.descriptorSetCount = 1;
-        dai.pSetLayouts = &GN_Vk.shadowDescriptorLayout;
-        vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.shadowDescriptorSet);
-        VkDescriptorBufferInfo dbi = {GN_Vk.shadowUBOBuffer, 0, 64};
-        VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        w.dstSet = GN_Vk.shadowDescriptorSet;
-        w.dstBinding = 0;
-        w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        w.descriptorCount = 1;
-        w.pBufferInfo = &dbi;
-        vkUpdateDescriptorSets(GN_Vk.device, 1, &w, 0, 0);
+        dai.descriptorSetCount = kShadowCascadeCount;
+        dai.pSetLayouts = layouts;
+        VkResult res = vkAllocateDescriptorSets(GN_Vk.device, &dai, s_shadowCascadeSets);
+        if(res != VK_SUCCESS) {
+            VkCheck(res, "vkAllocateDescriptorSets shadow cascade");
+            // 失败时数组内容未定义：全部置空，ShadowPassBegin 会跳过（不绑非法 set）。
+            for(uint32_t c = 0; c < kShadowCascadeCount; ++c) {
+                s_shadowCascadeSets[c] = VK_NULL_HANDLE;
+            }
+        } else {
+            for(uint32_t c = 0; c < kShadowCascadeCount; ++c) {
+                VkDescriptorBufferInfo dbi = {GN_Vk.shadowUBOBuffer, (VkDeviceSize)c * kShadowUBOSlotStride,
+                                              kShadowUBOSlotSize};
+                VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                w.dstSet = s_shadowCascadeSets[c];
+                w.dstBinding = 0;
+                w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                w.descriptorCount = 1;
+                w.pBufferInfo = &dbi;
+                vkUpdateDescriptorSets(GN_Vk.device, 1, &w, 0, 0);
+            }
+        }
+        // 兼容旧读取点：shadowDescriptorSet 指向第 0 级。
+        GN_Vk.shadowDescriptorSet = s_shadowCascadeSets[0];
     }
 
     // Shadow pipeline（P1b：深度专用走缓存：无片元阶段、0 颜色附件、深度偏移 1.25/1.75）

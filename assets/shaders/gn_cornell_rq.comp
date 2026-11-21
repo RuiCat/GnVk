@@ -31,8 +31,143 @@ layout(set = 0, binding = 2) uniform RtParams {
     vec4 lightPos;
     uvec4 counts;  // x=quadCount, y=sphereCount, z=materialCount
     vec4 accumParams; // x=frameStartSample, y=reset
+    vec4 prevEye;
+    vec4 prevFwd;
+    vec4 prevRight;
+    vec4 prevUp;
+    vec4 temporal; // x=historyValid, y=moving, z=targetSamples
 } u;
-layout(set = 0, binding = 3) buffer AccumData { vec4 accum[]; } accumData;
+layout(set = 0, binding = 3) readonly buffer HistoryColorIn { vec4 historyColorIn[]; } historyIn;
+layout(set = 0, binding = 8) writeonly buffer HistoryColorOut { vec4 historyColorOut[]; } historyOut;
+layout(set = 0, binding = 9) readonly buffer HistoryDepthIn { float historyDepthIn[]; } depthIn;
+layout(set = 0, binding = 10) writeonly buffer HistoryDepthOut { float historyDepthOut[]; } depthOut;
+
+layout(std140, binding = 11) uniform PROBE_UBO {
+    vec4 origin;        // xyz = 网格原点
+    vec4 spacingCounts; // x=spacing, yzw=counts
+    vec4 weight;        // x=强度（0=关）
+} probe;
+layout(std430, binding = 12) readonly buffer ProbeSh { vec4 probeSh[]; } probeData;
+layout(std430, binding = 13) readonly buffer ProbeDepth { vec2 probeDepthMoments[]; } probeDepthData;
+layout(std430, binding = 14) readonly buffer ProbeOffset { vec4 probeOffsets[]; } probeOffsetData;
+
+vec3 evalProbeSh(vec3 wp, vec3 n) {
+    // B3a：weight.z = normalBias（世界单位，沿表面法线偏移查询点）；weight.w 预留给 viewBias。
+    const float normalBias = max(probe.weight.z, 0.0);
+    const vec3 wpB = wp + n * normalBias;
+    vec3 counts = max(probe.spacingCounts.yzw, vec3(1.0));
+    vec3 grid = (wpB - probe.origin.xyz) / max(probe.spacingCounts.x, 1.0e-6);
+    grid = clamp(grid, vec3(0.0), counts - vec3(1.0));
+    ivec3 i0 = ivec3(floor(grid));
+    ivec3 i1 = min(i0 + 1, ivec3(counts) - 1);
+    vec3 f = fract(grid);
+    vec4 c[9];
+    for (int k = 0; k < 9; ++k) c[k] = vec4(0.0);
+    const int cx = int(counts.x);
+    const int cy = int(counts.y);
+    float wsum = 0.0;
+    for (int dz = 0; dz < 2; ++dz) {
+        for (int dy = 0; dy < 2; ++dy) {
+            for (int dx = 0; dx < 2; ++dx) {
+                float w = (dx == 0 ? 1.0 - f.x : f.x) *
+                          (dy == 0 ? 1.0 - f.y : f.y) *
+                          (dz == 0 ? 1.0 - f.z : f.z);
+                const int px = dx == 0 ? i0.x : i1.x;
+                const int py = dy == 0 ? i0.y : i1.y;
+                const int pz = dz == 0 ? i0.z : i1.z;
+                const int probeIndex = (pz * cy + py) * cx + px;
+                const vec3 basePos = probe.origin.xyz + probe.spacingCounts.x *
+                                    vec3(float(px), float(py), float(pz));
+                const vec3 probePos = basePos + probeOffsetData.probeOffsets[probeIndex].xyz;
+                // 背面探针（探针在表面背面）降权，减少墙角/球体轮廓的跨面串色。
+                if (dot(probePos - wpB, n) <= 0.0) w *= 0.5;
+                const vec3 toSurface = wpB - probePos;
+                const float dist = length(toSurface);
+                const vec3 d = toSurface / max(dist, 1.0e-6);
+                const vec3 a = abs(d);
+                int face = 4;
+                float u = 0.0;
+                float v = 0.0;
+                if (a.x >= a.y && a.x >= a.z) {
+                    if (d.x >= 0.0) {
+                        face = 0;
+                        u = -d.z / a.x;
+                        v = -d.y / a.x;
+                    } else {
+                        face = 1;
+                        u = d.z / a.x;
+                        v = -d.y / a.x;
+                    }
+                } else if (a.y >= a.z) {
+                    if (d.y >= 0.0) {
+                        face = 2;
+                        u = d.x / a.y;
+                        v = d.z / a.y;
+                    } else {
+                        face = 3;
+                        u = d.x / a.y;
+                        v = -d.z / a.y;
+                    }
+                } else {
+                    if (d.z >= 0.0) {
+                        face = 4;
+                        u = d.x / a.z;
+                        v = -d.y / a.z;
+                    } else {
+                        face = 5;
+                        u = -d.x / a.z;
+                        v = -d.y / a.z;
+                    }
+                }
+                const int res = max(1, int(probe.weight.y));
+                const vec2 texel = (vec2(u, v) * 0.5 + 0.5) * float(res) - 0.5;
+                const ivec2 di0 = ivec2(floor(texel));
+                const vec2 df = fract(texel);
+                vec2 depthMomentSum = vec2(0.0);
+                float depthWeight = 0.0;
+                for (int dd = 0; dd < 4; ++dd) {
+                    const int dx = dd & 1;
+                    const int dy = (dd >> 1) & 1;
+                    const int ix = clamp(di0.x + dx, 0, res - 1);
+                    const int iy = clamp(di0.y + dy, 0, res - 1);
+                    const float ww = (dx == 0 ? 1.0 - df.x : df.x) *
+                                     (dy == 0 ? 1.0 - df.y : df.y);
+                    const int idx = ((probeIndex * 6 + face) * res + iy) * res + ix;
+                    depthMomentSum += probeDepthData.probeDepthMoments[idx] * ww;
+                    depthWeight += ww;
+                }
+                const vec2 moments = depthWeight > 1.0e-6 ? depthMomentSum / depthWeight
+                                                          : vec2(1.0e30, 1.0e30);
+                const float mean = moments.x;
+                const float variance = max(moments.y - mean * mean, 1.0e-4);
+                const float diff = dist - mean;
+                float visible = 1.0;
+                if (diff > 0.0) visible = variance / (variance + diff * diff);
+                w *= clamp(visible, 0.0, 1.0);
+                wsum += w;
+                const int base = probeIndex * 9;
+                for (int k = 0; k < 9; ++k) c[k] += probeData.probeSh[base + k] * w;
+            }
+        }
+    }
+    if (wsum < 1.0e-4) return vec3(0.0);
+    for (int k = 0; k < 9; ++k) c[k] /= wsum;
+    const float b0 = 0.2820947918;
+    const float b1 = 0.4886025119 * n.y;
+    const float b2 = 0.4886025119 * n.z;
+    const float b3 = 0.4886025119 * n.x;
+    const float b4 = 1.0925484306 * n.x * n.y;
+    const float b5 = 1.0925484306 * n.y * n.z;
+    const float b6 = 0.3153915653 * (3.0 * n.z * n.z - 1.0);
+    const float b7 = 1.0925484306 * n.x * n.z;
+    const float b8 = 0.5462742153 * (n.x * n.x - n.y * n.y);
+    vec3 irr = (3.14159265359 * b0) * c[0].rgb;
+    irr += (2.0 * 3.14159265359 / 3.0) * (b1 * c[1].rgb + b2 * c[2].rgb + b3 * c[3].rgb);
+    irr += (3.14159265359 / 4.0) * (b4 * c[4].rgb + b5 * c[5].rgb + b6 * c[6].rgb + b7 * c[7].rgb +
+                         b8 * c[8].rgb);
+    return max(irr, vec3(0.0));
+}
+
 layout(set = 0, binding = 4) uniform accelerationStructureEXT tlas;
 layout(set = 0, binding = 5) readonly buffer Positions { vec4 positions[]; } posData;
 layout(set = 0, binding = 6) readonly buffer Normals { vec4 normals[]; } normData;
@@ -166,12 +301,15 @@ vec3 shadeDirect(Hit hit, vec3 p, int lightMode) {
         if (occluded(p + hit.normal * (EPS * 10.0), l, dist - EPS)) return fill;
         const float range = 9.0;
         const float att = 1.0 / (1.0 + 2.0 / range * dist + 1.0 / (range * range) * dist * dist);
-        result = albedo * (ndl / PI * 14.0 * att);
+        result = albedo * (ndl / PI * 3.0 * att);
     }
     return result + fill;
 }
 
-vec3 radiance(vec3 ro, vec3 rd, int lightMode, inout uint state) {
+vec3 radiance(vec3 ro, vec3 rd, int lightMode, inout uint state,
+              out vec3 primaryP, out bool primaryHit) {
+    primaryP = vec3(0.0);
+    primaryHit = false;
     vec3 result = vec3(0.0);
     vec3 throughput = vec3(1.0);
     vec3 currentOrigin = ro;
@@ -193,6 +331,12 @@ vec3 radiance(vec3 ro, vec3 rd, int lightMode, inout uint state) {
         }
         const vec3 direct = shadeDirect(hit, p, lightMode);
         if (!any(isnan(direct)) && !any(isinf(direct))) result += throughput * direct;
+        if (probe.weight.x > 0.5) {
+            // 探针只烘间接光；直接光在上一步加，跳过第 2/3 次漫反射射线。
+            const vec3 indirect = evalProbeSh(p, hit.normal);
+            result += throughput * albedo * indirect * 0.31830988618;
+            break;
+        }
         currentOrigin = p + hit.normal * (EPS * 10.0);
         currentDir = cosineDir(hit.normal, state);
         throughput *= albedo;
@@ -235,24 +379,89 @@ void main() {
     const int sampleCount = int(u.cam.w);
 
     const uint pixelIndex = pixel.y * uint(width) + pixel.x;
-    if (u.accumParams.y > 0.5) accumData.accum[pixelIndex] = vec4(0.0);
-    vec3 sum = accumData.accum[pixelIndex].rgb;
-    float count = accumData.accum[pixelIndex].w;
     const uint seed = uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + 17u;
     const uint frameStart = uint(u.accumParams.x);
+    vec3 sum = vec3(0.0);
+    vec3 primaryP = vec3(0.0);
+    bool primaryHit = false;
     for (int s = 0; s < sampleCount; ++s) {
         uint state = seed + (frameStart + uint(s)) * 0x9E3779B9u;
         if (state == 0u) state = 1u;
-        // 子像素抖动：配合多样本/逐帧累积做抗锯齿（与 CPU/解析路径同 seed 顺序）。
         const float jx = rnd(state);
         const float jy = rnd(state);
         const float uu = (float(pixel.x) + jx) / float(width);
         const float vv = (float(pixel.y) + jy) / float(height);
         const vec3 dir = normalize(forward + rightDir * ((2.0 * uu - 1.0) * tanHalf * aspect) +
                                    upDir * ((1.0 - 2.0 * vv) * tanHalf));
-        sum += radiance(eye, dir, lightMode, state);
-        count += 1.0;
+        vec3 p = vec3(0.0);
+        bool hit = false;
+        sum += radiance(eye, dir, lightMode, state, p, hit);
+        if (s == 0) { primaryP = p; primaryHit = hit; }
     }
-    accumData.accum[pixelIndex] = vec4(sum, count);
-    outBuf.pixels[pixelIndex] = packRgba(count > 0.0 ? sum / count : vec3(0.0));
+    vec3 color = sum / float(sampleCount);
+
+    vec2 prevUV = vec2(0.0);
+    float zPrev = 0.0;
+    bool histOk = primaryHit && u.temporal.x > 0.5;
+    if (histOk) {
+        const vec3 d = primaryP - u.prevEye.xyz;
+        zPrev = dot(d, u.prevFwd.xyz);
+        if (zPrev <= 1.0e-4) {
+            histOk = false;
+        } else {
+            const vec2 ndc = vec2(dot(d, u.prevRight.xyz) / (zPrev * tanHalf * aspect),
+                                  dot(d, u.prevUp.xyz) / (zPrev * tanHalf));
+            prevUV = vec2(0.5 + 0.5 * ndc.x, 0.5 - 0.5 * ndc.y);
+            histOk = all(greaterThanEqual(prevUV, vec2(0.0))) &&
+                     all(lessThanEqual(prevUV, vec2(1.0)));
+        }
+    }
+
+    vec4 histColor = vec4(0.0);
+    float histDepth = 1.0e30;
+    if (histOk) {
+        const vec2 texel = prevUV * u.size.xy - 0.5;
+        const ivec2 i0 = ivec2(floor(texel));
+        const vec2 f = fract(texel);
+        const int iw = int(u.size.x);
+        const int ih = int(u.size.y);
+        vec4 c = vec4(0.0);
+        float dsum = 0.0;
+        float wsum = 0.0;
+        for (int y = 0; y < 2; ++y) {
+            for (int x = 0; x < 2; ++x) {
+                const int ix = clamp(i0.x + x, 0, iw - 1);
+                const int iy = clamp(i0.y + y, 0, ih - 1);
+                const float wx = (x == 0) ? (1.0 - f.x) : f.x;
+                const float wy = (y == 0) ? (1.0 - f.y) : f.y;
+                const float ww = wx * wy;
+                const int idx = iy * iw + ix;
+                c += historyIn.historyColorIn[idx] * ww;
+                dsum += depthIn.historyDepthIn[idx] * ww;
+                wsum += ww;
+            }
+        }
+        if (wsum > 1.0e-6) {
+            histColor = c / wsum;
+            histDepth = dsum / wsum;
+            if (abs(zPrev - histDepth) > max(0.05 * zPrev, 0.05)) histOk = false;
+        }
+    }
+
+    float newCount = 1.0;
+    if (histOk) {
+        if (u.temporal.y > 0.5) {
+            color = mix(histColor.rgb, color, 0.15);
+            newCount = 1.0;
+        } else {
+            const float n = clamp(histColor.a, 1.0, 1024.0);
+            const float alpha = 1.0 / (n + 1.0);
+            color = mix(histColor.rgb, color, alpha);
+            newCount = min(n + 1.0, 1024.0);
+        }
+    }
+    historyOut.historyColorOut[pixelIndex] = vec4(color, newCount);
+    const float zCur = primaryHit ? dot(primaryP - eye, forward) : 1.0e30;
+    depthOut.historyDepthOut[pixelIndex] = zCur;
+    outBuf.pixels[pixelIndex] = packRgba(color);
 }

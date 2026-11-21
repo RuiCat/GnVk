@@ -49,6 +49,8 @@ struct sTextureData {
     std::vector<uint8_t> aBytes;
     bool aHasAlpha;          // 存在 alpha < 250 的像素
     float aPartialAlphaRatio; // 0 < alpha < 250 的像素占比
+    int32_t aWrapS;          // glTF sampler wrap_s 原始枚举（10497=REPEAT 缺省）
+    int32_t aWrapT;          // glTF sampler wrap_t 原始枚举
 
     sTextureData();
 };

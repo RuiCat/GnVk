@@ -126,6 +126,16 @@ bool SameLayout(const sVERTEX_LAYOUT &a, const sVERTEX_LAYOUT &b) {
     return true;
 }
 
+bool SameSpecAndVersion(const sPIPELINE_DESC &a, const sPIPELINE_DESC &b) {
+    if (a.aKeyVersion != b.aKeyVersion || a.aSpecCount != b.aSpecCount) return false;
+    const uint32_t count = a.aSpecCount < 8u ? a.aSpecCount : 8u;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (a.aSpec[i].aId != b.aSpec[i].aId) return false;
+        if (a.aSpec[i].aValue != b.aSpec[i].aValue) return false;
+    }
+    return true;
+}
+
 bool SameGraphicsState(const sPIPELINE_DESC &a, const sPIPELINE_DESC &b) {
     if (!SameLayout(a.aVertexLayout, b.aVertexLayout)) return false;
     if (a.aRenderPass != b.aRenderPass || a.aSubpass != b.aSubpass) return false;
@@ -191,7 +201,10 @@ sPIPELINE_DESC::sPIPELINE_DESC()
       aScissor{{0, 0}, {1, 1}},
       aCustomBlend(false),
       aBlendSrcColor(VK_BLEND_FACTOR_ONE), aBlendDstColor(VK_BLEND_FACTOR_ZERO),
-      aBlendSrcAlpha(VK_BLEND_FACTOR_ONE), aBlendDstAlpha(VK_BLEND_FACTOR_ZERO) {}
+      aBlendSrcAlpha(VK_BLEND_FACTOR_ONE), aBlendDstAlpha(VK_BLEND_FACTOR_ZERO),
+      aSpecCount(0), aKeyVersion(kPipelineKeyVersion) {
+    std::memset(aSpec, 0, sizeof(aSpec));
+}
 
 bool ValidatePipelineDesc(const sPIPELINE_DESC &desc, const char **reason) {
     if (reason) *reason = 0;
@@ -201,6 +214,14 @@ bool ValidatePipelineDesc(const sPIPELINE_DESC &desc, const char **reason) {
     }
     if (desc.aLayout == VK_NULL_HANDLE) {
         if (reason) *reason = "管线布局（aLayout）为空";
+        return false;
+    }
+    if (desc.aSpecCount > 8u) {
+        if (reason) *reason = "特殊化常量数量超过 8";
+        return false;
+    }
+    if (desc.aKeyVersion == 0u) {
+        if (reason) *reason = "管线键版本不能为 0";
         return false;
     }
 
@@ -293,6 +314,15 @@ uint64_t ComputePipelineKey(const sPIPELINE_DESC &desc) {
     uint64_t hash = FNV_OFFSET_BASIS;
     MixU64(hash, static_cast<uint64_t>(desc.aKind));
     MixU64(hash, (uint64_t)(desc.aLayout));
+    MixU64(hash, desc.aKeyVersion);
+    MixU64(hash, desc.aSpecCount);
+    {
+        const uint32_t count = desc.aSpecCount < 8u ? desc.aSpecCount : 8u;
+        for (uint32_t i = 0; i < count; ++i) {
+            MixU64(hash, desc.aSpec[i].aId);
+            MixU64(hash, desc.aSpec[i].aValue);
+        }
+    }
 
     if (desc.aKind == ePIPE_COMPUTE) {
         MixU64(hash, static_cast<uint64_t>(desc.aCompSize));
@@ -342,6 +372,7 @@ uint64_t ComputePipelineKey(const sPIPELINE_DESC &desc) {
 
 bool PipelineDescEqual(const sPIPELINE_DESC &a, const sPIPELINE_DESC &b) {
     if (a.aKind != b.aKind || a.aLayout != b.aLayout) return false;
+    if (!SameSpecAndVersion(a, b)) return false;
     if (a.aKind == ePIPE_COMPUTE) {
         return SameBytes(a.aCompSpv, a.aCompSize, b.aCompSpv, b.aCompSize);
     }

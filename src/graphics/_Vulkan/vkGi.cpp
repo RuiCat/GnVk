@@ -116,6 +116,9 @@ void GN_VkSetSsgiStrength(float strength) {
         ubo->envParams[3] = strength; // SSGI 合成权重
         vkUnmapMemory(GN_Vk.device, GN_Vk.giUBOMemory);
     }
+    // GI UBO 与 SSGI UBO 是两份数据：前者决定 pass 是否执行/合成权重，后者是 shader
+    // 的开关位。只写前者会让 SSGI shader 永远 early-out（P0 修复）。
+    setSsgiEnabled(strength);
 }
 
 } // namespace GNg

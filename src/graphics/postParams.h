@@ -34,7 +34,13 @@ struct sPOST_UBO {
     float ev;             // 曝光 EV（仅记录/UI 用，渲染用 exposure）
     int32_t tonemapMode;  // eTONEMAP_MODE
     float fxaa;           // L2a：FXAA 开关（0=关，1=开；合成着色器内单 pass 实现）
-    float pad1;           // 对齐保留
+    union {
+        // 0 = 交换链是 8-bit sRGB 格式，硬件做 linear→sRGB；1 = 非 sRGB 交换链，
+        // composite 需要自己编码。由 Vulkan 后端按实际 swapchainFormat 覆盖。
+        float srgbEncode;
+        // 兼容旧名：历史代码把该 4 B 当 padding 写入，语义现在改为编码开关。
+        float pad1;
+    };
 };
 
 static_assert(sizeof(sPOST_UBO) == 32, "sPOST_UBO 必须与 shader 契约一致（32 B）");
@@ -45,6 +51,8 @@ static_assert(offsetof(sPOST_UBO, bloomKnee) == 12, "sPOST_UBO.bloomKnee 偏移�
 static_assert(offsetof(sPOST_UBO, ev) == 16, "sPOST_UBO.ev 偏移错误");
 static_assert(offsetof(sPOST_UBO, tonemapMode) == 20, "sPOST_UBO.tonemapMode 偏移错误");
 static_assert(offsetof(sPOST_UBO, fxaa) == 24, "sPOST_UBO.fxaa 偏移错误");
+static_assert(offsetof(sPOST_UBO, srgbEncode) == 28, "sPOST_UBO.srgbEncode 偏移错误");
+static_assert(offsetof(sPOST_UBO, pad1) == 28, "sPOST_UBO.pad1 兼容别名偏移错误");
 
 // 默认后处理参数：曝光 1、ACES、Bloom 0.3 / 阈值 0.8 / 膝盖 0.3（§4.3）。
 sPOST_UBO makeDefaultPostUbo();

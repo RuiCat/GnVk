@@ -47,10 +47,11 @@ make imoRoomAsset \
 | `IMO_SCENE_INSPECT` | 未设 | `=1` 只自检角色；`=room` 只自检房间（不建窗口/不初始化 Vulkan） |
 | `IMO_SCENE_HIDE` / `IMO_SCENE_SHOW` | `Kemo_Body,Jirai` / 空 | 网格名子串过滤（只作用于角色） |
 | `IMO_SCENE_NO_TEXTURES` / `IMO_SCENE_MAX_MESHES` | 关 / 0 | 贴图与网格数的最小化二分开关 |
+| `IMO_SCENE_SRGB` | 开 | `=0` 关闭 albedo 的 sRGB 硬件解码（A/B 旧观感）；采样器 wrap 仍按 glTF sampler（默认 REPEAT） |
 | `IMO_SCENE_AMBIENT` | 0.35 | 房间模式的均匀环境辐亮度（0.2–0.6） |
 | `IMO_SCENE_BLOB` | 开 | `=0` 关掉贴地软阴影（假接触阴影） |
 | `IMO_SCENE_BLOB_SHADOW` / `IMO_SCENE_BLOB_RADIUS` | `assets/imoScene/blob_shadow.png` / 0.46 | 贴地阴影贴图与半径（米） |
-| `IMO_SCENE_SHADOWS` | 关 | **实验**：`=1` 开启方向光 CSM（真机首帧会触发 GPU 页错误，勿在日常会话用） |
+| `IMO_SCENE_SHADOWS` | 开 | 调试开关：`=0` 关闭方向光 CSM（E1/E2 修复后默认开；真机异常时用 0 回退） |
 | `IMO_SCENE_INDOOR_GI` | 开 | `=0` 退回天空 IBL（室内暖灰 SH9 的回退开关） |
 | `IMO_SCENE_SHADOW_INTENSITY` | 0.45 | 阴影方向光的强度 |
 | `IMO_SCENE_LAMPS` | 1.0 | 房间模式三盏吸顶点光的强度倍率 |
@@ -130,6 +131,10 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
 
 ## 关键决策
 
+- **贴图颜色空间与寻址**：glTF `baseColorTexture` 是 sRGB 编码，调用引擎
+  `ImageLoadFromMem(..., srgb, wrapU, wrapV)`：srgb=true 用 `R8G8B8A8_SRGB` 让硬件解码成线性，
+  wrap 按 glTF sampler 的 `wrapS/wrapT`（缺省 REPEAT）建采样器，修掉原来固定 CLAMP_TO_EDGE 把越界 UV 拉成边条的问题。
+  本资产实测 UV 越界（角色 U 到 1.665、房间 U/V 到 5.54/3.87），必须 REPEAT；`IMO_SCENE_SRGB=0` 可回退旧观感。
 - **蒙皮在 CPU 烘焙**：GLB 的 skin 有 1797 个关节，超过 GPU 调色板 UBO 上限（128）；
   场景只显示导入姿势，因此用 `computeSkinPalette` + 四权重混合一次性烘焙进顶点，
   之后走普通 `cMODEL`/PBR 路径（不占 SSBO 蒙皮管线，也不受关节数限制）。
@@ -178,17 +183,18 @@ RGB 为正常肤色，确认是正确的贴图。转换日志会打印 `FBX2GLB 
 室内布光（房间模式）：
 
 - **不用天空 IBL**：户外天空是亮蓝色，直接当环境光会把房间洗成一片淡蓝、丢掉明暗。
-  `applyRoomAmbient()` 用自定义 GI UBO 覆盖成**均匀暖灰 SH9**（`sh00 = L·√(4π)`，其余系数清零），
-  镜面天空压到 1/4；`IMO_SCENE_AMBIENT` 调亮度（默认 0.35），`IMO_SCENE_EV` 调曝光（默认 -0.40）。
+  房间模式调用引擎环境预设 `GN_VkSetEnvironmentLighting(eENV_LIGHTING_INDOOR_UNIFORM, ambient)`，
+  由引擎生成**均匀暖灰 SH9**（`sh00 = L·√(4π)`，其余系数清零）并压暗镜面天空；
+  `IMO_SCENE_INDOOR_GI=0` 退回 `eENV_LIGHTING_SKY_IBL`；`IMO_SCENE_AMBIENT` 调亮度（默认 0.35），`IMO_SCENE_EV` 调曝光（默认 -0.40）。
 - **不加太阳**：方向光没有阴影时只会把室内照成一片平；改为三盏暖色吸顶点光
   （角色上方 2.6 / 厨房 1.8 / 玄关 1.1，`IMO_SCENE_LAMPS` 倍率），点光衰减给远处墙面自然明暗。
 - 角色模式（`IMO_SCENE_NO_ROOM=1`）保持原来的 GI/IBL + 方向光参数不变。
 - **贴地软阴影（默认）**：`imoSceneBlobShadow` 把 `assets/imoScene/blob_shadow.png`（128² 径向渐变）
   铺在脚下（半径 0.46 m，`IMO_SCENE_BLOB_RADIUS`），走 PBR 混合管线，只压暗脚下、不引入新光照。
   这是 CSM 不可用时的接地感替代。
-- **CSM（实验、默认关闭）**：`imoSceneShadow` 每帧拟合 4 级级联（2048²、λ=0.5、拟合盒=角色 AABB 外扩 2.5 m），
-  3D pass 前画深度图、只投角色。**真机实测开启后首帧触发 `amdgpu page fault` → GPU reset → 合成器崩溃**
-  （见 CHANGELOG 2026-11-21），因此默认关闭，仅在独立 TTY/可恢复环境里用 `IMO_SCENE_SHADOWS=1` 复现。
+- **CSM（默认开启）**：`imoSceneShadow` 每帧拟合 4 级级联（2048²、λ=0.5、拟合盒=角色 AABB 外扩 2.5 m），
+  3D pass 前画深度图、只投角色。E1/E2 修复后默认开启；`IMO_SCENE_SHADOWS=0` 关闭（调试/回退）。
+  历史：真机曾因退休缓冲同帧释放触发 `amdgpu page fault` → GPU reset → 合成器崩溃（见 CHANGELOG 2026-11-21）。
   已知边界：`cMODEL::DrawShadow` 只画 OPAQUE 网格（本角色 22/32 OPAQUE、10 MASK），
   MASK 部件不投影，阴影轮廓偏瘦。
 

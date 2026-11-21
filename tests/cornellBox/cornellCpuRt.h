@@ -4,7 +4,19 @@
 
 #include <vector>
 
+namespace GNg {
+struct sVEC3;
+}
+
 namespace Cornell {
+
+struct sCornellGeometry;
+
+// 从探针位置渲染 6 面 cubemap（RGB 线性 radiance），用于 SH9 烘焙。
+// facesRgb 长度 = 6 * faceSize² * 3，面序与 GN3d::cubemapFaceDirection 一致。
+bool bakeProbeCubemap(const sCornellGeometry &geometry, const GNg::sVEC3 &probe, int lightMode,
+                      int faceSize, int samples, unsigned int seed, float *facesRgb,
+                      float *depthMoments = nullptr);
 
 // 渲染当前相机视角到 RGBA8（width*height*4）。纯 CPU，不依赖 Vulkan。
 // eye/fwd/right/up 为世界空间基；fovYDeg 为垂直 FOV；lightMode: 0=sun, 1=point。

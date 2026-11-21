@@ -342,6 +342,15 @@ extern GN_INIT_API short *TouchX; //点触摸时当前窗口位置X
 extern GN_INIT_API short *TouchY; //点触摸时当前窗口位置Y
 extern GN_INIT_API unsigned char *TouchZ; //点触摸时当前窗口位置Z  255:刚点下去 1:刚提起来 0:没有接触 其它值:越大点击接触范围越大  !!当按下去之后就算按紧值最大为254
 
+// DA-M2 批 1b：IME 全局收敛进上下文（跨 TU 通过访问器读写）。
+struct sIME_CONTEXT {
+    bool aImeOn;
+    bool aImeOnRecv;
+    unsigned char aImeCount;
+    char aImeChar[256];
+};
+GN_INIT_API sIME_CONTEXT &GetImeContext();
+
 extern GN_INIT_API bool ViewReSized; //标记当前主视口是否发生过大小更变
 
 struct sOPERATE_TIP //操作提示

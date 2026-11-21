@@ -570,6 +570,50 @@ TEST_CASE(pipelineDescEqualComputeIgnoresGraphicsFields) {
     CHECK(!PipelineDescEqual(base, changed));
 }
 
+TEST_CASE(pipelineSpecConstantsAffectKeyAndEquality) {
+    const sPIPELINE_DESC base = makeGraphicsDesc();
+    CHECK_EQ(base.aSpecCount, 0u);
+    CHECK_EQ(base.aKeyVersion, kPipelineKeyVersion);
+
+    sPIPELINE_DESC withSpec = base;
+    withSpec.aSpecCount = 1u;
+    withSpec.aSpec[0].aId = 7u;
+    withSpec.aSpec[0].aValue = 42u;
+    expectKeyDiffers(base, withSpec);
+    CHECK(!PipelineDescEqual(base, withSpec));
+
+    sPIPELINE_DESC sameSpec = base;
+    sameSpec.aSpecCount = 1u;
+    sameSpec.aSpec[0].aId = 7u;
+    sameSpec.aSpec[0].aValue = 42u;
+    CHECK_EQ(ComputePipelineKey(withSpec), ComputePipelineKey(sameSpec));
+    CHECK(PipelineDescEqual(withSpec, sameSpec));
+
+    sPIPELINE_DESC changedValue = sameSpec;
+    changedValue.aSpec[0].aValue = 43u;
+    expectKeyDiffers(sameSpec, changedValue);
+
+    sPIPELINE_DESC changedVersion = base;
+    changedVersion.aKeyVersion = kPipelineKeyVersion + 1u;
+    expectKeyDiffers(base, changedVersion);
+    CHECK(!PipelineDescEqual(base, changedVersion));
+
+    sPIPELINE_DESC compute = makeComputeDesc();
+    sPIPELINE_DESC computeSpec = compute;
+    computeSpec.aSpecCount = 1u;
+    computeSpec.aSpec[0].aId = 1u;
+    computeSpec.aSpec[0].aValue = 0x3f800000u;
+    expectKeyDiffers(compute, computeSpec);
+
+    sPIPELINE_DESC tooMany = base;
+    tooMany.aSpecCount = 9u;
+    EXPECT_INVALID_DESC(tooMany);
+
+    sPIPELINE_DESC badVersion = base;
+    badVersion.aKeyVersion = 0u;
+    EXPECT_INVALID_DESC(badVersion);
+}
+
 TEST_CASE(cachesRejectWithoutDevice) {
     cSHADER_CACHE shaders;
     const std::vector<char> &spv = vertSpv();
@@ -580,6 +624,8 @@ TEST_CASE(cachesRejectWithoutDevice) {
     shaders.Release();
     shaders.Release(); // 可重复调用
     CHECK_EQ(shaders.GetCount(), 0u);
+    shaders.SetFrame(100);
+    CHECK_EQ(shaders.CollectGarbage(100, 2), 0u); // 无设备：安全 no-op
 
     cPIPELINE_CACHE pipelines;
     bool created = true;
@@ -588,6 +634,8 @@ TEST_CASE(cachesRejectWithoutDevice) {
     CHECK(pipelines.GetLastError() != 0);
     CHECK(pipelines.GetLastError()[0] != '\0');
     CHECK_EQ(pipelines.GetCount(), 0u);
+    pipelines.SetFrame(100);
+    CHECK_EQ(pipelines.CollectGarbage(100, 2), 0u); // 无设备：安全 no-op
     pipelines.Release();
     pipelines.Release();
     CHECK_EQ(pipelines.GetCount(), 0u);

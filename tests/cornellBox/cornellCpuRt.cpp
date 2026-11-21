@@ -4,9 +4,11 @@
 //   * 镜面球：反射射线回到场景，显示红/绿墙；
 //   * 漫反射面：直接光 + 3 次弹射的路径追踪（8 spp），背光面有天空 fill。
 // 有 Monte Carlo 噪声；用于在没有 GPU 光追后端时验证“真光追”效果。
+#include <GN.h>
 #include "cornellCpuRt.h"
 
 #include "cornellGeometry.h"
+#include "giParams.h"
 
 #include <algorithm>
 #include <cmath>
@@ -186,13 +188,14 @@ sVec3 shadeDirect(const sCornellGeometry &g, const sHit &hit, const sVec3 &p, in
         if (occluded(g, origin, L, dist - EPS)) return fill;
         const float range = 9.0f;
         const float att = 1.0f / (1.0f + 2.0f / range * dist + 1.0f / (range * range) * dist * dist);
-        const float scale = ndl / PI * 14.0f * att;
+        const float scale = ndl / PI * 3.0f * att;
         result = mul(albedo, scale);
     }
     return add(result, fill);
 }
 
-sVec3 radiance(const sCornellGeometry &g, const sRay &ray, int lightMode, sRng &rng) {
+sVec3 radiance(const sCornellGeometry &g, const sRay &ray, int lightMode, sRng &rng,
+               bool indirectOnly) {
     sVec3 result = v3(0.0f, 0.0f, 0.0f);
     sVec3 throughput = v3(1.0f, 1.0f, 1.0f);
     sRay current = ray;
@@ -211,8 +214,11 @@ sVec3 radiance(const sCornellGeometry &g, const sRay &ray, int lightMode, sRng &
             throughput = mul(throughput, albedo);
             continue;
         }
-        // 直接光 + 天空 fill（shadeDirect 内）。
-        result = add(result, mul(throughput, shadeDirect(g, hit, p, lightMode)));
+        // 直接光 + 天空 fill（shadeDirect 内）。indirectOnly 时跳过首个命中的直接光：
+        // 探针只缓存间接弹射，运行时再加直接光。
+        if (!indirectOnly || bounce > 0) {
+            result = add(result, mul(throughput, shadeDirect(g, hit, p, lightMode)));
+        }
         // 每次漫反射命中做一次余弦弹射：真实间接光（红/绿墙渗色、球体遮挡）。
         current.aOrigin = add(p, mul(hit.aNormal, EPS * 10.0f));
         current.aDir = cosineDir(hit.aNormal, rng);
@@ -275,7 +281,7 @@ bool renderCpuRt(int width, int height, const float eye[3], const float fwd[3],
                         ray.aOrigin = camera;
                         ray.aDir = normalize(add(add(forward, mul(cameraRight, (2.0f * u - 1.0f) * tanHalf * aspect)),
                                                  mul(cameraUp, (1.0f - 2.0f * v) * tanHalf)));
-                        sum = add(sum, radiance(geometry, ray, lightMode, rng));
+                        sum = add(sum, radiance(geometry, ray, lightMode, rng, false));
                     }
                     const sVec3 c = mul(sum, 1.0f / static_cast<float>(PT_SAMPLES));
                     const size_t o = (static_cast<size_t>(y) * width + x) * 4u;
@@ -288,6 +294,62 @@ bool renderCpuRt(int width, int height, const float eye[3], const float fwd[3],
         }));
     }
     for (size_t i = 0; i < workers.size(); ++i) workers[i].join();
+    return true;
+}
+
+
+bool bakeProbeCubemap(const sCornellGeometry &geometry, const GNg::sVEC3 &probe, int lightMode,
+                      int faceSize, int samples, unsigned int seed, float *facesRgb,
+                      float *depthMoments) {
+    if (!facesRgb || faceSize <= 0 || samples <= 0) return false;
+    for (int face = 0; face < 6; ++face) {
+        for (int y = 0; y < faceSize; ++y) {
+            const float v = 2.0f * (static_cast<float>(y) + 0.5f) / static_cast<float>(faceSize) -
+                            1.0f;
+            for (int x = 0; x < faceSize; ++x) {
+                const float u = 2.0f * (static_cast<float>(x) + 0.5f) /
+                                    static_cast<float>(faceSize) - 1.0f;
+                float dir[3] = {0.0f, 0.0f, 1.0f};
+                GN3d::cubemapFaceDirection(face, u, v, dir);
+                const sVec3 probePos = v3(probe.x, probe.y, probe.z);
+                const sRay ray = {probePos, normalize(v3(dir[0], dir[1], dir[2]))};
+                if (depthMoments) {
+                    float depthSum = 0.0f;
+                    float depthSqSum = 0.0f;
+                    const float texelStep = 2.0f / static_cast<float>(faceSize);
+                    for (int j = 0; j < 4; ++j) {
+                        const float ju = (j & 1) ? 0.5f : -0.5f;
+                        const float jv = (j & 2) ? 0.5f : -0.5f;
+                        float jitterDir[3] = {0.0f, 0.0f, 1.0f};
+                        GN3d::cubemapFaceDirection(face, u + ju * texelStep * 0.5f,
+                                                   v + jv * texelStep * 0.5f, jitterDir);
+                        const sRay jitterRay = {
+                            probePos, normalize(v3(jitterDir[0], jitterDir[1], jitterDir[2]))};
+                        const sHit depthHit = trace(geometry, jitterRay, 1.0e30f);
+                        const float depth = depthHit.aValid ? depthHit.aT : 1.0e30f;
+                        depthSum += depth;
+                        depthSqSum += depth * depth;
+                    }
+                    const std::size_t depthIdx =
+                        ((static_cast<std::size_t>(face) * faceSize + y) * faceSize + x) * 2u;
+                    depthMoments[depthIdx + 0] = depthSum * 0.25f;
+                    depthMoments[depthIdx + 1] = depthSqSum * 0.25f;
+                }
+                sVec3 sum = v3(0.0f, 0.0f, 0.0f);
+                for (int sample = 0; sample < samples; ++sample) {
+                    sRng rng(seed + static_cast<unsigned int>(face * 131 + y * 17 + x * 7 +
+                                                              sample));
+                    sum = add(sum, radiance(geometry, ray, lightMode, rng, true));
+                }
+                const sVec3 value = mul(sum, 1.0f / static_cast<float>(samples));
+                const std::size_t idx =
+                    ((static_cast<std::size_t>(face) * faceSize + y) * faceSize + x) * 3u;
+                facesRgb[idx + 0] = value.x;
+                facesRgb[idx + 1] = value.y;
+                facesRgb[idx + 2] = value.z;
+            }
+        }
+    }
     return true;
 }
 

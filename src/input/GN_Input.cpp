@@ -94,46 +94,73 @@ void GT_sINPUT_PARAME::ImeParameMake(void *str, unsigned short len) {
 }
 unsigned int GT_InputParameSizes[] = {0, 20, 4, 6, 8, 4, 8, 20, 4}; //各输入操作消息的参数数据总大小字节 !顺序一一对应 GT_eINPUT_TYPE
 
-GN::sLIST<GT_sINPUT_PARAME> GT_InputRecList[2]; //0:录制输入队列 1:回放演奏输入队列
-GN::sLIST<GT_sINPUT_PARAME>::iterator GT_InputIt; //定位播放的当前位置
+// DA-M2 批 1：输入模块 17 个文件内全局收敛进上下文（行为不变；IME 3 个仍跨 TU，留给 1b）。
+struct sINPUT_CONTEXT {
+    GN::sLIST<GT_sINPUT_PARAME> aInputRecList[2];
+    GN::sLIST<GT_sINPUT_PARAME>::iterator aInputIt;
+    bool aInputNotIsMapping = true;
+    bool aInputRecOn = false;
+    bool aInputPlaying = false;
+    uint8 aInputRecId = 0;
+    uint8 aInputPlayId = 1;
+    int aMousePosDeviation = 32;
+    bool aMouseRePosX = false;
+    bool aMouseRePosY = false;
+    GNg::cVIEW2D *aMouseRePosView = 0;
+    GN::sLIST<GNg::sRECT> aLastDelayedMouseStates;
+    uint8 aTouchMappingMKey = GM_LEFT;
+    float aLastZoomLen = 0.0f;
+    int aInputLastPort = 0;
+    int aInputTestTime = 10000000;
+    bool aWsMappingToKey = false;
+};
+static sINPUT_CONTEXT gInputContext;
+
+
+
+// DA-M2 批 1b：IME 上下文（跨 TU 通过 GN::GetImeContext() 访问）。
+GN_INIT_API GN::sIME_CONTEXT &GN::GetImeContext() {
+    static GN::sIME_CONTEXT ctx = {false, false, 0, {0}};
+    return ctx;
+}
 
 GN_INIT_API unsigned int GT_RunTotalTime = 0;
 GN_INIT_API unsigned int GT_RunTotalTimeApp = 0;
 GN_INIT_API unsigned int GT_LastRunTotalTimeApp = 0;
 GN_INIT_API unsigned int GT_RunTotalFpsApp = 0;
 
-bool GT_InputNotIsMapping = true; //标记当前输入消息是否非从其它映射得来的
-bool GT_InputRecOn = false; //是否开启动输入操作记录
-bool GT_InputPlaying = false; //输入操作回放是否进行中
-uint8 GT_InputRecID = 0; //输入操作记录引用的队列编号
-uint8 GT_InputPlayID = 1; //输入操作演示引用的队列编号
+
+
+
+
+
 unsigned int GT_InputRecStartTime; //输入操作记录开始时间
 unsigned int GT_InputPlayStartTime; //输入操作演示开始时间
 
 GN_INIT_API void GN::InputRecReStart() {
     InputRecClear();
     GT_InputRecStartTime = GT_RunTotalTimeApp;
-    GT_InputRecOn = true;
+    gInputContext.aInputRecOn = true;
 }
 GN_INIT_API void GN::InputRecExitMsg() {
     GT_sINPUT_PARAME prm;
     prm.type = GT_eINPUT_GAME_EXIT;
     prm.time = GT_RunTotalTimeApp - GT_InputRecStartTime;
-    GT_InputRecList[GT_InputRecID].push_back(prm);
+    gInputContext.aInputRecList[gInputContext.aInputRecId].push_back(prm);
 }
 GN_INIT_API void GN::InputRecEnd() {
-    GT_InputRecOn = false;
+    gInputContext.aInputRecOn = false;
 }
 
 GN_INIT_API void GN::InputRecSave(const char *file_name, unsigned int dateID) {
-    if(GT_InputRecList[GT_InputRecID].empty()) return;
+    if(gInputContext.aInputRecList[gInputContext.aInputRecId].empty()) return;
     GNf::sFILE *fp = GNf::Open((char *)file_name, "wb", GNf::eFILE_STD);
     if(!fp) {
         GN_Log("保存输入操作记录失败!\n");
         return;
     }
     uint8 locbuf[131072] /*128K*/, fh[4] = {0x21, 0x08, 0x18, 0x08 /*GNd::eDATA_GIN*/};
-    unsigned int size = GT_InputRecList[GT_InputRecID].size();
+    unsigned int size = gInputContext.aInputRecList[gInputContext.aInputRecId].size();
     GN::sTBUF_INT tbuf(locbuf, 131072);
     uint8 *buf = (uint8 *)tbuf.GetSpace(16 + size * 64 /*(4+2+58)*/);
     uint8 *wpos = buf;
@@ -147,7 +174,7 @@ GN_INIT_API void GN::InputRecSave(const char *file_name, unsigned int dateID) {
     wpos += 4; //写入记录条目数
 
     GT_sINPUT_PARAME *_inp;
-    GN::sLIST<GT_sINPUT_PARAME>::iterator it = GT_InputRecList[GT_InputRecID].begin(), et = GT_InputRecList[GT_InputRecID].end();
+    GN::sLIST<GT_sINPUT_PARAME>::iterator it = gInputContext.aInputRecList[gInputContext.aInputRecId].begin(), et = gInputContext.aInputRecList[gInputContext.aInputRecId].end();
     for(; it != et; ++it) { //写入每条记录数据段
         _inp = &(*it);
         memcpy(wpos, &(_inp->time), 4);
@@ -176,8 +203,8 @@ GN_INIT_API void GN::InputRecSave(const char *file_name, unsigned int dateID) {
     GNf::Close(fp);
 }
 GN_INIT_API void GN::InputRecClear() {
-    GT_InputRecList[GT_InputRecID].clear();
-    GT_InputRecOn = false;
+    gInputContext.aInputRecList[gInputContext.aInputRecId].clear();
+    gInputContext.aInputRecOn = false;
 }
 GN_INIT_API bool GN::InputRecOpenPlay(const char *file_name, unsigned int *dateID, unsigned int *time) {
     InputRecClearPlay();
@@ -222,30 +249,30 @@ GN_INIT_API bool GN::InputRecOpenPlay(const char *file_name, unsigned int *dateI
             memcpy(inp.parame, rpos, GT_InputParameSizes[inp.type]);
             rpos += GT_InputParameSizes[inp.type];
         }
-        GT_InputRecList[GT_InputPlayID].push_back(inp);
+        gInputContext.aInputRecList[gInputContext.aInputPlayId].push_back(inp);
     }
     delete[] buf;
     return true;
 }
 GN_INIT_API void GN::InputRecRePlay() {
-    GT_InputPlaying = true;
+    gInputContext.aInputPlaying = true;
     GT_InputPlayStartTime = GT_RunTotalTimeApp;
-    GT_InputIt = GT_InputRecList[GT_InputPlayID].begin();
+    gInputContext.aInputIt = gInputContext.aInputRecList[gInputContext.aInputPlayId].begin();
 }
 GN_INIT_API void GN::InputRecStopPlay() {
-    GT_InputPlaying = false;
+    gInputContext.aInputPlaying = false;
 }
 GN_INIT_API void GN::InputRecClearPlay() {
-    GT_InputRecList[GT_InputPlayID].clear();
-    GT_InputPlaying = false;
+    gInputContext.aInputRecList[gInputContext.aInputPlayId].clear();
+    gInputContext.aInputPlaying = false;
 }
 GN_INIT_API void GN::InputRecSwapToPlay() {
-    GN_Swap(uint8, GT_InputPlayID, GT_InputRecID);
-    GT_InputPlaying = false;
-    GT_InputRecOn = false;
+    GN_Swap(uint8, gInputContext.aInputPlayId, gInputContext.aInputRecId);
+    gInputContext.aInputPlaying = false;
+    gInputContext.aInputRecOn = false;
 }
 GN_INIT_API uint8 GN::InputRecLastKeyUpGet() {
-    GN::sLIST<GT_sINPUT_PARAME>::reverse_iterator itr = GT_InputRecList[GT_InputRecID].rbegin(), etr = GT_InputRecList[GT_InputRecID].rend();
+    GN::sLIST<GT_sINPUT_PARAME>::reverse_iterator itr = gInputContext.aInputRecList[gInputContext.aInputRecId].rbegin(), etr = gInputContext.aInputRecList[gInputContext.aInputRecId].rend();
     for(; itr != etr; ++itr) {
         if(itr->type == GT_eINPUT_KEYBOARD) {
             if(!itr->parame[1]) return itr->parame[0];
@@ -255,16 +282,16 @@ GN_INIT_API uint8 GN::InputRecLastKeyUpGet() {
 }
 /*-----------------------------------------------------  文字输入 -----------------------------------------------------------------------*/
 
-bool GT_ImeOn = 0; //记录当前是否要接受输入
-bool GT_ImeOnRecv = 0; //标记当前是否有需要接受输入
-unsigned char GT_ImeCount = 0; //最近输进来字符数
-char GT_ImeChar[256] = {0}; //最近输入进来的字符数据
+
+
+
+
 
 GN_INIT_API bool GN_ImeIsOpen() {
-    return (GT_ImeOn || GT_ImeOnRecv);
+    return (GN::GetImeContext().aImeOn || GN::GetImeContext().aImeOnRecv);
 }
 GN_INIT_API bool GN_SkbNeedOpen() {
-    return GT_ImeOn;
+    return GN::GetImeContext().aImeOn;
 }
 
 /*****************************************************************************************************************************************/
@@ -273,12 +300,12 @@ extern void (*GT_BreakLoopHookProc)();
 #endif
 unsigned int GT_LastOnMouseTime[5] = {10000000, 10000000, 10000000, 10000000, 10000000}; //储存上次按过鼠标键到现在的时间
 unsigned int GT_MouseInterval = 600; //鼠标双击间隔时间
-int GT_MousePosDeviation = 32; //鼠标双击允许位置误差
-bool GT_MouseRePosX = false; //鼠标X出界自动重置为中间位置
-bool GT_MouseRePosY = false; //鼠标Y出界自动重置为中间位置
-GNg::cVIEW2D *GT_MouseRePosView = 0; //鼠标出界自动重置为中间位置对应的视口
 
-GN::sLIST<GNg::sRECT> GT_LastDelayedMouseStates; //记录上次需延误的鼠标状态更变消息
+
+
+
+
+
 GN_INIT_API unsigned int GT_IdleTime = 0;
 
 GN_INIT_API void GF_ReSetInputState(void (*get_ime_func)(char *ime_str, unsigned char *ime_len)) {
@@ -305,7 +332,7 @@ GN_INIT_API void GF_ReSetInputState(void (*get_ime_func)(char *ime_str, unsigned
     GN::MouseMKS = 0;
     GN::KeyDown = false;
     if(GT_RunTotalTime > 20 && GT_RunTotalTimeApp > 20) GN::ViewReSized = false;
-    GT_ImeCount = 0;
+    GN::GetImeContext().aImeCount = 0;
 
     if(GN::Mouse[GM_TOP]) {
         GN::Mouse[GM_TOP] = 0;
@@ -326,27 +353,27 @@ GN_INIT_API void GF_ReSetInputState(void (*get_ime_func)(char *ime_str, unsigned
         GN::MouseI[GM_BOTTOM] = 1;
     }
 
-    if(GT_LastDelayedMouseStates.size()) { //消化延误的消息
-        GN::sLIST<GNg::sRECT>::iterator itdms = GT_LastDelayedMouseStates.begin(), etdms = GT_LastDelayedMouseStates.end();
+    if(gInputContext.aLastDelayedMouseStates.size()) { //消化延误的消息
+        GN::sLIST<GNg::sRECT>::iterator itdms = gInputContext.aLastDelayedMouseStates.begin(), etdms = gInputContext.aLastDelayedMouseStates.end();
         GNg::sRECT *_dms;
         for(; itdms != etdms; ++itdms) {
             _dms = &(*itdms);
             GF_SetMouseState((uint8)_dms->right, _dms->bottom ? 1 : 0, _dms->left, _dms->top);
         }
-        GT_LastDelayedMouseStates.clear();
+        gInputContext.aLastDelayedMouseStates.clear();
     }
     //输入控制演示处理,将记录到的消息转为相应控制调用---------------------------------------------------------------------------------------
-    if(GT_InputPlaying) {
+    if(gInputContext.aInputPlaying) {
         GT_sINPUT_PARAME *_inp;
-        GN::sLIST<GT_sINPUT_PARAME>::iterator itend = GT_InputRecList[GT_InputPlayID].end();
-        for(; GT_InputIt != itend && GT_InputIt->time + GT_InputPlayStartTime <= GT_RunTotalTimeApp; ++GT_InputIt) {
-            _inp = &(*GT_InputIt);
+        GN::sLIST<GT_sINPUT_PARAME>::iterator itend = gInputContext.aInputRecList[gInputContext.aInputPlayId].end();
+        for(; gInputContext.aInputIt != itend && gInputContext.aInputIt->time + GT_InputPlayStartTime <= GT_RunTotalTimeApp; ++gInputContext.aInputIt) {
+            _inp = &(*gInputContext.aInputIt);
             switch(_inp->type) {
                 case GT_eINPUT_MOUSE_MOVE: {
-                    GNg::cVIEW2D *last_rpv = GT_MouseRePosView;
-                    GT_MouseRePosView = 0;
+                    GNg::cVIEW2D *last_rpv = gInputContext.aMouseRePosView;
+                    gInputContext.aMouseRePosView = 0;
                     GF_SetMouseMoveState((unsigned short)_inp->parame[0], _inp->parame[1], _inp->parame[2]);
-                    GT_MouseRePosView = last_rpv;
+                    gInputContext.aMouseRePosView = last_rpv;
                 } break;
                 case GT_eINPUT_MOUSE_KEY:
                     GF_SetMouseState((uint8)_inp->parame[0], _inp->parame[1] ? 1 : 0, _inp->parame[2], _inp->parame[3]);
@@ -364,8 +391,8 @@ GN_INIT_API void GF_ReSetInputState(void (*get_ime_func)(char *ime_str, unsigned
                     GF_SetKeyState(_inp->parame[0], _inp->parame[1] ? 1 : 0);
                     break;
                 case GT_eINPUT_IME:
-                    GT_ImeCount = *((unsigned short *)_inp->parame);
-                    memcpy(GT_ImeChar, GT_ImeCount > 18 ? *((char **)(_inp->parame + 1)) : (char *)(_inp->parame + 1), GT_ImeCount);
+                    GN::GetImeContext().aImeCount = *((unsigned short *)_inp->parame);
+                    memcpy(GN::GetImeContext().aImeChar, GN::GetImeContext().aImeCount > 18 ? *((char **)(_inp->parame + 1)) : (char *)(_inp->parame + 1), GN::GetImeContext().aImeCount);
                     break;
 #ifdef _GN_MAIN_H_
                 case GT_eINPUT_GAME_EXIT:
@@ -379,18 +406,18 @@ GN_INIT_API void GF_ReSetInputState(void (*get_ime_func)(char *ime_str, unsigned
             }
         }
     }
-    if(GT_ImeOn || GT_ImeOnRecv) get_ime_func(GT_ImeChar, &GT_ImeCount); //接收文本输入来的内容
+    if(GN::GetImeContext().aImeOn || GN::GetImeContext().aImeOnRecv) get_ime_func(GN::GetImeContext().aImeChar, &GN::GetImeContext().aImeCount); //接收文本输入来的内容
 #ifdef _GN_MAIN_H_
     else GN_SetImeFouscePos(-10000, -10000);
 #endif
-    if(GT_ImeCount) {
+    if(GN::GetImeContext().aImeCount) {
         GT_IdleTime = 0;
-        if(GT_InputRecOn) { //当有文字输入进来时就记录输入
+        if(gInputContext.aInputRecOn) { //当有文字输入进来时就记录输入
             GT_sINPUT_PARAME inp;
             inp.time = GT_RunTotalTimeApp - GT_InputRecStartTime;
             inp.type = GT_eINPUT_IME;
-            inp.ImeParameMake(GT_ImeChar, GT_ImeCount);
-            GT_InputRecList[GT_InputRecID].push_back(inp);
+            inp.ImeParameMake(GN::GetImeContext().aImeChar, GN::GetImeContext().aImeCount);
+            gInputContext.aInputRecList[gInputContext.aInputRecId].push_back(inp);
         }
     }
 }
@@ -413,10 +440,10 @@ GN_INIT_API void GF_DownKeyAllLoosen() {
 }
 GN_INIT_API void GF_SetMouseState(uint8 mkey, bool is_down, int px, int py) { //GN_Log("state: mkey=%d, is_down=%d, px=%d, py=%d\n", (int)mkey, is_down?1:0, px,py);
     if(!is_down && GN::MouseT[mkey] == 1) {
-        GT_LastDelayedMouseStates.push_back(GNg::sRECT(px, py, (int)mkey, 0));
+        gInputContext.aLastDelayedMouseStates.push_back(GNg::sRECT(px, py, (int)mkey, 0));
         return;
     }
-    if(GT_InputRecOn && GT_InputNotIsMapping) { //记录鼠标点击输入
+    if(gInputContext.aInputRecOn && gInputContext.aInputNotIsMapping) { //记录鼠标点击输入
         GT_sINPUT_PARAME inp;
         inp.time = GT_RunTotalTimeApp - GT_InputRecStartTime;
         inp.type = GT_eINPUT_MOUSE_KEY;
@@ -424,7 +451,7 @@ GN_INIT_API void GF_SetMouseState(uint8 mkey, bool is_down, int px, int py) { //
         inp.parame[1] = is_down ? 1 : 0;
         inp.parame[2] = px;
         inp.parame[3] = py;
-        GT_InputRecList[GT_InputRecID].push_back(inp);
+        gInputContext.aInputRecList[gInputContext.aInputRecId].push_back(inp);
     }
     GN::Mouse[mkey] = is_down;
     GN::MouseMX = px;
@@ -458,14 +485,14 @@ GN_INIT_API void GF_SetMouseState(uint8 mkey, bool is_down, int px, int py) { //
 GN_INIT_API void GF_SetMouseMoveState(unsigned short keys_state, int new_x, int new_y) {
     if(new_x == GN::MouseMX && new_y == GN::MouseMY) return; //忽略位置相同的消息 以免浪费性能
 
-    if(GT_InputRecOn && GT_InputNotIsMapping) { //记录鼠标移动输入
+    if(gInputContext.aInputRecOn && gInputContext.aInputNotIsMapping) { //记录鼠标移动输入
         GT_sINPUT_PARAME inp;
         inp.time = GT_RunTotalTimeApp - GT_InputRecStartTime;
         inp.type = GT_eINPUT_MOUSE_MOVE;
         inp.parame[0] = keys_state;
         inp.parame[1] = new_x;
         inp.parame[2] = new_y;
-        GT_InputRecList[GT_InputRecID].push_back(inp);
+        gInputContext.aInputRecList[gInputContext.aInputRecId].push_back(inp);
     }
     static unsigned int lastMouseTime = 0;
     int vx, vy; /*模版代码:计算在额定时间内的位置差*/
@@ -483,7 +510,7 @@ GN_INIT_API void GF_SetMouseMoveState(unsigned short keys_state, int new_x, int 
     memset(GN::MouseT, 0, 20 /* sizeof(unsigned int)*5 */);
 
 #ifdef _GN_MAIN_H_
-    if((vx > GT_MousePosDeviation || vy > GT_MousePosDeviation || vx < GT_MousePosDeviation || vy < GT_MousePosDeviation)) {
+    if((vx > gInputContext.aMousePosDeviation || vy > gInputContext.aMousePosDeviation || vx < gInputContext.aMousePosDeviation || vy < gInputContext.aMousePosDeviation)) {
         GT_LastOnMouseTime[0] = 10000000;
         GT_LastOnMouseTime[1] = 10000000;
         GT_LastOnMouseTime[2] = 10000000;
@@ -502,23 +529,23 @@ GN_INIT_API void GF_SetMouseMoveState(unsigned short keys_state, int new_x, int 
         pv->mouseMSY = vy * pv->zScreenRatioH;
 
         //使适合第一人称射击游戏的鼠标会轮回中心的处理
-        if(pv == GT_MouseRePosView) {
+        if(pv == gInputContext.aMouseRePosView) {
             short bw = pv->viewW >> 4, bh = pv->viewH >> 4, xpos, ypos;
-            if(GT_MouseRePosX && ((short)new_x > pv->viewX + pv->viewW - bw || (short)new_x < pv->viewX + bw)) xpos = pv->viewX + (pv->viewW >> 1);
+            if(gInputContext.aMouseRePosX && ((short)new_x > pv->viewX + pv->viewW - bw || (short)new_x < pv->viewX + bw)) xpos = pv->viewX + (pv->viewW >> 1);
             else xpos = new_x;
-            if(GT_MouseRePosY && ((short)new_y > pv->viewY + pv->viewH - bh || (short)new_y < pv->viewY + bh)) {
+            if(gInputContext.aMouseRePosY && ((short)new_y > pv->viewY + pv->viewH - bh || (short)new_y < pv->viewY + bh)) {
                 ypos = pv->viewY + (pv->viewH >> 1);
                 GN_SetCursorPos(xpos, ypos, false);
             } else {
                 ypos = new_y;
                 if(xpos != (short)new_x) GN_SetCursorPos(xpos, ypos, false);
             }
-            if(GT_MouseRePosX) { //速度轮回时会太长抵扣一下
+            if(gInputContext.aMouseRePosX) { //速度轮回时会太长抵扣一下
                 int rng = (pv->orthoW >> 2) + (pv->orthoW >> 3);
                 if(pv->mouseMSX > rng) pv->mouseMSX -= (pv->orthoW >> 1) - (pv->orthoW >> 4);
                 else if(pv->mouseMSX < -rng) pv->mouseMSX += (pv->orthoW >> 1) - (pv->orthoW >> 4);
             }
-            if(GT_MouseRePosY) {
+            if(gInputContext.aMouseRePosY) {
                 int rng = (pv->orthoH >> 2) + (pv->orthoH >> 3);
                 if(pv->mouseMSY > rng) pv->mouseMSY -= (pv->orthoH >> 1) - (pv->orthoH >> 4);
                 else if(pv->mouseMSY < -rng) pv->mouseMSY += (pv->orthoH >> 1) - (pv->orthoH >> 4);
@@ -531,57 +558,57 @@ GN_INIT_API void GF_SetMouseMoveState(unsigned short keys_state, int new_x, int 
 }
 /******************************************************** 触摸消息处理 ***************************************************************/
 unsigned short GT_DitherRange = 16; //触摸映射为鼠标按下的防斗容忍范围
-uint8 GT_TouchMappingMKey = GM_LEFT; //当前触摸点映射为鼠标的键位
+
 unsigned int GT_Touch0DownTime = 0; //首个触摸点原位按紧不动还未映射为其它鼠键时的累计时间
-float GT_LastZoomLen; //上次滚轮映射缩放剩余的累计长度
+
 
 GN_INIT_API void GF_SetTouchState(uint8 point_id, uint8 down) {
-    if(GT_TouchMappingMKey < GM_TOP) {
+    if(gInputContext.aTouchMappingMKey < GM_TOP) {
         if(point_id == 0) { //如是首个触摸点就映射为鼠标事件
             if(down == 255) {
                 GT_Touch0DownTime = 1;
-                GT_TouchMappingMKey = GM_LEFT;
+                gInputContext.aTouchMappingMKey = GM_LEFT;
 
             } else if(down == 1) {
-                GT_InputNotIsMapping = 0;
+                gInputContext.aInputNotIsMapping = 0;
                 if(GT_Touch0DownTime) {
-                    GF_SetMouseState(GT_TouchMappingMKey, 1, GN::TouchX[0], GN::TouchY[0]);
+                    GF_SetMouseState(gInputContext.aTouchMappingMKey, 1, GN::TouchX[0], GN::TouchY[0]);
                     GT_Touch0DownTime = 0;
                 }
-                GF_SetMouseState(GT_TouchMappingMKey, 0, GN::TouchX[0], GN::TouchY[0]);
-                GT_InputNotIsMapping = 1;
+                GF_SetMouseState(gInputContext.aTouchMappingMKey, 0, GN::TouchX[0], GN::TouchY[0]);
+                gInputContext.aInputNotIsMapping = 1;
             }
         } else if(point_id == 1) {
             if(down == 255) {
                 if(GT_Touch0DownTime) {
                     GT_Touch0DownTime = 0;
-                    GT_TouchMappingMKey = GM_TOP; //映射更变为滚轮键
-                    GT_LastZoomLen = 0.0f;
+                    gInputContext.aTouchMappingMKey = GM_TOP; //映射更变为滚轮键
+                    gInputContext.aLastZoomLen = 0.0f;
                 }
             }
         }
     } else { //映射滚轮操作模式
         if(down == 1) {
             if((!point_id && GN::TouchZ[1] <= 1) || (point_id == 1 && GN::TouchZ[0] <= 1)) {
-                GT_TouchMappingMKey = GM_LEFT; //这时第一和二个触摸点都被释放就标记退出滚轮操作
-                if(GT_LastZoomLen > -0.01f && GT_LastZoomLen < 0.01f) {
-                    GT_InputNotIsMapping = 0;
+                gInputContext.aTouchMappingMKey = GM_LEFT; //这时第一和二个触摸点都被释放就标记退出滚轮操作
+                if(gInputContext.aLastZoomLen > -0.01f && gInputContext.aLastZoomLen < 0.01f) {
+                    gInputContext.aInputNotIsMapping = 0;
                     GF_SetMouseState(GM_RIGHT, 1, GN::MouseMX, GN::MouseMY);
                     GF_SetMouseState(GM_RIGHT, 0, GN::MouseMX, GN::MouseMY);
-                    GT_InputNotIsMapping = 1;
+                    gInputContext.aInputNotIsMapping = 1;
                 }
             }
-            if(point_id <= 1) GT_LastZoomLen = 0.0f;
+            if(point_id <= 1) gInputContext.aLastZoomLen = 0.0f;
         }
     }
     //--------------------------------------------------------------------------------------------
-    if(GT_InputRecOn) { //记录触摸点击输入
+    if(gInputContext.aInputRecOn) { //记录触摸点击输入
         GT_sINPUT_PARAME inp;
         inp.time = GT_RunTotalTimeApp - GT_InputRecStartTime;
         inp.type = GT_eINPUT_TOUCH_KEY;
         inp.parame[0] = (short)point_id;
         inp.parame[1] = (short)down;
-        GT_InputRecList[GT_InputRecID].push_back(inp);
+        gInputContext.aInputRecList[gInputContext.aInputRecId].push_back(inp);
     }
     GN::TouchZ[point_id] = down;
 
@@ -589,30 +616,30 @@ GN_INIT_API void GF_SetTouchState(uint8 point_id, uint8 down) {
 }
 GN_INIT_API void GF_SetTouchMoveState(uint8 point_id, uint8 down_z, short new_x, short new_y) {
     if(GT_Touch0DownTime /* > 240*/ >= GT_MouseInterval) { //当有首个触摸点长按时就映射为鼠标左键双击消息
-        GT_InputNotIsMapping = false;
+        gInputContext.aInputNotIsMapping = false;
         GF_SetMouseState(GM_LEFT, 1, GN::MouseMX, GN::MouseMY);
         GN::Mouse2[GM_LEFT] = 1;
         GF_SetMouseState(GM_LEFT, 0, GN::MouseMX, GN::MouseMY);
-        GT_InputNotIsMapping = true;
+        gInputContext.aInputNotIsMapping = true;
         GT_Touch0DownTime = 0;
     }
     short *touch_x = GN::TouchX, *touch_y = GN::TouchY;
     if(touch_x[point_id] == new_x && touch_y[point_id] == new_y && (GN::TouchZ[point_id] == 255 || GN::TouchZ[point_id] == down_z)) return; //忽略没更变的消息 以免浪费性能
 
-    if(GT_TouchMappingMKey < GM_TOP) {
+    if(gInputContext.aTouchMappingMKey < GM_TOP) {
         if(point_id == 0) { //如是首个触摸点就映射为鼠标事件
             short crs_x = new_x - touch_x[point_id], crs_y = new_y - touch_y[point_id];
             if(crs_x && crs_y) {
-                GT_InputNotIsMapping = 0;
+                gInputContext.aInputNotIsMapping = 0;
                 if(GT_Touch0DownTime) {
                     short dhr = (short)GT_DitherRange;
                     if(crs_x > dhr || crs_x < -dhr || crs_y > dhr || crs_y < -dhr) {
-                        GF_SetMouseState(GT_TouchMappingMKey, 1, (int)new_x, (int)new_y);
+                        GF_SetMouseState(gInputContext.aTouchMappingMKey, 1, (int)new_x, (int)new_y);
                         GT_Touch0DownTime = 0;
                     }
                 }
-                GF_SetMouseMoveState(GT_TouchMappingMKey == GM_LEFT ? GMM_LEFT : GMM_RIGHT, (int)new_x, (int)new_y);
-                GT_InputNotIsMapping = 1;
+                GF_SetMouseMoveState(gInputContext.aTouchMappingMKey == GM_LEFT ? GMM_LEFT : GMM_RIGHT, (int)new_x, (int)new_y);
+                gInputContext.aInputNotIsMapping = 1;
             }
         }
     } else { //映射滚轮操作模式
@@ -625,21 +652,21 @@ GN_INIT_API void GF_SetTouchMoveState(uint8 point_id, uint8 down_z, short new_x,
                 tchp0_1.x = (float)(touch_x[1] - touch_x[0]), tchp0_1.y = (float)(touch_y[1] - touch_y[0]);
                 tchp0__1.x = (float)(new_x - touch_x[0]), tchp0__1.y = (float)(new_y - touch_y[0]);
             }
-            GT_LastZoomLen += GNg::Vec2Length(&tchp0__1) - GNg::Vec2Length(&tchp0_1);
+            gInputContext.aLastZoomLen += GNg::Vec2Length(&tchp0__1) - GNg::Vec2Length(&tchp0_1);
 
-            GT_InputNotIsMapping = 0;
-            if(GT_LastZoomLen > 65.0f) {
-                GT_LastZoomLen -= 65.0f;
+            gInputContext.aInputNotIsMapping = 0;
+            if(gInputContext.aLastZoomLen > 65.0f) {
+                gInputContext.aLastZoomLen -= 65.0f;
                 GF_SetMouseState(GM_TOP, 1, GN::MouseMX, GN::MouseMY);
-            } else if(GT_LastZoomLen < -65.0f) {
-                GT_LastZoomLen += 65.0f;
+            } else if(gInputContext.aLastZoomLen < -65.0f) {
+                gInputContext.aLastZoomLen += 65.0f;
                 GF_SetMouseState(GM_BOTTOM, 1, GN::MouseMX, GN::MouseMY);
             }
-            GT_InputNotIsMapping = 1;
+            gInputContext.aInputNotIsMapping = 1;
         }
     }
     //--------------------------------------------------------------------------------------------
-    if(GT_InputRecOn) { //记录触摸拖动输入
+    if(gInputContext.aInputRecOn) { //记录触摸拖动输入
         GT_sINPUT_PARAME inp;
         inp.time = GT_RunTotalTimeApp - GT_InputRecStartTime;
         inp.type = GT_eINPUT_TOUCH_MOVE;
@@ -647,7 +674,7 @@ GN_INIT_API void GF_SetTouchMoveState(uint8 point_id, uint8 down_z, short new_x,
         inp.parame[1] = (short)down_z;
         inp.parame[2] = new_x;
         inp.parame[3] = new_y;
-        GT_InputRecList[GT_InputRecID].push_back(inp);
+        gInputContext.aInputRecList[gInputContext.aInputRecId].push_back(inp);
     }
     static unsigned int lastTouchTime = 0;
     short vx, vy; /*模版代码:计算在额定时间内的位置差*/
@@ -679,13 +706,13 @@ GN_INIT_API void GF_SetTouchMoveState(uint8 point_id, uint8 down_z, short new_x,
 }
 /*************************************************************************************************************************************/
 GN_INIT_API void GF_SetKeyState_(int key, bool is_down) {
-    if(GT_InputRecOn && GN::Key[key] != is_down) { //记录按键盘输入
+    if(gInputContext.aInputRecOn && GN::Key[key] != is_down) { //记录按键盘输入
         GT_sINPUT_PARAME inp;
         inp.time = GT_RunTotalTimeApp - GT_InputRecStartTime;
         inp.type = GT_eINPUT_KEYBOARD;
         inp.parame[0] = key;
         inp.parame[1] = is_down ? 1 : 0;
-        GT_InputRecList[GT_InputRecID].push_back(inp);
+        gInputContext.aInputRecList[gInputContext.aInputRecId].push_back(inp);
     }
     if(!is_down) GN::Key0[key] = 1;
     GN::Key1[key] = GN::KeyDown = !GN::Key[key];
@@ -696,20 +723,20 @@ GN_INIT_API void GF_SetKeyState_(int key, bool is_down) {
 GN_INIT_API void (*GF_SetKeyState)(int key, bool is_down) = GF_SetKeyState_;
 
 GN_INIT_API void GF_SetInFvState(short start_infv_id, const float *infv, short in_count) {
-    if(GT_InputRecOn) { //记录浮点数值更新输入
+    if(gInputContext.aInputRecOn) { //记录浮点数值更新输入
         GT_sINPUT_PARAME inp;
         inp.time = GT_RunTotalTimeApp - GT_InputRecStartTime;
         inp.type = GT_eINPUT_INFV_UPDATE;
         inp.parame[0] = start_infv_id;
         inp.parame[1] = in_count;
         memcpy(inp.parame + 2, infv, in_count << 2 /* *sizeof(float) */);
-        GT_InputRecList[GT_InputRecID].push_back(inp);
+        gInputContext.aInputRecList[gInputContext.aInputRecId].push_back(inp);
     }
     memcpy(GNio::InFv + start_infv_id, infv, in_count << 2);
     //GT_IdleTime = 0;
 }
-int GT_InPutLastPort = 0; //最近按下过的输入端口号
-int GT_InPutTestTime = 10000000; //输入出端口测试时间
+
+
 unsigned short *GT_IO_MappingKeys = 0; //IO输入出映射键数据
 
 GN_INIT_API void GF_SetInPortState(unsigned short port_id, bool is_on) {
@@ -717,17 +744,17 @@ GN_INIT_API void GF_SetInPortState(unsigned short port_id, bool is_on) {
     if(GT_IO_MappingKeys && GT_IO_MappingKeys[port_id])
         GF_SetKeyState(GT_IO_MappingKeys[port_id], is_on);
 
-    GT_InPutLastPort = port_id;
-    GT_InPutTestTime = 0;
+    gInputContext.aInputLastPort = port_id;
+    gInputContext.aInputTestTime = 0;
 }
 GN_INIT_API void GF_ReSetViewport(short new_w, short new_h) {
-    if(GT_InputRecOn) { //记录窗口大小改变
+    if(gInputContext.aInputRecOn) { //记录窗口大小改变
         GT_sINPUT_PARAME inp;
         inp.time = GT_RunTotalTimeApp - GT_InputRecStartTime;
         inp.type = GT_eINPUT_VIEW_SIZE;
         inp.parame[0] = new_w;
         inp.parame[1] = new_h;
-        GT_InputRecList[GT_InputRecID].push_back(inp);
+        gInputContext.aInputRecList[gInputContext.aInputRecId].push_back(inp);
     }
     GN::ViewReSized = true;
 #ifdef _GN_2D_H_
@@ -742,12 +769,12 @@ GN_INIT_API void GF_ReSetViewport(short new_w, short new_h) {
 }
 GN_INIT_API void GN_SetMouseDoubleClick(unsigned int Interval, unsigned int deviation) {
     GT_MouseInterval = Interval;
-    GT_MousePosDeviation = deviation;
+    gInputContext.aMousePosDeviation = deviation;
 }
 GN_INIT_API void GN_SetMouseOutViewRePos(GNg::cVIEW2D *view, bool xpos, bool ypos) {
-    GT_MouseRePosView = view;
-    GT_MouseRePosX = xpos;
-    GT_MouseRePosY = ypos;
+    gInputContext.aMouseRePosView = view;
+    gInputContext.aMouseRePosX = xpos;
+    gInputContext.aMouseRePosY = ypos;
 }
 /**************************************************************外部IO的东西*************************************************************************************************/
 
@@ -804,8 +831,8 @@ GN_INIT_API int GNio::InPutTestDisplay(unsigned int nTime, unsigned int show_del
     unsigned int lcolor = 0xffaf4f00;
 #endif
 #ifdef _GN_RUNINFO_H_ //文字输入出端口号提示
-    if(GT_InPutTestTime < show_delay_time)
-        GN_RunValueCheck(GT_InPutLastPort, "          IN  PORT: ", GT_InPutLastPort);
+    if(gInputContext.aInputTestTime < show_delay_time)
+        GN_RunValueCheck(gInputContext.aInputLastPort, "          IN  PORT: ", gInputContext.aInputLastPort);
 #endif
 #ifdef _GN_G2D_H_
     short i = 0, n = (short)GetInPortNum();
@@ -815,14 +842,14 @@ GN_INIT_API int GNio::InPutTestDisplay(unsigned int nTime, unsigned int show_del
         GNg::LineFrame2dDraw(GNg::ViewCur->ortho_left + w * i, GNg::ViewCur->ortho_top, w, h, 3, fcolor);
     }
 #endif
-    GT_InPutTestTime += nTime;
-    return GT_InPutLastPort;
+    gInputContext.aInputTestTime += nTime;
+    return gInputContext.aInputLastPort;
 }
 extern uint8 GT_MouseCkN = 0;
-bool GT_WS_MappingToKey = false;
+
 
 GN_INIT_API void GN::SetWeightSensorMappingToKey(bool yes) {
-    GT_WS_MappingToKey = yes;
+    gInputContext.aWsMappingToKey = yes;
 }
 GN_INIT_API void GN::SetTouchMappingToMouseDitherRange(unsigned short dr) {
     GT_DitherRange = dr;
@@ -860,7 +887,7 @@ GN_INIT_API void GN_UnInitInput() {
 GN_INIT_API void GN_InputProc(unsigned int nTime) {
     static unsigned int sensorCaps = GNio::GetSensorCaps(); //用静态变量以仅执行1次 减少性能开销
     if(sensorCaps) {
-        if(GT_WS_MappingToKey) { //感应器信号映射为键盘信号
+        if(gInputContext.aWsMappingToKey) { //感应器信号映射为键盘信号
             GN::Key[GK_A] = GNio::InFv[GI_WY] > 0.7f;
             GN::Key[GK_D] = GNio::InFv[GI_WY] < -0.7f;
             GN::Key[GK_W] = GNio::InFv[GI_WX] > -3.0f;
@@ -897,8 +924,8 @@ GN_INIT_API void GN_InputProc(unsigned int nTime) {
             else if(GN::Mouse0[0]) GT_MouseCkN = 0;
         }
     }
-    GT_ImeOn = false;
-    GT_ImeOnRecv = false;
+    GN::GetImeContext().aImeOn = false;
+    GN::GetImeContext().aImeOnRecv = false;
     GT_LastRunTotalTimeApp = GT_RunTotalTimeApp;
     GT_RunTotalTime += nTime; /*更新应用运行时间*/
     GT_RunTotalTimeApp += nTime;

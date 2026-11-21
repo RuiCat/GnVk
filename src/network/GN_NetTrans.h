@@ -454,8 +454,15 @@ class NET_API cSERVER_UDP // ★UDP协议服务器基类
     void Shutdown();
 
     virtual void OnRecv(const sADDR &addr, char *data, int size) { //当收到客户端发来消息时的处理(数据包来源地址, 数据内容, 收到的数据总大小字节)
-        data[size - 1] = 0;
-        zSocket->SendTo(addr, strcat(data, " Receive!"), size + 9);
+        if(!data || size < 1) return;
+        // 加固（STRCPY 审计）：原实现把 " Receive!" 直接 strcat 进收包缓冲，会写越缓冲末尾 9 字节；
+        // 改为等长临时缓冲拼接，发送字节数保持 size + 9 不变。
+        const char suffix[] = " Receive!";
+        P<char> out(size + (int)sizeof(suffix));
+        char *dst = out;
+        memcpy(dst, data, size - 1);
+        memcpy(dst + (size - 1), suffix, sizeof(suffix));
+        zSocket->SendTo(addr, out, size + (int)(sizeof(suffix) - 1));
     }
 };
 }; //end namespace GNn
