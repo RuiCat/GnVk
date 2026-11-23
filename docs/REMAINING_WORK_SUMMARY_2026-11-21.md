@@ -14,7 +14,8 @@
 | Goal | 旧 `goal-6fde2e21-…`（轮次 8 为止）；**2026-11-22 新会话 `get_goal` 为 null，已按续跑需要重建** |
 | 构建基线 | `make` exit=0；`make unit` **463/0**；`make imoScene` exit=0（2026-11-22 二次实测仍 463/0） |
 | lint | 新增/改动文件 0/0；`GN_UiTextIn`(1129)/`GN_UiFBrowser`(1966) 为历史超限（非本轮引入） |
-| 最新备份 | `GnVk-20261121T153906Z.tar.zst`（213143276 B，sha256 `d11557cd…633e88`；**2026-11-22 实测 1875 普通文件 + 320 目录**，订正 BACKLOG B7b 的 1861 口径；同盘 staging，外盘 EROFS） |
+| 最新备份（异盘，2026-11-23） | `/run/media/ruicat/3ce0adc2-…/dsh-backups/GnVk/GnVk-20261123T143728Z.tar.zst`（202831287 B，sha256 `929fa8ee…8f46d`；`zstd -t` 通过、异盘侧 `sha256sum -c` 成功、rsync `--checksum` **0 差异**、**2106/2106** 文件；源设备号 45 ≠ 目标 87） |
+| 旧备份（同盘 staging） | `GnVk-20261121T153906Z.tar.zst`（213143276 B，sha256 `d11557cd…633e88`；**2026-11-22 实测 1875 普通文件 + 320 目录**，订正 BACKLOG B7b 的 1861 口径；同盘 staging，外盘 EROFS） |
 | 工作树 | 含多会话未提交改动；**禁止** `make clean`/`git checkout/clean/stash`；恢复单文件不要用 `git show HEAD:`（HEAD 可能是未拆分旧版） |
 
 ## 2. 已完成（有实跑证据）
@@ -45,7 +46,7 @@
 | P2b 真实 layout/管线 + shader 槽位迁移 | 无 `/dev/dri`，改绘制高风险 | GPU 机：`make gpuCheck` 99 条 + 目视；保留 `GN_BINDING_LAYOUT_LEGACY` A/B |
 | P3/P4 GPU 接线（vkRenderQueue/逐层提交/多 pass） | 需 GPU 验证 | GPU 机：分层渲染冒烟 + 像素断言 |
 | DA-M1r 3 处旧 ABI | 需用户决策 | 三选一：保持 / 升 ABI / 逐处迁移 |
-| B7b 异盘备份 | 外盘只读（EROFS） | 重挂 rw：`udisksctl unmount -b /dev/nvme1n1p1 && udisksctl mount -b /dev/nvme1n1p1 -o rw`；再 `bash .dsh/backupProject.sh` |
+| ~~B7b 异盘备份~~ | **已解决（2026-11-23）**：外盘 remount rw 后写入异盘成功并完成全部校验，见 BACKLOG §8 B7d | 重挂 rw：`udisksctl unmount -b /dev/nvme1n1p1 && udisksctl mount -b /dev/nvme1n1p1 -o rw`；再 `bash .dsh/backupProject.sh` |
 | DA-M3 UI Vulkan | 缺 `assets/fileicon/` 样本 + GPU | 补样本后在 GPU 机恢复合并 |
 
 ## 4. CPU 剩余：DA-M2（26 个全局，分批）
