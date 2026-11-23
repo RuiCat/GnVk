@@ -59,12 +59,14 @@ void buildCube(sCUBE &cube, float worldX, float r, float g, float b) {
         }
         uint32_t *index = cube.aIndices + face * 6u;
         const uint32_t base = face * 4u;
+        // 绕序按 PBR pass 实测有效正面（世界 CW，与 kQuadIndexBA 同口径）：
+        // 世界 CCW 的 (0,1,2)/(0,2,3) 会被判背面，整块立方体不可见（2026-11-23 真机实测）。
         index[0] = base + 0u;
-        index[1] = base + 1u;
-        index[2] = base + 2u;
+        index[1] = base + 2u;
+        index[2] = base + 1u;
         index[3] = base + 0u;
-        index[4] = base + 2u;
-        index[5] = base + 3u;
+        index[4] = base + 3u;
+        index[5] = base + 2u;
     }
     cube.aColor[0] = r;
     cube.aColor[1] = g;

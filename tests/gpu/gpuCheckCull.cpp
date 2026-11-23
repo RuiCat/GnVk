@@ -70,12 +70,14 @@ void buildCubeMesh(GN3d::sMESH &mesh, float r, float g, float b) {
         }
         uint32_t *index = mesh.aIndices + face * 6u;
         const uint32_t base = face * 4u;
+        // 绕序按 PBR pass 实测有效正面（世界 CW，与 kQuadIndexBA 同口径）：
+        // 世界 CCW 的 (0,1,2)/(0,2,3) 会被判背面，整块立方体不可见（2026-11-23 真机实测）。
         index[0] = base + 0u;
-        index[1] = base + 1u;
-        index[2] = base + 2u;
+        index[1] = base + 2u;
+        index[2] = base + 1u;
         index[3] = base + 0u;
-        index[4] = base + 2u;
-        index[5] = base + 3u;
+        index[4] = base + 3u;
+        index[5] = base + 2u;
     }
     mesh.aDiffuse[0] = r;
     mesh.aDiffuse[1] = g;
@@ -186,6 +188,7 @@ void runCullDrawCheck(const GN3d::sFRUSTUM &cullFrustum, const GNg::sMAT44 &view
                 SampleSwapchain(pixels, width, projectX(2.0f, width), projectY(0.0f, height));
             const sFLOAT_PIXEL minusX =
                 SampleSwapchain(pixels, width, projectX(-2.0f, width), projectY(0.0f, height));
+
             reportPixel("cull.draw.origin", isDrawn(origin), origin, "expected non-background");
             reportPixel("cull.draw.plusX", isDrawn(plusX), plusX, "expected non-background");
             reportPixel("cull.draw.minusX", isPbrBackground(minusX), minusX,
