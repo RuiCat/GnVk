@@ -2,6 +2,7 @@
 #include <GN.h>
 #include "GN_Vk.h"
 #include "vkInternal.h"
+#include "vkValidation.h" // 校验模式下的帧内命令缓冲分段标签
 
 #include <cstring>
 
@@ -124,6 +125,8 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     // 扩容退休的旧缓冲也只在那里（fence 之后）释放。
     // 纹理集同步已移到 GN_VkBeginFrame（录制开始前）：录制中改写已绑定的 set 会让命令缓冲失效。
 
+    vkValidationEndLabel(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
+    vkValidationBeginLabel(GN_Vk.commandBuffers[GN_Vk.currentFrame], "flush2D");
     // 刷新当前 2D 批次
     if(gVCnt > 0) {
         void *d;
@@ -201,6 +204,8 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
         rpi.clearValueCount = 3;
         rpi.pClearValues = cvs;
+        vkValidationEndLabel(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
+        vkValidationBeginLabel(GN_Vk.commandBuffers[GN_Vk.currentFrame], "renderPass3D");
         vkCmdBeginRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame], &rpi, VK_SUBPASS_CONTENTS_INLINE);
     }
 

@@ -79,6 +79,36 @@ void vkValidationCreateMessenger(VkInstance instance) {
     }
 }
 
+namespace {
+PFN_vkCmdBeginDebugUtilsLabelEXT s_beginLabelFn = 0;
+PFN_vkCmdEndDebugUtilsLabelEXT s_endLabelFn = 0;
+bool s_labelFnsLoaded = false;
+} // namespace
+
+void vkValidationBeginLabel(VkCommandBuffer cmd, const char *name) {
+    if(!vkValidationAvailable() || cmd == VK_NULL_HANDLE || name == 0) return;
+    if(!s_labelFnsLoaded) {
+        s_beginLabelFn = (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetInstanceProcAddr(
+            s_instance, "vkCmdBeginDebugUtilsLabelEXT");
+        s_endLabelFn = (PFN_vkCmdEndDebugUtilsLabelEXT)vkGetInstanceProcAddr(
+            s_instance, "vkCmdEndDebugUtilsLabelEXT");
+        s_labelFnsLoaded = true;
+    }
+    if(s_beginLabelFn == 0) return;
+    VkDebugUtilsLabelEXT label = {VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
+    label.pLabelName = name;
+    label.color[0] = 0.2f;
+    label.color[1] = 0.8f;
+    label.color[2] = 0.4f;
+    label.color[3] = 1.0f;
+    s_beginLabelFn(cmd, &label);
+}
+
+void vkValidationEndLabel(VkCommandBuffer cmd) {
+    if(!vkValidationAvailable() || cmd == VK_NULL_HANDLE || s_endLabelFn == 0) return;
+    s_endLabelFn(cmd);
+}
+
 void vkValidationDestroyMessenger() {
     if(s_messenger == VK_NULL_HANDLE || s_instance == VK_NULL_HANDLE) return;
     PFN_vkDestroyDebugUtilsMessengerEXT destroyFn =

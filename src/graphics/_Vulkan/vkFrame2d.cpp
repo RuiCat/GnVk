@@ -2,6 +2,7 @@
 #include <GN.h>
 #include "GN_Vk.h"
 #include "vkInternal.h"
+#include "vkValidation.h" // 校验模式下的帧内命令缓冲分段标签
 
 #include <cstring>
 
@@ -148,6 +149,7 @@ bool GN_VkBeginFrame() {
     rpi.pClearValues = &cv;
     vkCmdBeginRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame], &rpi, VK_SUBPASS_CONTENTS_INLINE);
     s_inRenderPass = true; // 标记2D渲染通道活跃
+    vkValidationBeginLabel(GN_Vk.commandBuffers[GN_Vk.currentFrame], "frame-2D");
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipeline);
     // 初始化动态 scissor 为全视口
     {

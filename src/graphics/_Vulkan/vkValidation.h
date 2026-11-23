@@ -21,6 +21,10 @@ void vkValidationCreateMessenger(VkInstance instance);
 // 销毁 messenger（实例销毁前调用）。
 void vkValidationDestroyMessenger();
 
+// 帧内命令缓冲分段标签（仅校验模式下生效；用于定位「命令缓冲在帧内哪一段变 invalid」）。
+void vkValidationBeginLabel(VkCommandBuffer cmd, const char *name);
+void vkValidationEndLabel(VkCommandBuffer cmd);
+
 } // namespace GNg
 
 #endif // _GN_VK_VALIDATION_H_

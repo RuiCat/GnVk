@@ -7,6 +7,7 @@
 #include <GN.h>
 #include "GN_Vk.h"
 #include "vkInternal.h"
+#include "vkValidation.h" // 校验模式下的帧内命令缓冲分段标签
 
 #include <cstddef>
 #include <cstdio>
@@ -155,6 +156,7 @@ void GN_VkDrawDebugLines(const void *lines, uint32_t lineCount, unsigned int col
     vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory3D);
 
     VkCommandBuffer cmd = GN_Vk.commandBuffers[GN_Vk.currentFrame];
+    vkValidationBeginLabel(cmd, "drawDebugLines");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_debugPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_debugPipelineLayout,
                             0, 1, &s_debugDescriptorSet, 0, 0);
@@ -162,6 +164,7 @@ void GN_VkDrawDebugLines(const void *lines, uint32_t lineCount, unsigned int col
     vkCmdBindVertexBuffers(cmd, 0, 1, &GN_Vk.vertexBuffer3D, &offset);
     s_vtxOfs3D += vertexSize;
     vkCmdDraw(cmd, vertexCount, 1, 0, 0);
+    vkValidationEndLabel(cmd);
 }
 
 // task-26：按当前 swapchainExtent 重建调试线框固定视口管线（init 与 resize 共用）。
