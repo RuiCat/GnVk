@@ -323,8 +323,14 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
         return;
     }
     static bool firstFrame = true;
+    static unsigned long frameCount = 0;
+    ++frameCount;
     if (firstFrame) {
         std::fprintf(stderr, "[imoScene] 首帧: 开始 3D pass（%dx%d）\n", width, height);
+    }
+    // 存活证明：每 120 帧打一行，用来区分「进程卡死」与「只是没有新日志」。
+    if (frameCount % 120u == 0u) {
+        std::fprintf(stderr, "[imoScene] 已渲染 %lu 帧（%dx%d）\n", frameCount, width, height);
     }
     const float aspect = static_cast<float>(width) / static_cast<float>(height);
     GNg::sMAT44 view;
