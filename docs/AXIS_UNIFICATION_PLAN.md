@@ -66,6 +66,18 @@
 证据：`VK_ICD_FILENAMES=$PWD/.local/probes/lvp_icd.json make gpuCheck`（llvmpipe 26.2.5，CPU Vulkan）：
 旧规则（CW）**pass=78 fail=18**，其中 `ground.placement`/`ground.pbr`（真实透视 + 世界 CCW 四边形）被判背面剔除、
 `3d.forward`/`3d.pbr`/`material.draw`/`texture.sample`/`cull.draw.*` 同因失败；改回 CCW（阴影 CW）后 **96/96 PASS**。
+**2026-11-23 真机复核（RADV PHOENIX / 780M）——上条结论与实测不符，务必按此执行**：
+
+1. **实测**：同一 PBR pass（`vk3dInit.cpp:289` `frontFace=COUNTER_CLOCKWISE`、正高度视口、`Mat44PerspectiveVK` 的 `m[5]=-f`）下，
+   **世界 CCW 三角形被判背面整块不可见，世界 CW 才可见**（`gpuCheck` P8/P9-c 立方体：CCW 时全图最亮 = clear `0.000`，改 CW 后 `0.231`）。
+   这与上条「世界 CCW 内容仍是帧缓冲 CCW，frontFace 必须 CCW」相反。
+2. **但真实场景渲染正确**：imoScene 加载 glTF 角色 + 房间在同一 pass 下视觉正常（2026-11-24 截图，角色正脸/衣物/室内无内外翻转），
+   且 `src/graphics/GN_3Dasset.cpp:164-167` 的 glTF 导入**原样拷贝索引、不翻转**。
+3. **可执行规则（写新几何时照做）**：在 `Mat44PerspectiveVK` 这类 **Y 翻转投影** + 正高度视口 + `frontFace=CCW` 的组合下，
+   **要让三角形在 Y 翻转后的帧缓冲里呈 CCW**；等价地说，世界坐标里以「自相机看是 CW」的顶点顺序写入才可见
+   （gpuCheck 里的 `kQuadIndexBA=(0,2,1)` 与 2026-11-23 修正后的立方体索引就是这个口径）。
+4. **仍待澄清**：为何 glTF 未经翻转却仍正确（资产本身 CW / 转换链里另有镜像 / 非双面材质差异），
+   三者未做定论；**在澄清前不要改 `descPBR.aFrontFace`**，否则会翻掉现有正确画面。台账：`docs/BACKLOG.md` §8 B10。
 
 **证据**：`vk3dInit.cpp:232,385,560`；`vk3dInitScene.cpp:468,707,885`；`tests/gpu/gpuCheck3D.cpp:305-307`（G-Buffer 用 identity viewProj）；`mmdMeshBuilder.cpp` 的 `reverseTriangleWinding`（镜像后反绕序）；`mmdViewer.cpp:477-485`（地面 0,2,1 绕序）。
 
