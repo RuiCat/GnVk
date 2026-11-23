@@ -94,8 +94,11 @@ void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry) {
         vkUpdateDescriptorSets(GN_Vk.device, 2, writes, 0, nullptr);
 }
 
-// 每个 3D pass 开始：把规范 set 的 12 个绑定同步到所有纹理 set。
-// 单 in-flight fence 保证上一帧已完成，这里改写不会撞上正在使用的 set。
+} // namespace
+
+// 帧首（命令缓冲尚未开始录制）把规范 set 的 12 个绑定同步到所有纹理 set。
+// 校验层结论：在录制中改写「已绑定」的描述符集（未开 UPDATE_AFTER_BIND）会让命令缓冲进入
+// invalid state，之后的 bind/draw 全被丢弃 —— 这是 cull.debugLine 全图 0 像素的根因。
 void refreshPBRTextureSets() {
     if(GN_Vk.descriptorSetPBR == VK_NULL_HANDLE) {
         return;
@@ -104,8 +107,6 @@ void refreshPBRTextureSets() {
         syncPBRTextureSet(s_pbrTextureSets[i]);
     }
 }
-
-} // namespace
 
 // P10：最近一次 PBR 绘制提交的 indexCount（诊断/验收钩子）。
 namespace {
@@ -121,7 +122,7 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     // 偏移不按 pass 归零：同一帧可能先录 4 级 shadow pass，归零会覆盖其顶点数据
     // （已录制命令在提交时才读取缓冲）。帧首由 GN_VkBeginFrame 归零，
     // 扩容退休的旧缓冲也只在那里（fence 之后）释放。
-    refreshPBRTextureSets();   // 同步各纹理描述符集里的场景/光照/环境绑定
+    // 纹理集同步已移到 GN_VkBeginFrame（录制开始前）：录制中改写已绑定的 set 会让命令缓冲失效。
 
     // 刷新当前 2D 批次
     if(gVCnt > 0) {

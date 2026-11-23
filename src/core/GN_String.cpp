@@ -188,31 +188,11 @@ GN_API char *GN_StrUnSplitToData(const char **strs, unsigned int strn, char spli
 	unsigned int i = 1, len = strlen(strs[0]);
 	for(; i < strn; ++i)len += 1 + strlen(strs[i]);
 	char *str_out = new char[len+1];
-	GN_StrUnSplit(str_out, strs, strn, split_key);
+	GN_StrUnSplit_s(str_out, (int)(len + 1), strs, strn, split_key); // 迁移：走容量版，不再依赖调用方契约
 	return str_out;
 }
-GN_API unsigned int GN_StrUnSplit(char *str_out, const char **strs, unsigned int strn, char split_key){
-   #define GT_TMP_STR_UNSPLIT \
-	char *pstr = str_out;\
-	/* 契约（B5f）：调用方缓冲区须容下拼接结果。 */\
-	strcpy(pstr, strs[0]);\
-	pstr += strlen(pstr);\
-	unsigned int i = 1;\
-	for(; i < strn; ++i){\
-		*pstr = split_key; ++pstr;\
-		/* 契约（B5f）：同上。 */\
-		strcpy(pstr, strs[i]);\
-		pstr += strlen(pstr);\
-	}\
-	return pstr - str_out;
-
-	GT_TMP_STR_UNSPLIT
-}
-GN_API unsigned int GN_StrUnSplit(char *str_out, const P< P<char> > &str_s, char split_key){
-	const P<char> *strs = str_s;
-	unsigned int strn = ((P< P<char> > &)str_s).Num();
-	GT_TMP_STR_UNSPLIT
-}
+// DA-M1r（2026-11-24）：旧契约型 GN_StrUnSplit（无容量参数）已删除——调用方迁移到
+// GN_StrUnSplit_s(dst, cap, ...)；仓库内唯一调用方 GN_StrUnSplitToData 已改走容量版。
 GN_API unsigned int GN_StrGetArray(uint8 *p_data, unsigned int em_size, const char *str , const char *fmt , char split_key, uint8 *p_def){
 	// -12.6418304443359, -12.6139526367188, 0, 12.6418304443359, -12.6139526367188, 0, -12.6418304443359, 12.6139
 	/*
@@ -382,27 +362,8 @@ GN_API P< P<char> > GN_StrExtractToData(const char *str, char key, char key2){
 	}
 	return sub_strs;
 }
-GN_API void GN_StrExtractFromMultiItem(char str_out[], char *str, int id, char key){
-	int i = 0;
-	char *pstr = str;
-	char *pstr2= pstr;
-	while(i < id){
-		while(*pstr2 && *pstr2 != key)++pstr2;
-		if(*pstr2){
-			++pstr2;
-			pstr = pstr2;
-		}else{
-		// 契约（B5f）：str_out 由调用方提供，须容下剩余串。
-			strcpy(str_out, pstr);
-			return;
-		}
-		++i;
-	}
-	while(*pstr2 && *pstr2 != key)++pstr2;
-	int len = pstr2 - pstr;
-	strncpy(str_out, pstr, len);
-	str_out[len] = 0;
-}
+// DA-M1r（2026-11-24）：旧契约型 GN_StrExtractFromMultiItem（无容量参数）已删除——
+// 调用方迁移到 GN_StrExtractFromMultiItem_s(dst, cap, ...)（仓库内已无旧接口调用方）。
 
 GN_API unsigned int GN_StrUnSplit_s(char *dst, int cap, const char **strs, unsigned int strn, char split_key){
 	if(!dst || cap <= 0) return 0;

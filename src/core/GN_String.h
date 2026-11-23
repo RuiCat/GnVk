@@ -85,11 +85,8 @@ GN_API P<char *> GN_StrSplit(char *str, char split_key = ' ');
 //把多个字符串连成一个(多个字符串的数组, 字符串数, 连接添加到字符串间的分隔符)返回连好的字符串 这会帮你分配好适当的空间 用完记得释放指针
 GN_API char *GN_StrUnSplitToData(const char **strs, unsigned int strn, char split_key = ' ');
 
-//把多个字符串连成一个(装填连好的字符串 需预先分配好空间, 多个字符串的数组, 字符串数, 连接添加到字符串间的分隔符)返回连好的字符串长度
-GN_API unsigned int GN_StrUnSplit(char *str_out, const char **strs, unsigned int strn, char split_key = ' ');
-
-//把多个字符串连成一个(装填连好的字符串 需预先分配好空间, 多个字符串的数组, 连接添加到字符串间的分隔符)返回连好的字符串长度
-GN_API unsigned int GN_StrUnSplit(char *str_out, const P<P<char>> &strs, char split_key = ' ');
+// DA-M1r（2026-11-24）：无容量参数的旧 GN_StrUnSplit 两个重载已删除（ABI 迁移，用户已批准）。
+// 需要拼接用容量版 GN_StrUnSplit_s，或由引擎分配空间的 GN_StrUnSplitToData。
 // 带容量上限的拼接：最多写 cap-1 字节并补 NUL，返回写入字节数（不含 NUL）。
 GN_API unsigned int GN_StrUnSplit_s(char *dst, int cap, const char **strs, unsigned int strn, char split_key = ' ');
 
@@ -115,7 +112,7 @@ GN_API int GN_StrExtract(char *sub_str_out[], char *str, char key = '<', char ke
 GN_API P<P<char>> GN_StrExtractToData(const char *str, char key = '<', char key2 = '>');
 
 //从多项名的字符串中提取出指定序号的名(用于装填提取内容的字符缓冲 需分配好大于各个项名的长度, 多项名的字符串如"name0,name1,name2", 需提取名的序号, 分隔符) !如果 id 索取超出项名数则会返回最后一项
-GN_API void GN_StrExtractFromMultiItem(char str_out[], char *str, int id, char key = ',');
+// DA-M1r（2026-11-24）：旧无容量版已删除（ABI 迁移，用户已批准），统一用下面的 _s 版本。
 // 带容量上限的取段：返回写入字节数（不含 NUL）；非法输入或段不存在返回 -1。
 GN_API int GN_StrExtractFromMultiItem_s(char *dst, int cap, const char *str, int id, char key = ',');
 

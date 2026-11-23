@@ -18,6 +18,9 @@ namespace GNg {
 
 struct sIMAGE;
 
+// 帧首同步 PBR 纹理描述符集（定义在 vk3dForward.cpp），必须在命令缓冲开始录制之前调用。
+void refreshPBRTextureSets();
+
 // 2D 顶点格式（vkFrame2d/vkDraw2d 共享）
 struct VkVertex {
     float x, y;

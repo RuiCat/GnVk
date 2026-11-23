@@ -121,6 +121,8 @@ bool GN_VkBeginFrame() {
     // 旧实现在每个 pass 开头归零，4 级 cascade 的 draw 会在提交前互相覆盖顶点数据。
     s_vtxOfs3D = 0;
     s_idxOfs3D = 0;
+    // 描述符集同步必须在命令缓冲开始录制之前（录制中改写已绑定的 set 会让 CB 失效）。
+    refreshPBRTextureSets();
     // 处理pass内延迟的纹理上传 (必须在vkWaitForFences之后)
     for(int i = 0; i < s_pendingUploadCnt; i++) {
         if(s_pendingUploads[i].img && s_pendingUploads[i].data) {

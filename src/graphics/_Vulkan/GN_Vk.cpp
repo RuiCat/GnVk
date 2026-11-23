@@ -13,6 +13,7 @@
 #include <GN.h>
 #include "GN_Vk.h"
 #include "vkInternal.h"
+#include "vkValidation.h" // GN_VK_VALIDATION=1 时启用 Khronos 校验层
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -111,11 +112,21 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     const char **exts = glfwGetRequiredInstanceExtensions(&extCount);
     VkInstanceCreateInfo ici = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &ai;
-    ici.enabledExtensionCount = extCount;
-    ici.ppEnabledExtensionNames = exts;
+    // 可选：GN_VK_VALIDATION=1 时追加校验层与 VK_EXT_debug_utils（未装层则不加）。
+    static std::vector<const char *> s_layerNames;
+    static std::vector<const char *> s_extNames;
+    s_extNames.assign(exts, exts + extCount); // GLFW 要求的扩展（含 surface）
+    if(vkValidationAvailable()) {
+        vkValidationAppendInstanceParams(s_layerNames, s_extNames);
+        ici.enabledLayerCount = (uint32_t)s_layerNames.size();
+        ici.ppEnabledLayerNames = s_layerNames.empty() ? 0 : &s_layerNames[0];
+    }
+    ici.enabledExtensionCount = (uint32_t)s_extNames.size();
+    ici.ppEnabledExtensionNames = &s_extNames[0];
     VkResult res = vkCreateInstance(&ici, 0, &GN_Vk.instance);
     VkCheck(res, "vkCreateInstance");
     if(res != VK_SUCCESS || GN_Vk.instance == VK_NULL_HANDLE) return;
+    vkValidationCreateMessenger(GN_Vk.instance);
 
     // Surface
     res = glfwCreateWindowSurface(GN_Vk.instance, window, 0, &GN_Vk.surface);
@@ -177,12 +188,15 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
         std::vector<VkExtensionProperties> eps(ec);
         vkEnumerateDeviceExtensionProperties(GN_Vk.physicalDevice, nullptr, &ec, eps.data());
         bool hasAs = false, hasRq = false, hasDho = false, hasBda = false;
+        bool hasDi = false, hasS14 = false;
         for (uint32_t i = 0; i < ec; ++i) {
             const char *n = eps[i].extensionName;
             if (std::strcmp(n, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) == 0) hasAs = true;
             else if (std::strcmp(n, VK_KHR_RAY_QUERY_EXTENSION_NAME) == 0) hasRq = true;
             else if (std::strcmp(n, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) == 0) hasDho = true;
             else if (std::strcmp(n, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0) hasBda = true;
+            else if (std::strcmp(n, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0) hasDi = true;
+            else if (std::strcmp(n, VK_KHR_SPIRV_1_4_EXTENSION_NAME) == 0) hasS14 = true;
         }
         if (hasAs && hasRq) {
             VkPhysicalDeviceFeatures2 f2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
@@ -190,12 +204,20 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
             rqFeat.pNext = &bdaFeat;
             f2.pNext = &asFeat;
             vkGetPhysicalDeviceFeatures2(GN_Vk.physicalDevice, &f2);
-            if (asFeat.accelerationStructure && rqFeat.rayQuery && bdaFeat.bufferDeviceAddress) {
+            // 校验层报过的完整依赖链：ray_query → spirv_1_4 + acceleration_structure；
+            // acceleration_structure → deferred_host_operations + descriptor_indexing (+ buffer_device_address)。
+            // 任何一环缺失就不开光追，避免创建出违规设备。
+            if (asFeat.accelerationStructure && rqFeat.rayQuery && bdaFeat.bufferDeviceAddress && hasDho &&
+                hasBda && hasDi && hasS14) {
                 rayQuery = true;
                 dexts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
                 dexts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-                if (hasDho) dexts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-                if (hasBda) dexts.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+                dexts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+                dexts.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+                dexts.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+                dexts.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
+                // spirv_1_4 还要求 shader_float_controls（校验层点名）
+                dexts.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
             }
         }
     }
@@ -236,7 +258,8 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
             isSrgbSwapchainFormat(GN_Vk.swapchainFormat) ? "sRGB" : "non-sRGB");
     VkSwapchainCreateInfoKHR sci = {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     sci.surface = GN_Vk.surface;
-    sci.minImageCount = 2;
+    // 校验层报过 minImageCount(2) < surface caps 的最小值（本机 4）；按 caps 取，避免交换链违规。
+    sci.minImageCount = caps.minImageCount > 2u ? caps.minImageCount : 2u;
     sci.imageFormat = GN_Vk.swapchainFormat;
     sci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     sci.imageExtent = GN_Vk.swapchainExtent;
@@ -406,6 +429,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     // Command pool
     VkCommandPoolCreateInfo cpci = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     cpci.queueFamilyIndex = GN_Vk.graphicsFamily;
+    cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; // 每帧 vkResetCommandBuffer 需要
     VkCheck(vkCreateCommandPool(GN_Vk.device, &cpci, 0, &GN_Vk.commandPool), "vkCreateCommandPool");
     GN_Vk.commandBuffers = new VkCommandBuffer[GN_Vk.swapchainImageCount];
     VkCommandBufferAllocateInfo cbai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
@@ -634,6 +658,7 @@ void GN_VkShutdown() {
     DestroyImageUploadCache();
     vkDestroyDevice(GN_Vk.device, 0);
     vkDestroySurfaceKHR(GN_Vk.instance, GN_Vk.surface, 0);
+    vkValidationDestroyMessenger();
     vkDestroyInstance(GN_Vk.instance, 0);
     GN_Vk.initialized = false;
 }
@@ -929,7 +954,8 @@ void GN_VkResize(int w, int h) {
             isSrgbSwapchainFormat(GN_Vk.swapchainFormat) ? "sRGB" : "non-sRGB");
     VkSwapchainCreateInfoKHR sci = {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     sci.surface = GN_Vk.surface;
-    sci.minImageCount = 2;
+    // 校验层报过 minImageCount(2) < surface caps 的最小值（本机 4）；按 caps 取，避免交换链违规。
+    sci.minImageCount = caps.minImageCount > 2u ? caps.minImageCount : 2u;
     sci.imageFormat = GN_Vk.swapchainFormat;
     sci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     sci.imageExtent = GN_Vk.swapchainExtent;
