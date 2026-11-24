@@ -322,8 +322,14 @@ class cENTITY {
     float aRenderAlpha;
 
     // 固定顺序：物理 → 动画 → 骨骼（plan §2）。网格部分见 PrepareRender。
-    // view/frustum 可空：为空时只跑不含相机的部分。
+    // **注意**：本函数会调 `aPhysics.Step(dt)`，而它推进的是**整个 cPHYSICS_WORLD**。
+    // 所以"N 个实体共享同一个世界"时不能对每个实体都调它（那会让物理跑 N 倍速）；
+    // 多实体场景请用 `cSCENE::SetPhysicsController(共享控制器)`，由场景统一推进一次。
     void Update(float dt);
+
+    // 只做"动画 → 骨骼"，不推进物理、不同步刚体变换。
+    // 用途：物理由场景/上层统一推进之后，逐实体刷姿势。
+    void UpdateAnimation(float dt);
 
     // 渲染前：刷新世界 AABB + 选级 + 剔除。返回本帧是否可见。
     bool PrepareRender(const sLOD_VIEW &view, const sFRUSTUM *frustum);

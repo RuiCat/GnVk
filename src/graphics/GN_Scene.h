@@ -35,6 +35,7 @@ namespace GN3d {
 // 本头里的 include 变成空操作 → cENTITY 还没定义"的循环守卫问题。
 // 本头的所有接口只需要 cENTITY*（不透明指针），完整类型只在 .cpp 里用。
 class cENTITY;
+class cPHYSICS_CONTROLLER;
 
 // 一条绘制项：实体 + 本帧的排序键。
 struct sDRAW_ITEM {
@@ -58,8 +59,21 @@ class cSCENE {
     cENTITY *At(uint32_t index) const; // 越界返回 nullptr
 
     // ── 每帧 ──
-    // 固定顺序更新所有实体（物理 → 动画 → 骨骼，见 cENTITY::Update）。
-    void Update(float dt);
+    // 更新所有实体（物理 → 动画 → 骨骼）。
+    //
+    // **物理是"世界级"操作**：`cPHYSICS_CONTROLLER::Step` 推进的是整个 `cPHYSICS_WORLD`。
+    // 所以两种用法：
+    //   * 设了共享控制器（`SetPhysicsController`，多实体场景的标准做法）：
+    //     场景每帧只 Step 一次，然后逐个实体"同步刚体 → 模型 + 推进动画/骨骼"；
+    //   * 没设：退回逐实体 `cENTITY::Update`，此时**每个实体必须各有一个世界**
+    //     （否则物理会跑 N 倍速 —— 这正是这条注释存在的原因）。
+    //
+    // renderAlpha 只在设了共享控制器时用（快照插值因子，通常传 cGAME_CLOCK::Alpha()）。
+    void Update(float dt, float renderAlpha = 0.0f);
+
+    // 共享物理控制器（非拥有）。设了它之后，实体的 `aId` 与控制器里的 entityId 对应。
+    void SetPhysicsController(cPHYSICS_CONTROLLER *controller);
+    cPHYSICS_CONTROLLER *PhysicsController() const;
 
     // 剔除 + LOD + 排序，产出 `DrawOrder()`。frustum 为空 = 不剔除（只排序）。
     // 返回可见实体数。等价于"这一帧要画几个"。
@@ -90,6 +104,7 @@ class cSCENE {
     std::vector<cENTITY *> aEntities;
     std::vector<sDRAW_ITEM> aDrawOrder;
     sLOD_POLICY aPolicy;
+    cPHYSICS_CONTROLLER *aPhysics; // 共享物理控制器（可空，见 Update 的注释）
     bool aCull;
     bool aSort;
     uint32_t aCulled;

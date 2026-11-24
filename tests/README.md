@@ -64,12 +64,12 @@
 
 | 项 | 数值 |
 |----|------|
-| 单元测试用例 | **599**（67 个文件）|
+| 单元测试用例 | **601**（67 个文件）|
 | gpuCheck 文件 | 18 |
 | gpuCheck 实跑 | `pass=116 fail=0 skip=0` |
-| 单测实跑 | `599 cases, 0 failed, 0 assertions failed` |
+| 单测实跑 | `601 cases, 0 failed, 0 assertions failed` |
 | src 源文件 | 174 个 .cpp |
-| src 总行数 | 95966 |
+| src 总行数 | 96052 |
 | 编译产物着色器 | 47 个 .spv |
 
 <!-- AUTO-STATS:END -->

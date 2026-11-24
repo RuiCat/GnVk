@@ -18,7 +18,8 @@ namespace GN3d {
 
 sDRAW_ITEM::sDRAW_ITEM() : aEntity(nullptr), aDistance(0.0f), aTransparent(false) {}
 
-cSCENE::cSCENE() : aPolicy(), aCull(true), aSort(true), aCulled(0), aRejected(0) {}
+cSCENE::cSCENE()
+    : aPolicy(), aPhysics(nullptr), aCull(true), aSort(true), aCulled(0), aRejected(0) {}
 
 bool cSCENE::Add(cENTITY *entity) {
     if(entity == nullptr) return false;
@@ -52,11 +53,33 @@ cENTITY *cSCENE::At(uint32_t index) const {
     return aEntities[index];
 }
 
-void cSCENE::Update(float dt) {
+void cSCENE::Update(float dt, float renderAlpha) {
+    if(aPhysics == nullptr) {
+        // 无共享控制器：逐实体推进。要求每个实体各有一个世界（见头文件）。
+        for(size_t i = 0; i < aEntities.size(); ++i) {
+            if(aEntities[i] != nullptr) aEntities[i]->Update(dt);
+        }
+        return;
+    }
+
+    // 共享控制器：整个物理世界只推进**一次**，然后逐实体同步 + 刷动画/骨骼。
+    // 逐个实体调 cENTITY::Update 会把同一个世界推进 N 次（N = 实体数）——
+    // 表现为"N 倍速下落 + 穿插爆炸"，是这里最容易写错的地方。
+    aPhysics->Step(dt, renderAlpha);
     for(size_t i = 0; i < aEntities.size(); ++i) {
-        if(aEntities[i] != nullptr) aEntities[i]->Update(dt);
+        cENTITY *entity = aEntities[i];
+        if(entity == nullptr) continue;
+        if(entity->aId != 0) {
+            cMODEL *model = entity->aMesh.Model();
+            if(model != nullptr) aPhysics->ApplyTransformInterpolated(entity->aId, *model);
+        }
+        entity->UpdateAnimation(dt);
     }
 }
+
+void cSCENE::SetPhysicsController(cPHYSICS_CONTROLLER *controller) { aPhysics = controller; }
+
+cPHYSICS_CONTROLLER *cSCENE::PhysicsController() const { return aPhysics; }
 
 namespace {
 

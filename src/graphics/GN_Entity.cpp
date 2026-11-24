@@ -660,7 +660,10 @@ void cENTITY::Update(float dt) {
         // 直接取最新位置会看到"每两帧跳一次"的台阶（见 cPHYSICS_CONTROLLER 的注释）。
         if(model != nullptr) aPhysics.ApplyTransformInterpolated(aId, *model);
     }
+    UpdateAnimation(dt);
+}
 
+void cENTITY::UpdateAnimation(float dt) {
     // 2) 动画：状态机优先（有则按参数转换并驱动播放器），否则走手工播放的时间轴。
     if(aAnim.StateMachineActive()) {
         aAnim.UpdateWithStateMachine(dt, aParams);

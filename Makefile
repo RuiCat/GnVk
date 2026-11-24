@@ -353,6 +353,32 @@ $(CHARACTER_DEMO_BIN): $(CHARACTER_DEMO_SRC) $(TARGET)
 	@mkdir -p build
 	$(CXX) $(CHARACTER_DEMO_FLAGS) $(CHARACTER_DEMO_SRC) $(TEST_LIBS) -o $(CHARACTER_DEMO_BIN)
 
+# ── 物理场景视频（P0–P6 综合演示）：逐帧离屏渲染 → ffmpeg 编码 ──
+# 需要 Vulkan 设备（容器里用 lavapipe）与 ffmpeg（不在 PATH 时可用 FFMPEG=... 指定）。
+PHYSICS_VIDEO_SRC   := $(wildcard tests/physicsVideo/*.cpp)
+PHYSICS_VIDEO_BIN   := build/physicsVideo
+PHYSICS_VIDEO_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+PHYSICS_VIDEO_OUT   ?= .local/video
+PHYSICS_VIDEO_FRAMES ?= 240
+PHYSICS_VIDEO_SIZE  ?= 1280 720
+FFMPEG              ?= $(shell command -v ffmpeg 2>/dev/null || echo /work/.sbx/bin/ffmpeg)
+
+.PHONY: physicsVideo
+physicsVideo: $(PHYSICS_VIDEO_BIN)
+	@echo "$(YELLOW)🎬 渲染物理场景（$(PHYSICS_VIDEO_FRAMES) 帧 @ $(PHYSICS_VIDEO_SIZE)）...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(PHYSICS_VIDEO_BIN) --out $(PHYSICS_VIDEO_OUT)/frames \
+		--frames $(PHYSICS_VIDEO_FRAMES) --size $(PHYSICS_VIDEO_SIZE)
+	@echo "$(YELLOW)🎞  编码 mp4...$(RESET)"
+	@$(FFMPEG) -y -loglevel error -framerate 30 -i $(PHYSICS_VIDEO_OUT)/frames/frame_%05d.png \
+		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart \
+		$(PHYSICS_VIDEO_OUT)/physics-collision.mp4
+	@ls -lh $(PHYSICS_VIDEO_OUT)/physics-collision.mp4
+
+$(PHYSICS_VIDEO_BIN): $(PHYSICS_VIDEO_SRC) $(TARGET)
+	@echo "$(YELLOW)🎬 编译物理场景视频渲染器...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(PHYSICS_VIDEO_FLAGS) $(PHYSICS_VIDEO_SRC) $(TEST_LIBS) -o $(PHYSICS_VIDEO_BIN)
+
 # ── 示例无窗口冒烟（所有示例在 GN_HEADLESS_FRAMES 下跑固定帧数）──
 # 依赖只取「编译」产物：不能依赖 headlessCheck/gpuCheck 这些 .PHONY 运行目标，
 # 否则它们会先以窗口模式跑一次（无显示时 SKIP → make 直接失败）。

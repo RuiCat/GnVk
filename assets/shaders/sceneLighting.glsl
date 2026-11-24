@@ -115,16 +115,21 @@ vec3 applyAerialPerspective(vec3 litColor, vec3 worldPos) {
     return mix(litColor, aerialColor, blend);
 }
 
-// 契约 §8：i=0..count-1 由近到远做包含测试（Vulkan NDC x/y/z ∈ [0,1]）；
-// 返回第一个命中级，都不命中返回 -1（无阴影）。
+// 契约 §8：i=0..count-1 由近到远做包含测试；返回第一个命中级，都不命中返回 -1（无阴影）。
+//
+// **Vulkan NDC 的口径：x/y ∈ [-1,1]，只有 z ∈ [0,1]**（见 Mat44OrthoVK 的实现）。
+// 这里曾经把 x/y 也写成 [0,1] —— 于是每个级联只有"Light 空间右上象限"那 1/4 的片元
+// 能选中级联，阴影只在那块区域出现（表现为"场景里只有一小片有影子"）。
+// 更隐蔽的是：下方的 ShadowCalculation 用的是 uv = ndc.xy * 0.5 + 0.5（x/y ∈ [-1,1] 口径），
+// 两处口径不一致，所以不是"完全没阴影"而是"阴影缺了 3/4"，很难一眼看出来。
 int selectCascade(vec3 worldPos) {
     int cascadeCount = int(clamp(lightData.shadowParams.y, 1.0, 4.0));
     for (int i = 0; i < cascadeCount; ++i) {
         vec4 clip = lightData.shadowLightVP[i] * vec4(worldPos, 1.0);
         if (clip.w <= 0.0) continue;
         vec3 ndc = clip.xyz / clip.w;
-        if (ndc.x >= 0.0 && ndc.x <= 1.0 &&
-            ndc.y >= 0.0 && ndc.y <= 1.0 &&
+        if (ndc.x >= -1.0 && ndc.x <= 1.0 &&
+            ndc.y >= -1.0 && ndc.y <= 1.0 &&
             ndc.z >= 0.0 && ndc.z <= 1.0) {
             return i;
         }

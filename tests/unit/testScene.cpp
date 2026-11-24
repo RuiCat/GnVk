@@ -500,3 +500,104 @@ TEST_CASE(sceneSortStableForEqualDistances1000) {
 
     for (size_t i = 0; i < objects.size(); ++i) destroyEntity(objects[i]);
 }
+
+// ── 多实体共享一个物理世界：物理每帧只能推进一次 ─────────────
+// 这是 cSCENE::SetPhysicsController 存在的理由。如果不走共享控制器、而是对 N 个实体
+// 各调一次 cENTITY::Update，同一个 cPHYSICS_WORLD 会被 Step N 次 ⇒ 物理跑 N 倍速，
+// 表现为"下落快得离谱 + 穿插爆炸"。这条用例把两种接法的差别量化出来。
+TEST_CASE(sceneSharedPhysicsStepsWorldOnce) {
+    const int kEntities = 8;
+
+    // ── A：共享控制器（推荐接法）──
+    float sharedDrop = 0.0f;
+    {
+        cPHYSICS_WORLD world;
+        world.SetFixedTimestep(1.0f / 60.0f, 4);
+        cPHYSICS_CONTROLLER physics;
+        physics.SetWorld(&world);
+        cSCENE scene;
+        scene.SetPhysicsController(&physics);
+        CHECK(scene.PhysicsController() == &physics);
+
+        std::vector<sTestEntity> objects;
+        for (int i = 0; i < kEntities; ++i) {
+            objects.push_back(makeCubeEntity((float)i * 2.0f, 20.0f, 0.0f));
+            cENTITY *entity = objects.back().aEntity;
+            entity->aId = (uint32_t)(i + 1);
+            const uint32_t handle = world.AddBody(GN3d::MakeBoxBody(
+                GN3d::eBODY_DYNAMIC, GNg::sVEC3{(float)i * 2.0f, 20.0f, 0.0f},
+                GNg::sVEC3{0.5f, 0.5f, 0.5f}, 1.0f));
+            physics.AttachBody(entity->aId, handle);
+            scene.Add(entity);
+        }
+
+        // 60 帧 = 1 秒；自由落体应下落约 0.5*g*t² ≈ 4.9 m
+        for (int f = 0; f < 60; ++f) scene.Update(1.0f / 60.0f, 0.5f);
+        const sRIGID_BODY *body = world.GetBody(physics.BodyOf(1u));
+        CHECK(body != nullptr);
+        sharedDrop = 20.0f - body->aPos.y;
+        // 1 秒自由落体：4.9 m 左右（容差放宽到 ±1 m，允许子步累积误差）
+        CHECK(sharedDrop > 3.9f);
+        CHECK(sharedDrop < 6.0f);
+        // 模型也被同步了（不是只有刚体在动）
+        CHECK(objects[0].aModel->aPosition.y < 20.0f);
+
+        for (size_t i = 0; i < objects.size(); ++i) destroyEntity(objects[i]);
+    }
+
+    // ── B：每个实体各调 cENTITY::Update（错误接法，仅同一个世界）──
+    float overdrivenDrop = 0.0f;
+    {
+        cPHYSICS_WORLD world;
+        world.SetFixedTimestep(1.0f / 60.0f, 4);
+        cPHYSICS_CONTROLLER physics;
+        physics.SetWorld(&world);
+
+        std::vector<sTestEntity> objects;
+        for (int i = 0; i < kEntities; ++i) {
+            objects.push_back(makeCubeEntity((float)i * 2.0f, 20.0f, 0.0f));
+            cENTITY *entity = objects.back().aEntity;
+            entity->aId = (uint32_t)(i + 1);
+            entity->aPhysics.SetWorld(&world); // 每个实体都指向**同一个**世界
+            const uint32_t handle = world.AddBody(GN3d::MakeBoxBody(
+                GN3d::eBODY_DYNAMIC, GNg::sVEC3{(float)i * 2.0f, 20.0f, 0.0f},
+                GNg::sVEC3{0.5f, 0.5f, 0.5f}, 1.0f));
+            entity->aPhysics.AttachBody(entity->aId, handle);
+        }
+        for (int f = 0; f < 60; ++f) {
+            for (size_t i = 0; i < objects.size(); ++i) objects[i].aEntity->Update(1.0f / 60.0f);
+        }
+        const sRIGID_BODY *body = world.GetBody(0);
+        CHECK(body != nullptr);
+        overdrivenDrop = 20.0f - body->aPos.y;
+        // 被推进了 8 倍：同样 1 秒的真实时间里，下落距离明显大于共享控制器
+        CHECK(overdrivenDrop > sharedDrop * 1.5f);
+
+        for (size_t i = 0; i < objects.size(); ++i) destroyEntity(objects[i]);
+    }
+
+    char detail[200];
+    std::snprintf(detail, sizeof(detail), "共享控制器下落 %.2f m，逐实体 Step（%d 个实体）下落 %.2f m",
+                  sharedDrop, kEntities, overdrivenDrop);
+    CHECK(overdrivenDrop > sharedDrop);
+}
+
+// 没有共享控制器时退回逐实体更新（单实体场景的旧行为不变）。
+TEST_CASE(sceneWithoutPhysicsControllerFallsBack) {
+    sTestEntity object = makeCubeEntity(0.0f, 10.0f, 0.0f);
+    cPHYSICS_WORLD world;
+    object.aEntity->aId = 1u;
+    object.aEntity->aPhysics.SetWorld(&world);
+    const uint32_t handle = world.AddBody(MakeSphereBody(GN3d::eBODY_DYNAMIC,
+                                                         GNg::sVEC3{0.0f, 10.0f, 0.0f}, 0.5f, 1.0f));
+    CHECK(object.aEntity->aPhysics.AttachBody(1u, handle));
+
+    cSCENE scene;
+    CHECK(scene.PhysicsController() == nullptr);
+    scene.Add(object.aEntity);
+    for (int i = 0; i < 30; ++i) scene.Update(1.0f / 60.0f);
+    const sRIGID_BODY *body = world.GetBody(handle);
+    CHECK(body != nullptr);
+    CHECK(body->aPos.y < 10.0f); // 物理确实在跑
+    destroyEntity(object);
+}

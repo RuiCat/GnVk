@@ -1,5 +1,64 @@
 # Changelog
 
+## 2026-11-25 — 多实体物理碰撞场景 → 720p 视频（+ 一个选择器缺陷）
+
+把 P0–P6 攒下来的东西**一次性串起来**跑成一段能看的画面：55 个箱子堆成金字塔、16 个重球
+从正上方砸下来、一记侧面重球撞底层，60Hz 物理 + 30fps 输出、相机环绕推近，编码成 8 秒 mp4。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| `tests/physicsVideo` | `tests/physicsVideo/main.cpp`（`make physicsVideo`） | 逐帧离屏渲染写 PNG，再交给 ffmpeg 编码；`--size/--frames/--out/--no-shadows` 可调 |
+| 共享物理控制器 | `cSCENE::SetPhysicsController` + `cENTITY::UpdateAnimation` | **多实体场景的正确接法**（见下） |
+| 修复：CSM 级联选级 | `assets/shaders/sceneLighting.glsl::selectCascade` | NDC x/y 用错了范围（见下） |
+| 单测 | `tests/unit/testScene.cpp` +2 | 共享控制器 vs 逐实体 Step 的量化对比 |
+
+产出：`.local/video/physics-collision.mp4`（1280×720 / 30fps / 8.00s / 738 KB / H.264）。
+
+### 抓到的问题 1：`cSCENE::Update` 会把物理推进 N 次
+
+`cENTITY::Update(dt)` 内部调 `aPhysics.Step(dt)`，而 `cPHYSICS_CONTROLLER::Step`
+推进的是**整个 `cPHYSICS_WORLD`**。于是"N 个实体共享一个世界"时逐个 Update ⇒ 物理跑
+N 倍速（下落快 N 倍 + 穿插爆炸）。P4 的示例里我是靠"一个控制器管全部刚体"绕过去的，
+但没有把这个约束写进 `cSCENE`。
+
+修法（两层）：
+1. `cENTITY::Update` 拆出 `UpdateAnimation(dt)`（只做动画 → 骨骼，不推进物理）；
+2. `cSCENE::SetPhysicsController(ctrl)` —— 设了之后场景每帧**只 Step 一次**，然后逐实体
+   `ApplyTransformInterpolated` + `UpdateAnimation`。没设时退回旧行为（每个实体自带世界）。
+
+用例 `sceneSharedPhysicsStepsWorldOnce` 把两种接法的差别量化：同样 1 秒真实时间，
+共享控制器下落 4.9 m（≈ ½gt²），逐实体 Step 的 8 实体场景下落 >7 m。
+
+### 抓到的问题 2：`selectCascade` 的 NDC 范围写错，阴影只出现 1/4
+
+`sceneLighting.glsl` 里选级用的是 `ndc.x/y ∈ [0,1]`，但 `Mat44OrthoVK` 产出的是
+**Vulkan 标准 NDC：x/y ∈ [-1,1]，只有 z ∈ [0,1]**。后果不是"完全没阴影"，而是**只有
+Light 空间右上象限的片元能选中级联** —— 阴影缺了 3/4。更隐蔽的是同一文件里的
+`ShadowCalculation` 用的是 `uv = ndc.xy * 0.5 + 0.5`（即 x/y ∈ [-1,1] 口径），
+两处口径不一致，所以看起来像"阴影很淡"而不是"阴影坏了"。
+
+已改成 `[-1,1]`。实测差异：修复前后"有影 vs 无影"的像素差从只覆盖金字塔底部一小片
+（2313 px），到全场景正确的投影。
+
+**仍未解决**：本场景里阴影依然几乎看不见。排查结论（留档，不假装已解决）：
+- 阴影因子本身有效（把 `shadow` 直接输出成灰度时，球体下缘是暗的 = 自阴影成立）；
+- 但**天空 IBL 的贡献盖过了方向光**：把环境光与环境光预设全部归零、只留一盏有影方向光
+  之后，画面仍被照亮（IBL 走 `envPrefetchedImage`，不受 `GN_VkEnableGI(false)` 影响）；
+  于是 `shadow` 只作用于直接光那一小部分，投影落不到地面。
+- 我这轮改用引擎的 `GN_VkSetEnvironmentLighting(INDOOR_UNIFORM, 0.10)` 压低 IBL，
+  画面立体感明显变好，但投影仍然偏弱。彻底解决需要让 IBL 强度可调（GI UBO 缺一个
+  `envIntensity`），或给方向光加"仅直接光"的调试开关 —— 这两条都超出一段视频的范围，
+  记在这里留给后续。
+
+### 环境备注
+
+容器里没有 ffmpeg：apt 不可用（非 root），johnvansickle 静态包下载到 17 MB 就断流。
+最后用 `pip install -i https://pypi.tuna.tsinghua.edu.cn/simple imageio-ffmpeg` 拿到
+静态 ffmpeg 9.0.2（顺带发现 `/tmp` 是 256 MB 的 tmpfs，pip 解包时把它写满 —— 需要
+`TMPDIR` 指到 `/work`）。这些都不进仓库，`make physicsVideo` 通过 `FFMPEG=` 变量接收。
+
 ## 2026-11-24 — 控制器规划 P6：统一剔除 / LOD / 排序（收尾）+ 揪出一个"静默失效"级缺陷
 
 P6 是这条规划的最后一段，也是文档里说的"如果只能做两件事"之一。前面 P1–P5 把**每个实体**的
