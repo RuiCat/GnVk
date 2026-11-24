@@ -96,11 +96,118 @@ void *sIMAGE::RenderTargetGet(sIMAGE *img) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  无窗口（离屏）渲染目标：替代 swapchain
+//  除「图的来源」以外，离屏图与交换链镜像在引擎里完全等价（同格式/尺寸/张数，同样挂在
+//  swapchainImages/Views/framebuffers 上），因此 render pass、2D/3D 管线、每帧命令缓冲与
+//  读回全部沿用窗口模式的同一套代码——没有任何 if(headless) 渗透到绘制路径里。
+// ═══════════════════════════════════════════════════════════
+static const uint32_t kHeadlessImageCount = 3;
+
+// 优先带 sRGB 的 8bit 格式（与窗口模式同一色彩路径），必须同时支持颜色附件与回读。
+static VkFormat chooseOffscreenFormat() {
+    const VkFormat candidates[] = {VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_SRGB,
+                                   VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM};
+    const VkFormatFeatureFlags need =
+        VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+    for(size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        VkFormatProperties fp;
+        vkGetPhysicalDeviceFormatProperties(GN_Vk.physicalDevice, candidates[i], &fp);
+        if((fp.optimalTilingFeatures & need) == need) return candidates[i];
+    }
+    return VK_FORMAT_UNDEFINED;
+}
+
+static bool createOffscreenSwapchain(uint32_t w, uint32_t h, uint32_t count) {
+    const VkFormat fmt = chooseOffscreenFormat();
+    if(fmt == VK_FORMAT_UNDEFINED) {
+        GN_LogErr("[GN_Vk] FATAL: 找不到可作渲染目标且可回读的 8bit 格式\n");
+        return false;
+    }
+    if(count == 0) count = 1;
+    GN_Vk.swapchainFormat = fmt;
+    GN_Vk.swapchainExtent = {w, h};
+    GN_Vk.swapchainImageCount = count;
+    GN_Vk.swapchainImages = new VkImage[count];
+    GN_Vk.swapchainViews = new VkImageView[count];
+    GN_Vk.swapchainMemories = new VkDeviceMemory[count];
+    for(uint32_t i = 0; i < count; ++i) {
+        GN_Vk.swapchainImages[i] = VK_NULL_HANDLE;
+        GN_Vk.swapchainViews[i] = VK_NULL_HANDLE;
+        GN_Vk.swapchainMemories[i] = VK_NULL_HANDLE;
+    }
+    for(uint32_t i = 0; i < count; ++i) {
+        VkImageCreateInfo ci = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ci.imageType = VK_IMAGE_TYPE_2D;
+        ci.format = fmt;
+        ci.extent = {w, h, 1};
+        ci.mipLevels = 1;
+        ci.arrayLayers = 1;
+        ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        // 颜色附件（渲染目标）+ 回读源；不参与采样，避免与 sIMAGE 的采样路径混淆。
+        ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkResult res = vkCreateImage(GN_Vk.device, &ci, 0, &GN_Vk.swapchainImages[i]);
+        if(res != VK_SUCCESS) {
+            fprintf(stderr, "[GN_Vk] FATAL: 离屏图像创建失败 err=%d\n", (int)res);
+            return false;
+        }
+        VkMemoryRequirements mr;
+        vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.swapchainImages[i], &mr);
+        VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        ai.allocationSize = mr.size;
+        ai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        res = vkAllocateMemory(GN_Vk.device, &ai, 0, &GN_Vk.swapchainMemories[i]);
+        if(res != VK_SUCCESS) {
+            fprintf(stderr, "[GN_Vk] FATAL: 离屏图像显存分配失败 err=%d\n", (int)res);
+            return false;
+        }
+        vkBindImageMemory(GN_Vk.device, GN_Vk.swapchainImages[i], GN_Vk.swapchainMemories[i], 0);
+        GN_Vk.swapchainViews[i] = MakeImageView(GN_Vk.swapchainImages[i], fmt);
+        if(GN_Vk.swapchainViews[i] == VK_NULL_HANDLE) {
+            fprintf(stderr, "[GN_Vk] FATAL: 离屏图像视图创建失败\n");
+            return false;
+        }
+    }
+    fprintf(stderr, "[GN_Vk] 无窗口离屏目标: %ux%u × %u 张 (format=%d)\n", w, h, count,
+            (int)fmt);
+    return true;
+}
+
+// 只释放离屏图与显存；view 由调用方按统一顺序销毁（与 swapchain 路径一致）。
+static void destroyOffscreenSwapchain() {
+    if(GN_Vk.swapchainImages) {
+        for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; ++i) {
+            if(GN_Vk.swapchainImages[i] != VK_NULL_HANDLE) {
+                vkDestroyImage(GN_Vk.device, GN_Vk.swapchainImages[i], 0);
+            }
+        }
+        delete[] GN_Vk.swapchainImages;
+        GN_Vk.swapchainImages = 0;
+    }
+    if(GN_Vk.swapchainMemories) {
+        for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; ++i) {
+            if(GN_Vk.swapchainMemories[i] != VK_NULL_HANDLE) {
+                vkFreeMemory(GN_Vk.device, GN_Vk.swapchainMemories[i], 0);
+            }
+        }
+        delete[] GN_Vk.swapchainMemories;
+        GN_Vk.swapchainMemories = 0;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  设备与交换链初始化（辅助函数见 vkDevice.cpp；2D/3D 分流见 vk*2d.cpp / vk3d*.cpp）
 // ═══════════════════════════════════════════════════════════
 
 void GN_VkInit(GLFWwindow *window, int w, int h) {
     if(GN_Vk.initialized) return;
+    // window == 0 → 无窗口（离屏）模式：不建 surface、不建 swapchain、不需要任何窗口系统。
+    const bool headless = (window == nullptr);
+    GN_Vk.headless = headless;
+    GN_Vk.swapFinalLayout =
+        headless ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     GN_Vk.viewWidth = w;
     GN_Vk.viewHeight = h;
 
@@ -108,36 +215,61 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     VkApplicationInfo ai = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
     ai.pApplicationName = "GN_mini";
     ai.apiVersion = VK_API_VERSION_1_1; // 1.1: 硬件光追(AS/ray_query)与 Features2 需要
+    // 无窗口模式：实例不需要任何 surface 扩展（GLFW 在没有窗口时也不会给出）
     uint32_t extCount = 0;
-    const char **exts = glfwGetRequiredInstanceExtensions(&extCount);
+    const char **exts = headless ? 0 : glfwGetRequiredInstanceExtensions(&extCount);
+    if(headless) extCount = 0;
     VkInstanceCreateInfo ici = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &ai;
     // 可选：GN_VK_VALIDATION=1 时追加校验层与 VK_EXT_debug_utils（未装层则不加）。
     static std::vector<const char *> s_layerNames;
     static std::vector<const char *> s_extNames;
-    s_extNames.assign(exts, exts + extCount); // GLFW 要求的扩展（含 surface）
+    if(extCount > 0) s_extNames.assign(exts, exts + extCount); // GLFW 要求的扩展（含 surface）
+#if defined(__APPLE__)
+    // MoltenVK：端口枚举模式。不声明它时 vkEnumeratePhysicalDevices 直接返回
+    // VK_ERROR_INCOMPATIBLE_DRIVER（在 macOS 上表现为“没有任何 Vulkan 设备”）。
+    // 扩展本身若不存在（真 Apple 原生驱动）则不加，避免校验层报错。
+    {
+        uint32_t ic = 0;
+        if(vkEnumerateInstanceExtensionProperties(nullptr, &ic, nullptr) == VK_SUCCESS && ic > 0) {
+            std::vector<VkExtensionProperties> ieps(ic);
+            if(vkEnumerateInstanceExtensionProperties(nullptr, &ic, ieps.data()) == VK_SUCCESS) {
+                for(uint32_t i = 0; i < ic; ++i) {
+                    if(std::strcmp(ieps[i].extensionName,
+                                   "VK_KHR_portability_enumeration") == 0) {
+                        s_extNames.push_back("VK_KHR_portability_enumeration");
+                        ici.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+#endif
     if(vkValidationAvailable()) {
         vkValidationAppendInstanceParams(s_layerNames, s_extNames);
         ici.enabledLayerCount = (uint32_t)s_layerNames.size();
         ici.ppEnabledLayerNames = s_layerNames.empty() ? 0 : &s_layerNames[0];
     }
     ici.enabledExtensionCount = (uint32_t)s_extNames.size();
-    ici.ppEnabledExtensionNames = &s_extNames[0];
+    ici.ppEnabledExtensionNames = s_extNames.empty() ? 0 : &s_extNames[0];
     VkResult res = vkCreateInstance(&ici, 0, &GN_Vk.instance);
     VkCheck(res, "vkCreateInstance");
     if(res != VK_SUCCESS || GN_Vk.instance == VK_NULL_HANDLE) return;
     vkValidationCreateMessenger(GN_Vk.instance);
 
-    // Surface
-    res = glfwCreateWindowSurface(GN_Vk.instance, window, 0, &GN_Vk.surface);
-    VkCheck(res, "glfwCreateWindowSurface");
-    if(res != VK_SUCCESS || GN_Vk.surface == VK_NULL_HANDLE) return;
+    // Surface（无窗口模式没有 surface）
+    if(!headless) {
+        res = glfwCreateWindowSurface(GN_Vk.instance, window, 0, &GN_Vk.surface);
+        VkCheck(res, "glfwCreateWindowSurface");
+        if(res != VK_SUCCESS || GN_Vk.surface == VK_NULL_HANDLE) return;
+    }
 
     // Physical device
     uint32_t dc = 0;
     res = vkEnumeratePhysicalDevices(GN_Vk.instance, &dc, 0);
     if(res != VK_SUCCESS || dc == 0) {
-        fprintf(stderr, "[GN_Vk] FATAL: 未找到可用的 Vulkan 物理设备 (err=%d, count=%u)\n", (int)res, dc);
+        GN_LogErr("[GN_Vk] FATAL: 未找到可用的 Vulkan 物理设备 (err=%d, count=%u)\n", (int)res, dc);
         return;
     }
     VkPhysicalDevice *devs = new VkPhysicalDevice[dc];
@@ -152,6 +284,14 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     vkGetPhysicalDeviceQueueFamilyProperties(GN_Vk.physicalDevice, &qc, qps);
     bool queueFound = false;
     for(uint32_t i = 0; i < qc; i++) {
+        if(headless) { // 无 surface：只要求图形队列
+            if(qps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+                GN_Vk.graphicsFamily = i;
+                queueFound = true;
+                break;
+            }
+            continue;
+        }
         VkBool32 pr;
         vkGetPhysicalDeviceSurfaceSupportKHR(GN_Vk.physicalDevice, i, GN_Vk.surface, &pr);
         if(qps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT && pr) {
@@ -174,7 +314,8 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     qci.pQueuePriorities = &qp;
 
     // 硬件光追（RT）能力：仅在驱动支持时启用 AS/ray_query 扩展与特性，否则保持原样。
-    std::vector<const char *> dexts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    std::vector<const char *> dexts;
+    if(!headless) dexts.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME); // 离屏渲染不需要交换链扩展
     bool rayQuery = false;
     VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeat = {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
@@ -189,6 +330,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
         vkEnumerateDeviceExtensionProperties(GN_Vk.physicalDevice, nullptr, &ec, eps.data());
         bool hasAs = false, hasRq = false, hasDho = false, hasBda = false;
         bool hasDi = false, hasS14 = false;
+        bool hasPortabilitySubset = false;
         for (uint32_t i = 0; i < ec; ++i) {
             const char *n = eps[i].extensionName;
             if (std::strcmp(n, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) == 0) hasAs = true;
@@ -197,7 +339,11 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
             else if (std::strcmp(n, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0) hasBda = true;
             else if (std::strcmp(n, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0) hasDi = true;
             else if (std::strcmp(n, VK_KHR_SPIRV_1_4_EXTENSION_NAME) == 0) hasS14 = true;
+            else if (std::strcmp(n, "VK_KHR_portability_subset") == 0) hasPortabilitySubset = true;
         }
+        // MoltenVK / 某些移植层：设备声明了 VK_KHR_portability_subset 就必须启用它，
+        // 否则 vkCreateDevice 报 VUID-VkDeviceCreateInfo-pProperties-04451。
+        if (hasPortabilitySubset) dexts.push_back("VK_KHR_portability_subset");
         if (hasAs && hasRq) {
             VkPhysicalDeviceFeatures2 f2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
             asFeat.pNext = &rqFeat;
@@ -239,6 +385,15 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     // P1b：设备就绪后初始化管线缓存（所有缓存的管线在 GN_VkShutdown 里统一 Release）
     GN_Vk.aPipelineCache.Init(GN_Vk.device);
 
+    // 渲染目标：窗口模式 = swapchain；无窗口模式 = 自建离屏图（同格式/尺寸/张数约定）
+    if(headless) {
+        const uint32_t ow = (uint32_t)(w > 0 ? w : 800);
+        const uint32_t oh = (uint32_t)(h > 0 ? h : 600);
+        if(!createOffscreenSwapchain(ow, oh, kHeadlessImageCount)) {
+            fprintf(stderr, "[GN_Vk] FATAL: 离屏目标创建失败\n");
+            return;
+        }
+    } else {
     // Swapchain
     VkSurfaceCapabilitiesKHR caps;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(GN_Vk.physicalDevice, GN_Vk.surface, &caps);
@@ -278,6 +433,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     GN_Vk.swapchainViews = new VkImageView[GN_Vk.swapchainImageCount];
     vkGetSwapchainImagesKHR(GN_Vk.device, GN_Vk.swapchain, &GN_Vk.swapchainImageCount, GN_Vk.swapchainImages);
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) GN_Vk.swapchainViews[i] = MakeImageView(GN_Vk.swapchainImages[i], GN_Vk.swapchainFormat);
+    } // end of: headless 离屏目标 / swapchain
 
     // Render pass
     VkAttachmentDescription ad = {};
@@ -286,7 +442,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     ad.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     ad.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     ad.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    ad.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    ad.finalLayout = GN_Vk.swapFinalLayout; // 窗口=PRESENT_SRC；无窗口=TRANSFER_SRC
     VkAttachmentReference ar = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
     VkSubpassDescription sp = {};
     sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -403,15 +559,16 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     }
 
     // 2D 叠层通道：3D pass 之后用它把 HUD/文本画在 3D 画面上（loadOp=LOAD 保留已有画面）。
-    // 3D pass 的 resolve 附件 finalLayout 是 PRESENT_SRC_KHR，所以这里也从 PRESENT_SRC 开始。
+    // 以 swapFinalLayout 为起点：窗口模式是 PRESENT_SRC（承接上一条 pass 的结果），
+    // 无窗口模式是 TRANSFER_SRC。两种模式下叠层通道都 loadOp=LOAD，不清掉 3D/合成画面。
     if(s_renderPass2DOverlay == VK_NULL_HANDLE) {
         VkAttachmentDescription adOverlay = {};
         adOverlay.format = GN_Vk.swapchainFormat;
         adOverlay.samples = VK_SAMPLE_COUNT_1_BIT;
         adOverlay.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         adOverlay.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        adOverlay.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        adOverlay.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        adOverlay.initialLayout = GN_Vk.swapFinalLayout;
+        adOverlay.finalLayout = GN_Vk.swapFinalLayout;
         VkAttachmentReference arOverlay = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
         VkSubpassDescription spOverlay = {};
         spOverlay.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -642,8 +799,12 @@ void GN_VkShutdown() {
     }
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) vkDestroyImageView(GN_Vk.device, GN_Vk.swapchainViews[i], 0);
     delete[] GN_Vk.swapchainViews;
-    delete[] GN_Vk.swapchainImages;
-    vkDestroySwapchainKHR(GN_Vk.device, GN_Vk.swapchain, 0);
+    if(GN_Vk.headless) {
+        destroyOffscreenSwapchain();
+    } else {
+        delete[] GN_Vk.swapchainImages;
+        vkDestroySwapchainKHR(GN_Vk.device, GN_Vk.swapchain, 0);
+    }
     vkDestroyPipelineLayout(GN_Vk.device, GN_Vk.pipelineLayout, 0);
     vkDestroyDescriptorSetLayout(GN_Vk.device, GN_Vk.descriptorLayout, 0);
     if(s_rtFramebuffer) {
@@ -657,7 +818,7 @@ void GN_VkShutdown() {
     vkDestroyRenderPass(GN_Vk.device, GN_Vk.renderPass, 0);
     DestroyImageUploadCache();
     vkDestroyDevice(GN_Vk.device, 0);
-    vkDestroySurfaceKHR(GN_Vk.instance, GN_Vk.surface, 0);
+    if(!GN_Vk.headless) vkDestroySurfaceKHR(GN_Vk.instance, GN_Vk.surface, 0);
     vkValidationDestroyMessenger();
     vkDestroyInstance(GN_Vk.instance, 0);
     GN_Vk.initialized = false;
@@ -914,6 +1075,12 @@ bool GN_VkRayQuerySupported() {
     return GN_Vk.rayQuerySupported;
 }
 
+void GN_VkWaitIdle() {
+    if(GN_Vk.initialized && GN_Vk.device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(GN_Vk.device);
+    }
+}
+
 void GN_VkResize(int w, int h) {
     if(w <= 0 || h <= 0) return;
     GN_Vk.viewWidth = w;
@@ -934,8 +1101,19 @@ void GN_VkResize(int w, int h) {
     delete[] GN_Vk.framebuffers;
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) vkDestroyImageView(GN_Vk.device, GN_Vk.swapchainViews[i], 0);
     delete[] GN_Vk.swapchainViews;
-    delete[] GN_Vk.swapchainImages;
-    vkDestroySwapchainKHR(GN_Vk.device, GN_Vk.swapchain, 0);
+    if(GN_Vk.headless) {
+        destroyOffscreenSwapchain();
+    } else {
+        delete[] GN_Vk.swapchainImages;
+        vkDestroySwapchainKHR(GN_Vk.device, GN_Vk.swapchain, 0);
+    }
+    if(GN_Vk.headless) {
+        // 无窗口：直接按新尺寸重建离屏图（后续 framebuffer / 3D 目标重建路径窗窗口模式共用）
+        if(!createOffscreenSwapchain((uint32_t)w, (uint32_t)h, kHeadlessImageCount)) {
+            fprintf(stderr, "[GN_Vk] resize: 离屏目标重建失败\n");
+            return;
+        }
+    } else {
     // 重建 swapchain
     VkSurfaceCapabilitiesKHR caps;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(GN_Vk.physicalDevice, GN_Vk.surface, &caps);
@@ -973,6 +1151,7 @@ void GN_VkResize(int w, int h) {
     GN_Vk.swapchainViews = new VkImageView[GN_Vk.swapchainImageCount];
     vkGetSwapchainImagesKHR(GN_Vk.device, GN_Vk.swapchain, &GN_Vk.swapchainImageCount, GN_Vk.swapchainImages);
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) GN_Vk.swapchainViews[i] = MakeImageView(GN_Vk.swapchainImages[i], GN_Vk.swapchainFormat);
+    } // end of: headless / swapchain 重建
     // 重建 framebuffers
     GN_Vk.framebuffers = new VkFramebuffer[GN_Vk.swapchainImageCount];
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {

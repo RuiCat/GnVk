@@ -4,6 +4,7 @@
 // 视角约定：yaw=0 时相机在焦点 +Z 侧看向 -Z（角色正面 +Z，与 glTF 资产正面一致）。
 
 #include "imoSceneCamera.h"
+#include "imoSceneActions.h"
 
 #include <cmath>
 
@@ -27,6 +28,7 @@ const float DEFAULT_NEAR = 0.05f;
 const float DEFAULT_FAR = 300.0f;
 
 GN3d::cCAMERA gCamera;
+GN::cGAME_CLOCK gCameraClock; // 本文件的 dt 来源（timeScale 可做慢动作/暂停）
 GNg::sVEC3 gInitialFocus;
 float gInitialHeight = 2.0f;
 // 拖拽锚点：每帧用光标绝对位置求增量，松开/首次按下时重新锚定（避免陈旧增量）。
@@ -40,6 +42,7 @@ bool gLastPanValid = false;
 } // namespace
 
 void cameraInit(const GNg::sVEC3 &focus, float height) {
+    bindImoSceneActions(gInput); // 键位只在绑定表里出现一次（改键改 imoSceneActions.cpp）
     gInitialFocus = focus;
     gInitialHeight = (height > 0.5f) ? height : 0.5f;
     gCamera.Init();
@@ -55,24 +58,27 @@ void cameraReset() {
 }
 
 void cameraUpdate(float deltaSeconds) {
-    if (GN::Key1[GK_R]) {
+    // 时间轴统一走引擎时钟（默认 timeScale=1，与拆分前等价）；键位读取全部走动作编号。
+    gCameraClock.Tick(deltaSeconds);
+    gInput.Update(gCameraClock.DeltaTime());
+    if (gInput.Pressed(GN::eACT_RESET_VIEW)) {
         cameraReset();
     }
     // 方向键 / J L 键盘旋转（鼠标不可用时的兜底路径）。
     float keyYaw = 0.0f;
     float keyPitch = 0.0f;
-    if (GN::Key[GK_LEFT] || GN::Key[GK_J]) keyYaw -= KEY_ROTATE_SPEED * deltaSeconds;
-    if (GN::Key[GK_RIGHT] || GN::Key[GK_L]) keyYaw += KEY_ROTATE_SPEED * deltaSeconds;
-    if (GN::Key[GK_UP]) keyPitch += KEY_ROTATE_SPEED * deltaSeconds;
-    if (GN::Key[GK_DOWN]) keyPitch -= KEY_ROTATE_SPEED * deltaSeconds;
+    if (gInput.Down(GN::eACT_LOOK_LEFT)) keyYaw -= KEY_ROTATE_SPEED * deltaSeconds;
+    if (gInput.Down(GN::eACT_LOOK_RIGHT)) keyYaw += KEY_ROTATE_SPEED * deltaSeconds;
+    if (gInput.Down(GN::eACT_LOOK_UP)) keyPitch += KEY_ROTATE_SPEED * deltaSeconds;
+    if (gInput.Down(GN::eACT_LOOK_DOWN)) keyPitch -= KEY_ROTATE_SPEED * deltaSeconds;
     if (keyYaw != 0.0f || keyPitch != 0.0f) {
         gCamera.OrbitRotate(-keyYaw, keyPitch);
     }
     // 滚轮：上滚拉近、下滚拉远。
-    if (GN::Mouse1[GM_TOP]) {
+    if (gInput.Pressed(GN::eACT_ZOOM_IN)) {
         gCamera.OrbitZoom(WHEEL_ZOOM_STEP);
     }
-    if (GN::Mouse1[GM_BOTTOM]) {
+    if (gInput.Pressed(GN::eACT_ZOOM_OUT)) {
         gCamera.OrbitZoom(-WHEEL_ZOOM_STEP);
     }
     if (!GNg::ViewCur) {
@@ -82,7 +88,7 @@ void cameraUpdate(float deltaSeconds) {
     const int mouseY = GNg::ViewCur->mouseMY;
 
     // 左/右键拖动：绕焦点旋转（向右拖 = 视角右转 = 相机左移）。
-    const bool rotating = (GN::Mouse[GM_LEFT] != 0) || (GN::Mouse[GM_RIGHT] != 0);
+    const bool rotating = gInput.Down(eIMO_ACT_DRAG_ROTATE);
     if (!rotating) {
         gLastMouseValid = false;
         gLastMouseX = mouseX;
@@ -101,7 +107,7 @@ void cameraUpdate(float deltaSeconds) {
     }
 
     // 中键拖动：沿相机右/上轴平移焦点。
-    const bool panning = (GN::Mouse[GM_CENTRE] != 0);
+    const bool panning = gInput.Down(eIMO_ACT_DRAG_PAN);
     if (!panning) {
         gLastPanValid = false;
         gLastPanX = mouseX;

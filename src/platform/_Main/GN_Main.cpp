@@ -236,15 +236,37 @@ static void CharCallback(GLFWwindow *, unsigned int codepoint) {
 //  平台 API 实现
 // ═══════════════════════════════════════════════════════════
 
+GN_MAIN_API int GN_HeadlessFramesRequested() {
+    const char *env = std::getenv("GN_HEADLESS_FRAMES");
+    if(!env || !env[0]) return 0;
+    const int frames = std::atoi(env);
+    return frames > 0 ? frames : 0;
+}
+
 GN_MAIN_API void GT_AppArgsSet(int *argc, char **argv) {
     (void)argc;
     (void)argv;
+    // 无窗口模式：没有显示服务器就没有 glfwInit 可做，直接返回（入口不必改造）。
+    const int headlessFrames = GN_HeadlessFramesRequested();
+    if(headlessFrames > 0) {
+        fprintf(stderr, "[GN] GN_HEADLESS_FRAMES=%d：跳过 glfwInit（无窗口离屏运行）\n",
+                headlessFrames);
+        return;
+    }
     if(!glfwInit()) {
         fprintf(stderr, "GLFW init failed\n");
         exit(1);
     }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+}
+
+GN_MAIN_API bool GN_TryRunHeadlessFromEnv(short vw, short vh) {
+    const int frames = GN_HeadlessFramesRequested();
+    if(frames <= 0) return false;
+    const bool ok = GT_InitAllAndRunHeadless(vw, vh, frames, 0);
+    fprintf(stderr, "[GN] 无窗口运行结束: %s (%d 帧)\n", ok ? "ok" : "初始化失败", frames);
+    return true; // 无论成败都已处理完，调用方不应再进窗口循环
 }
 
 GN_MAIN_API void GN_InitWindow(int **hwnd, const char *caption, short vw, short vh, bool fs, bool zoom, bool cursor) {
@@ -321,10 +343,48 @@ GN_MAIN_API void GT_InitAllAndRun(int *hwnd, short vw, short vh, short cb,
         fc++;
     }
 
+    // 先等 GPU 空闲再让用户回调释放资源（同无窗口路径：最后一帧的 fence 还没等过）
+    GNg::GN_VkWaitIdle();
     GF_FrameCycleEndProc();
     GNg::GN_VkShutdown();
     glfwDestroyWindow(GT_MainWindow);
     GT_MainWindow = nullptr;
+}
+
+// ── 无窗口（离屏）运行：不建窗口、不建 surface/交换链，跑固定帧数后返回 ──
+// 与 GT_InitAllAndRun 的差别只有「目标从哪来」：这里调 GN_VkInit(0, ...) 让后端自建离屏图，
+// 帧循环、2D/3D 回调、资源生命周期完全同窗窗口模式。也不需要 glfwInit（无窗口系统依赖）。
+GN_MAIN_API bool GT_InitAllAndRunHeadless(short vw, short vh, int frames, void (*frame_proc)(int frame_index)) {
+    if(vw <= 0) vw = 800;
+    if(vh <= 0) vh = 600;
+    if(frames < 0) frames = 0;
+    fprintf(stderr, "[GN] GT_InitAllAndRunHeadless: %dx%d frames=%d\n", vw, vh, frames);
+
+    GNg::GN_VkInit(0, vw, vh); // window=0 → 无 surface/swapchain 路径
+    if(!GNg::GN_Vk.initialized) {
+        fprintf(stderr, "[GN] 无窗口渲染初始化失败（没有可用的 Vulkan 设备？）\n");
+        return false;
+    }
+
+    GN_InitInput(); // 输入子系统仍然初始化（事件永远不会到来，但状态容器/映射键要保持可用）
+
+    GT_SystemInited |= (1 << 2); // 标记图形设备已可用（同窗口模式）
+    GF_FrameCycleBeginProc();
+
+    for(int i = 0; i < frames; ++i) {
+        GF_ReSetInputState(GT_GetImeChar);
+        const unsigned int t = (unsigned int)i * 16u;
+        GF_FrameCycleProc1(t); // PreFrame 回调（GPU 资源安全初始化窗口）
+        GF_FrameCycleProc2(t); // BeginFrame → 用户回调 → RenderFinish（EndFrame 提交）
+        if(frame_proc) frame_proc(i);
+    }
+
+    // 先等 GPU 空闲再让用户回调释放资源：最后一帧已提交但 fence 未等，此时销毁模型 AS/
+    // 网格/缓冲就是写后释放（lavapipe 上表现为幔发性 SIGSEGV）。窗口主循环同样如此处理。
+    GNg::GN_VkWaitIdle();
+    GF_FrameCycleEndProc();
+    GNg::GN_VkShutdown();
+    return true;
 }
 
 // ── 兼容旧 API 桩 ──

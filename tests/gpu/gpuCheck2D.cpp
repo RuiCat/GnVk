@@ -1,5 +1,6 @@
 // P1b 2D 四混合验收实现：把 swapchain 回读统一解码为线性 RGBA，再做像素数学。
 #include "gpuCheck2D.h"
+#include "gpuTestHooks.h"
 
 #include <GN.h>
 #include "GN_Vk.h"
@@ -37,8 +38,8 @@ void CheckPixel(const char *name, const sFLOAT_PIXEL &p, float r, float g, float
 
 void RunBlendCase(const char *name, unsigned short blendMode, float expectedR, float expectedG,
                   float expectedB, float expectedA, float expectedBgB) {
-    const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
-    const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
+    const uint32_t width = Extent().width;
+    const uint32_t height = Extent().height;
     if(!GNg::GN_VkBeginFrame()) {
         ReportFail(name, "GN_VkBeginFrame failed");
         return;
@@ -48,7 +49,7 @@ void RunBlendCase(const char *name, unsigned short blendMode, float expectedR, f
     GNg::ImageDraw(0, (int)(width / 4), (int)(height / 4), (int)(width / 2), (int)(height / 2),
                    0x80800000u, 0, blendMode, 0, 0, 0, 0);
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
 
     std::vector<uint8_t> pixels;
     if(!ReadSwapchain(0, 0, (int)width, (int)height, pixels)) {
@@ -66,8 +67,8 @@ void RunBlendCase(const char *name, unsigned short blendMode, float expectedR, f
 } // namespace
 
 void Run2DChecks() {
-    if(!GNg::GN_Vk.pipeline || !GNg::GN_Vk.pipelineBright || !GNg::GN_Vk.pipelineMultiply ||
-       !GNg::GN_Vk.pipelineNull) {
+    if(!Pipe(GNg::eTEST_PIPE_2D) || !Pipe(GNg::eTEST_PIPE_2D_BRIGHT) || !Pipe(GNg::eTEST_PIPE_2D_MULTIPLY) ||
+       !Pipe(GNg::eTEST_PIPE_2D_NULL)) {
         ReportSkip("2d.pipelines", "one or more 2D pipelines missing");
         return;
     }

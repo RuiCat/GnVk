@@ -21,10 +21,11 @@ namespace GNg {
 
 namespace {
 
-const uint32_t SKIN_SSBO_MAX_JOINTS = 4096;
+// 容量来自 GN_3DSkin.h 的共享常量：CPU 侧分流（selectSkinPalettePath）与这里的缓冲
+// 容量必须是同一个数，否则"选到 SSBO 却装不下"会在运行时才暴露。
 const uint32_t SKIN_SSBO_SLOTS = 3;
 const VkDeviceSize SKIN_SSBO_BYTES =
-    (VkDeviceSize)SKIN_SSBO_MAX_JOINTS * (VkDeviceSize)sizeof(sMAT44);
+    (VkDeviceSize)GN3d::SKIN_SSBO_MAX_JOINTS * (VkDeviceSize)sizeof(sMAT44);
 
 // push constant：模型矩阵 + albedo（与 gn3d_skinned_ssbo.vert/.frag 的 ModelPC 一致）。
 struct alignas(16) sSKIN_SSBO_PUSH {
@@ -244,7 +245,7 @@ bool GN_VkDraw3DSkinnedSsbo(const void *vertices, uint32_t vertexCount,
     if(vertices == nullptr || vertexCount == 0 || palette == nullptr || modelMatrix == nullptr) {
         return false;
     }
-    if(paletteCount == 0 || paletteCount > SKIN_SSBO_MAX_JOINTS) return false;
+    if(paletteCount == 0 || paletteCount > GN3d::SKIN_SSBO_MAX_JOINTS) return false;
     if(!init3DSkinnedSsbo()) return false; // 惰性初始化（幂等）
 
     const uint32_t slot = (GN_Vk.currentFrame + s_slotCursor++) % SKIN_SSBO_SLOTS;

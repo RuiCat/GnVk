@@ -113,9 +113,10 @@ void resetCamera() {
 
 // 每帧相机输入：只汇总 sCAMERA_INPUT，具体运动全部由 cCAMERA::ApplyInput 执行。
 // 顺序与拆分前一致：F 切换模式 → 平移/键盘转视角/鼠标拖拽 → 轨道缩放/平移。
+// P0：键位读取全部走动作映射（绑定表见 mmdViewerActions.cpp），本函数不再出现 GK_*/GM_*。
 void updateCameraInput(float dt) {
     // F 键：自由飞行 ↔ 轨道（与 1-6/G/H/O/P/C/V/R 不冲突）。
-    if (GN::Key1[GK_F]) {
+    if (gInput.Pressed(GN::eACT_ORBIT_TOGGLE)) {
         if (gCamera.aMode == GN3d::eCAMERA_MODE_ORBIT) {
             gCamera.aMode = GN3d::eCAMERA_MODE_FREE; // 出轨道：保留当前 position/rotation
         } else {
@@ -127,28 +128,28 @@ void updateCameraInput(float dt) {
     GN3d::sCAMERA_INPUT input;
 
     // 平移：W/S 前后、A/D 左右、Q/E 升降（沿相机自身轴），Shift 加速。
-    if (GN::Key[GK_W]) input.aMoveFront += 1.0f;
-    if (GN::Key[GK_S]) input.aMoveFront -= 1.0f;
-    if (GN::Key[GK_A]) input.aMoveLeft += 1.0f;
-    if (GN::Key[GK_D]) input.aMoveLeft -= 1.0f;
-    if (GN::Key[GK_Q]) input.aMoveUp -= 1.0f;
-    if (GN::Key[GK_E]) input.aMoveUp += 1.0f;
-    input.aBoost = (GN::Key[GK_SHIFT] != 0);
+    if (gInput.Down(GN::eACT_MOVE_FRONT)) input.aMoveFront += 1.0f;
+    if (gInput.Down(GN::eACT_MOVE_BACK)) input.aMoveFront -= 1.0f;
+    if (gInput.Down(GN::eACT_MOVE_LEFT)) input.aMoveLeft += 1.0f;
+    if (gInput.Down(GN::eACT_MOVE_RIGHT)) input.aMoveLeft -= 1.0f;
+    if (gInput.Down(GN::eACT_MOVE_DOWN)) input.aMoveUp -= 1.0f;
+    if (gInput.Down(GN::eACT_MOVE_UP)) input.aMoveUp += 1.0f;
+    input.aBoost = gInput.Down(GN::eACT_BOOST);
 
     // 键盘转视角：方向键 / J L（鼠标不可用时始终可用的一条路径），增量 = rad/s × dt。
     const float lookStep = KEY_LOOK_SPEED * dt;
     float lookYaw = 0.0f;
     float lookPitch = 0.0f;
-    if (GN::Key[GK_LEFT] || GN::Key[GK_J]) lookYaw -= lookStep;
-    if (GN::Key[GK_RIGHT] || GN::Key[GK_L]) lookYaw += lookStep;
-    if (GN::Key[GK_UP]) lookPitch += lookStep;
-    if (GN::Key[GK_DOWN]) lookPitch -= lookStep;
+    if (gInput.Down(GN::eACT_LOOK_LEFT)) lookYaw -= lookStep;
+    if (gInput.Down(GN::eACT_LOOK_RIGHT)) lookYaw += lookStep;
+    if (gInput.Down(GN::eACT_LOOK_UP)) lookPitch += lookStep;
+    if (gInput.Down(GN::eACT_LOOK_DOWN)) lookPitch -= lookStep;
 
     // 鼠标拖拽转视角（按住左键或右键；光标绝对位置求增量，松开/首次按下重新锚定）。
     if (GNg::ViewCur) {
         const int mx = GNg::ViewCur->mouseMX;
         const int my = GNg::ViewCur->mouseMY;
-        const bool dragging = (GN::Mouse[GM_LEFT] != 0) || (GN::Mouse[GM_RIGHT] != 0);
+        const bool dragging = gInput.Down(eMMD_ACT_DRAG_LOOK);
         if (!dragging) {
             gLastMouseValid = false;
             gLastMouseX = mx;
@@ -172,12 +173,12 @@ void updateCameraInput(float dt) {
 
     // 轨道模式专属：滚轮缩放 + 中键拖动平移（自由模式保持旧行为：滚轮/中键无作用）。
     if (orbitMode) {
-        if (GN::Mouse1[GM_TOP]) input.aZoom += ORBIT_ZOOM_STEP;
-        if (GN::Mouse1[GM_BOTTOM]) input.aZoom -= ORBIT_ZOOM_STEP;
+        if (gInput.Pressed(GN::eACT_ZOOM_IN)) input.aZoom += ORBIT_ZOOM_STEP;
+        if (gInput.Pressed(GN::eACT_ZOOM_OUT)) input.aZoom -= ORBIT_ZOOM_STEP;
         if (GNg::ViewCur) {
             const int mx = GNg::ViewCur->mouseMX;
             const int my = GNg::ViewCur->mouseMY;
-            const bool panning = (GN::Mouse[GM_CENTRE] != 0);
+            const bool panning = gInput.Down(eMMD_ACT_DRAG_PAN);
             if (!panning) {
                 gLastPanValid = false;
                 gLastPanX = mx;

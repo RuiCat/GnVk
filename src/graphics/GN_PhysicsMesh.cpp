@@ -258,4 +258,15 @@ void cPHYSICS_WORLD::buildMeshContacts() {
     }
 }
 
+bool querySphereTriangle(const GNg::sVEC3 &center, float radius, const GNg::sVEC3 &a,
+                         const GNg::sVEC3 &b, const GNg::sVEC3 &c, sCONTACT_MANIFOLD &out) {
+    return sphereTriangleContact(center, radius, a, b, c, out);
+}
+
+bool queryCapsuleTriangle(const GNg::sVEC3 &e0, const GNg::sVEC3 &e1, float radius,
+                          const GNg::sVEC3 &a, const GNg::sVEC3 &b, const GNg::sVEC3 &c,
+                          sCONTACT_MANIFOLD &out) {
+    return capsuleTriangleContact(e0, e1, radius, a, b, c, out);
+}
+
 } // namespace GN3d

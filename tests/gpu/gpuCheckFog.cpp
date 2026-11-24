@@ -6,6 +6,7 @@
 //   3) fog.forward：Blinn-Phong 路径同样被雾影响（binding 3），关闭后恢复。
 // 注：延迟光照的 binding 8 已接线并由管线创建时的描述符布局校验；G-Buffer 全链路像素验收未做。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 #include "GN_3Dlight.h"
 
@@ -75,7 +76,7 @@ bool drawPbrQuad(const GNg::sMAT44 &identity, const float *vertices) {
                         1.0f);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     return true;
 }
 
@@ -86,14 +87,14 @@ bool drawForwardQuad(const GNg::sMAT44 &identity, const float *vertices) {
     GNg::GN_VkDraw3D(vertices, 4, kQuadIndexCCW, 6, &identity, 0.8f, 0.5f, 0.3f);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     return true;
 }
 
 bool readCenter(sFLOAT_PIXEL &out) {
     std::vector<uint8_t> pixels;
-    const int width = (int)GNg::GN_Vk.swapchainExtent.width;
-    const int height = (int)GNg::GN_Vk.swapchainExtent.height;
+    const int width = (int)Extent().width;
+    const int height = (int)Extent().height;
     if(!ReadSwapchain(0, 0, width, height, pixels)) return false;
     out = SampleSwapchain(pixels, width, width / 2, height / 2);
     return true;
@@ -172,7 +173,7 @@ void reportForward() {
 } // namespace
 
 void RunFogChecks() {
-    if(!GNg::GN_Vk.initialized) {
+    if(!EngineReady()) {
         ReportSkip("fog.setup", "GN_Vk not initialized");
         return;
     }

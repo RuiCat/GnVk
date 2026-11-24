@@ -975,10 +975,6 @@ GN_API void M33TransformQuads(sQUADS2 &qs, const sMAT33 &matrix);
 //用矩阵33来转换4边型并一起计算范围矩型(矩型结构, 相对的四边型结构输出, 变换矩阵, 变换矩阵是否包含镜象变换, 变换矩阵xy缩放逆因子 默认0即当矩阵不包含缩放, 相对的四边型另外一点输出)  适合2D变换用 !!变换矩型会一并计算相对的四边型
 GN_API void M33TransformRect(sRECT2 &rc, sQUADS2 &qs, const sMAT33 &matrix, bool has_mirror = false, const sVEC2 *scl_factor_inv = 0, sVEC2 *ap = 0 /*[1]*/);
 
-struct GN_API sVEC3 //3D向量
-{
-    float x, y, z;
-};
 //按顶点数据计算获得能包围这些顶点的范围盒(范围盒输出, 顶点数据, 顶点数) !里面已包含 RangeBoxEnsure 调用
 GN_API void GetRangeBoxFromVertexs(sRECT2 *rb, sVEC2 *vex_data, int vex_num);
 

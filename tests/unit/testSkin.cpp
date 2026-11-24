@@ -182,3 +182,27 @@ TEST_CASE(packPaletteTruncatesAt128) {
 
     CHECK_EQ(packPalette(nullptr, 4, ubo), 0u);
 }
+
+// ── P2：调色板路径分流（UBO ≤128 / SSBO ≤4096 / 拒绝）──────────────
+TEST_CASE(skinPalettePathSelection) {
+    using namespace GN3d;
+    CHECK(selectSkinPalettePath(0) == eSKIN_PATH_NONE);
+    CHECK(selectSkinPalettePath(1) == eSKIN_PATH_UBO);
+    CHECK(selectSkinPalettePath(SKIN_MAX_JOINTS) == eSKIN_PATH_UBO);
+    CHECK(selectSkinPalettePath(SKIN_MAX_JOINTS + 1) == eSKIN_PATH_SSBO);
+    CHECK(selectSkinPalettePath(SKIN_SSBO_MAX_JOINTS) == eSKIN_PATH_SSBO);
+    // 超容量明确拒绝，而不是静默截断（截断=角色缺肢体且看不出原因）
+    CHECK(selectSkinPalettePath(SKIN_SSBO_MAX_JOINTS + 1) == eSKIN_PATH_NONE);
+
+    CHECK_EQ(skinPaletteCapacity(eSKIN_PATH_NONE), 0u);
+    CHECK_EQ(skinPaletteCapacity(eSKIN_PATH_UBO), SKIN_MAX_JOINTS);
+    CHECK_EQ(skinPaletteCapacity(eSKIN_PATH_SSBO), SKIN_SSBO_MAX_JOINTS);
+
+    CHECK(!skinPaletteTruncated(0));
+    CHECK(!skinPaletteTruncated(128));
+    CHECK(!skinPaletteTruncated(129));
+    CHECK(!skinPaletteTruncated(4096));
+    CHECK(skinPaletteTruncated(4097));
+    // SSBO 容量必须大于 UBO 容量，否则"分流"没有意义
+    CHECK(SKIN_SSBO_MAX_JOINTS > SKIN_MAX_JOINTS);
+}

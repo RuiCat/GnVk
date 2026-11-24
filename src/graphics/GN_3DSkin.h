@@ -47,5 +47,36 @@ bool skinVertices(const sSKINNED_VERTEX *in, uint32_t count, const GNg::sMAT44 *
 // 返回实际写入的矩阵数（= min(paletteCount, SKIN_MAX_JOINTS)）。
 uint32_t packPalette(const GNg::sMAT44 *palette, uint32_t paletteCount, sSKIN_UBO &out);
 
+// ═══════════════════════════════════════════════════════════
+//  调色板路径分流（P2）：UBO ≤128 / SSBO ≤4096 / 拒绝
+// ═══════════════════════════════════════════════════════════
+// 为什么要有它：MMD 模型常见 200+ 关节，超过 UBO 的 128 就会静默截断（画面坏但不说原因）。
+// 引擎两套绘制入口都早已存在（GN_VkDraw3DSkinned / ...Ssbo），缺的只是"按关节数选一套"
+// ——这段判断原先谁都不做。放在本头（纯 CPU）而不是 Vulkan 层，是为了能无 GPU 单测。
+
+// SSBO 调色板容量，与 _Vulkan/vkSkinSsbo.cpp 里的缓冲容量是同一条定义（共享常量，
+// 两边不可能漂移）。v1 上限 4096。
+const uint32_t SKIN_SSBO_MAX_JOINTS = 4096;
+
+enum eSKIN_PALETTE_PATH {
+    eSKIN_PATH_NONE = 0, // 无关节 / 超出 SSBO 上限：调用方不应绘制（而不是静默画错）
+    eSKIN_PATH_UBO = 1, // 1..SKIN_MAX_JOINTS：8KB UBO，着色器把索引钳到 127
+    eSKIN_PATH_SSBO = 2 // SKIN_MAX_JOINTS+1..SKIN_SSBO_MAX_JOINTS：SSBO，索引钳到 4095
+};
+
+// 该路径能容纳的关节数上限（NONE = 0）。
+uint32_t skinPaletteCapacity(eSKIN_PALETTE_PATH path);
+
+// 按关节数选路径：
+//   0                     → NONE
+//   1..128                → UBO
+//   129..4096             → SSBO
+//   >4096                 → NONE（超容量。**不静默截断**：截断会让角色缺肢体，
+//                            却看不出是"关节太多"，所以宁可让调用方报错/换资产）
+eSKIN_PALETTE_PATH selectSkinPalettePath(uint32_t jointCount);
+
+// 该关节数在这条路径上是否会被截断（仅用于告警文案；NONE 返回 true）。
+bool skinPaletteTruncated(uint32_t jointCount);
+
 } // namespace GN3d
 #endif // _GN_3DSKIN_H_

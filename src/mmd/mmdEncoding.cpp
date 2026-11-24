@@ -1,7 +1,16 @@
-// MMD 文本编码转换实现：Shift-JIS 走系统 iconv（与 GN_Sys 既有 GB2312 转换同一依赖）。
+// MMD 文本编码转换实现：Shift-JIS → UTF-8 依赖平台的编码转换能力。
+//   * Windows: MultiByteToWideChar(CP932…) + 本文件的 UTF-16→UTF-8（无外部依赖，不需要 iconv）
+//   * Linux/macOS: 系统 iconv（与 GN_Sys 既有的 GB2312 转换同一依赖）
 #include "mmdEncoding.h"
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
 #include <iconv.h>
+#endif
 
 #include <vector>
 
@@ -29,6 +38,7 @@ void appendUtf8(std::string &out, uint32_t codePoint) {
 }
 
 // 用指定源编码调用 iconv；成功返回 true。
+#if !defined(_WIN32)
 bool convertWithIconv(const char *fromCode, const uint8_t *bytes, size_t size, std::string &out) {
     iconv_t handle = iconv_open("UTF-8", fromCode);
     if (handle == reinterpret_cast<iconv_t>(-1)) {
@@ -50,6 +60,27 @@ bool convertWithIconv(const char *fromCode, const uint8_t *bytes, size_t size, s
     out.swap(result);
     return true;
 }
+#else // _WIN32：用系统代码页转换（Windows 没有 iconv）
+bool convertWithCodePage(unsigned int codePage, const uint8_t *bytes, size_t size, std::string &out) {
+    if (size > 0x7FFFFFFFu) {
+        return false;
+    }
+    const int wideLen = ::MultiByteToWideChar(codePage, 0, reinterpret_cast<const char *>(bytes),
+                                             static_cast<int>(size), nullptr, 0);
+    if (wideLen <= 0) {
+        return false;
+    }
+    std::vector<wchar_t> wide(static_cast<size_t>(wideLen));
+    if (::MultiByteToWideChar(codePage, 0, reinterpret_cast<const char *>(bytes),
+                              static_cast<int>(size), &wide[0], wideLen) <= 0) {
+        return false;
+    }
+    // Windows 的 wchar_t 就是 UTF-16LE，直接复用本文件的 UTF-16LE → UTF-8。
+    out = utf16LeToUtf8(reinterpret_cast<const uint8_t *>(&wide[0]),
+                        static_cast<size_t>(wideLen) * sizeof(wchar_t));
+    return true;
+}
+#endif
 
 } // namespace
 
@@ -57,6 +88,16 @@ std::string shiftJisToUtf8(const uint8_t *bytes, size_t size) {
     if (!bytes || size == 0) {
         return std::string();
     }
+#if defined(_WIN32)
+    // 932=CP932（Windows 的 Shift-JIS 实现）；余下两个是更严格/更老的变体，作兜底。
+    static const unsigned int CODEPAGES[] = {932u, 943u, 20932u};
+    for (size_t i = 0; i < sizeof(CODEPAGES) / sizeof(CODEPAGES[0]); ++i) {
+        std::string converted;
+        if (convertWithCodePage(CODEPAGES[i], bytes, size, converted)) {
+            return converted;
+        }
+    }
+#else
     static const char *const CODECS[] = {"SHIFT-JIS", "CP932", "SHIFT_JIS"};
     for (size_t i = 0; i < sizeof(CODECS) / sizeof(CODECS[0]); ++i) {
         std::string converted;
@@ -64,6 +105,7 @@ std::string shiftJisToUtf8(const uint8_t *bytes, size_t size) {
             return converted;
         }
     }
+#endif
     return std::string(reinterpret_cast<const char *>(bytes), size);
 }
 

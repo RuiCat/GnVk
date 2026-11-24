@@ -7,6 +7,7 @@
 //   4) cloth.draw：平面布料按 identity VP 绘制，中心像素 ≈ albedo（±0.05）；
 //   5) cloth.invalid：dt<=0、count 不符上传、pass 外绘制、重复销毁都安全。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 #include "GN_3DclothGPU.h"
 
@@ -190,14 +191,14 @@ void reportDraw() {
     const bool drew = GNg::GN_VkClothDraw(identity, 0.7f, 0.3f, 0.2f);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     if(!drew) {
         ReportFail("cloth.draw", "GN_VkClothDraw returned false");
         return;
     }
     std::vector<uint8_t> pixels;
-    const int width = (int)GNg::GN_Vk.swapchainExtent.width;
-    const int height = (int)GNg::GN_Vk.swapchainExtent.height;
+    const int width = (int)Extent().width;
+    const int height = (int)Extent().height;
     if(!ReadSwapchain(0, 0, width, height, pixels)) {
         ReportFail("cloth.draw", "swapchain readback failed");
         return;
@@ -239,7 +240,7 @@ void reportInvalid() {
 } // namespace
 
 void RunClothChecks() {
-    if(!GNg::GN_Vk.initialized) {
+    if(!EngineReady()) {
         ReportSkip("cloth.setup", "GN_Vk not initialized");
         return;
     }

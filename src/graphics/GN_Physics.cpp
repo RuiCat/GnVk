@@ -172,7 +172,8 @@ const uint32_t cPHYSICS_WORLD::INVALID_HANDLE;
 
 cPHYSICS_WORLD::cPHYSICS_WORLD()
     : aContinuousCollision(false), aGravity{0.0f, -9.81f, 0.0f}, aFixedStep(1.0f / 60.0f),
-      aAccumulator(0.0f), aMaxSubSteps(4), aBodyCount(0), aJointCount(0), aLastContactCount(0) {
+      aAccumulator(0.0f), aMaxSubSteps(4), aBodyCount(0), aJointCount(0), aLastContactCount(0),
+      aLastSubSteps(0) {
     resetMesh();
 }
 
@@ -221,7 +222,10 @@ uint32_t cPHYSICS_WORLD::AddBody(const sRIGID_BODY &body) {
     }
     aUsed[handle] = 1;
     aBodies[handle].aSleepTime = 0.0f;
-    if(!IsDynamicBody(aBodies[handle])) aBodies[handle].aSleeping = false;
+    // 新加入世界的刚体一律从"醒着"开始：aSleeping 是入参结构体的字段，
+    // 调用方（尤其用 sRIGID_BODY body; 起手的）常常没写它，而一个 sleeping=垃圾值的
+    // 动态刚体会永远不积分——表现是"刚体加了但不动"，极难查。
+    aBodies[handle].aSleeping = false;
     BodyUpdateInertia(aBodies[handle]);
     BodyUpdateWorldState(aBodies[handle]);
 
@@ -282,6 +286,7 @@ void cPHYSICS_WORLD::Clear() {
     aAccumulator = 0.0f;
     aBodyCount = 0;
     aLastContactCount = 0;
+    aLastSubSteps = 0;
 }
 
 // 用上一步的接触冲量预填本步约束：按刚体对匹配，再按接触点世界位置就近匹配（阈值 5cm）。
@@ -371,6 +376,21 @@ void cPHYSICS_WORLD::Step(float dt) {
     }
     // 子步用尽仍有积压：丢弃余量，避免"死亡螺旋"
     if(steps >= aMaxSubSteps && aAccumulator > aFixedStep) aAccumulator = 0.0f;
+    aLastSubSteps = steps;
+}
+
+bool cPHYSICS_WORLD::GetContactInfo(uint32_t index, sCONTACT_INFO &out) const {
+    if(index >= aConstraints.size()) return false;
+    if(index >= aConstraintBodyLo.size() || index >= aConstraintBodyHi.size()) return false;
+    const sCONTACT_CONSTRAINT &constraint = aConstraints[index];
+    if(constraint.aManifold.aCount == 0) return false;
+    out.aBodyLo = aConstraintBodyLo[index];
+    out.aBodyHi = aConstraintBodyHi[index];
+    out.aNormal = constraint.aManifold.aNormal;
+    out.aPoint = constraint.aManifold.aPoints[0].aPoint;
+    out.aPenetration = constraint.aManifold.aPoints[0].aPenetration;
+    out.aPointCount = constraint.aManifold.aCount;
+    return true;
 }
 
 void cPHYSICS_WORLD::StepOnce(float dt) {

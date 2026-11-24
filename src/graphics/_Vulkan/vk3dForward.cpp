@@ -10,11 +10,11 @@ namespace GNg {
 
 namespace {
 
-// PBR 描述符集按“albedo/normal 纹理组合”缓存。
-// 原因：GN_VkDraw3DPBR 若在单帧内反复改写同一个 descriptorSetPBR，GPU 在提交后读到的是
-// 最后一次写入的内容——多个不同贴图的网格会全部采样到同一张贴图（真机表现为整身衣物
-// 变成同一张黑白贴图的图案）。这里为每个纹理组合分配独立 set，并在每个 3D pass 开始时
-// 从规范 set 复制 12 个静态绑定（场景/光源/阴影/天空盒/雾/GI/LUT），再覆盖 binding 1/3。
+// 纹理描述符环集：按“albedo/normal 纹理组合”为每个组合分配独立的 set。
+// 原因：若在单帧内反复改写同一个 descriptorSetPBR，GPU 提交后读到的是最后一次写入的内容
+// （多个不同贴图的网格会全部采样到同一张），而且改写已绑定的集本身违规
+// （VUID-vkUpdateDescriptorSets-None-03047）。环集只在帧首从规范 set 拷静态绑定
+// （PBR 12 个：场景/光源/阴影/天空盒/雾/GI/LUT），再用本组合的纹理覆盖 binding 1/3。
 struct sPBR_TEXTURE_SET {
     VkImageView aAlbedo;
     VkSampler aAlbedoSampler;
@@ -24,6 +24,52 @@ struct sPBR_TEXTURE_SET {
 };
 
 std::vector<sPBR_TEXTURE_SET> s_pbrTextureSets;
+
+// 前向（Blinn-Phong）路径的纹理环集：同一理由（见上方注释）。
+struct sFORWARD_TEXTURE_SET {
+    VkImageView aAlbedo;
+    VkSampler aSampler;
+    VkDescriptorSet aSet;
+};
+
+std::vector<sFORWARD_TEXTURE_SET> s_forwardTextureSets;
+
+// 环集缓存的状态：已同步到的规范集代际号 + 「需要整体重建」标记。
+uint32_t s_pbrSyncedGen = 0;
+uint32_t s_forwardSyncedGen = 0;
+bool s_ringResetRequested = false;
+
+// 定义在下方：把规范 set 的 5 个绑定同步到指定纹理 set，再覆盖 binding 1。
+void syncForwardTextureSet(const sFORWARD_TEXTURE_SET &entry);
+
+VkDescriptorSet findOrCreateForwardSet(VkImageView albedo, VkSampler sampler) {
+    for(size_t i = 0; i < s_forwardTextureSets.size(); ++i) {
+        const sFORWARD_TEXTURE_SET &entry = s_forwardTextureSets[i];
+        if(entry.aAlbedo == albedo && entry.aSampler == sampler) return entry.aSet;
+    }
+    if(GN_Vk.descriptorPool == VK_NULL_HANDLE || GN_Vk.descriptorLayout3D == VK_NULL_HANDLE) {
+        return GN_Vk.descriptorSet3D;
+    }
+    if(s_forwardTextureSets.size() >= kTextureSetCacheCap) {
+        return GN_Vk.descriptorSet3D; // 同 PBR：录制中不释放、不改写规范集
+    }
+    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    dai.descriptorPool = GN_Vk.descriptorPool;
+    dai.descriptorSetCount = 1;
+    dai.pSetLayouts = &GN_Vk.descriptorLayout3D;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    if(vkAllocateDescriptorSets(GN_Vk.device, &dai, &set) != VK_SUCCESS) {
+        fprintf(stderr, "[GN_Vk] 前向纹理描述符集分配失败（回退共享 set）\n");
+        return GN_Vk.descriptorSet3D;
+    }
+    sFORWARD_TEXTURE_SET entry;
+    entry.aAlbedo = albedo;
+    entry.aSampler = sampler;
+    entry.aSet = set;
+    syncForwardTextureSet(entry); // 首次使用前补齐 5 个绑定（环集未绑定过，合法）
+    s_forwardTextureSets.push_back(entry);
+    return set;
+}
 
 // 定义在下方：把规范 set 的 12 个绑定同步到指定纹理 set，再覆盖 binding 1/3。
 void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry);
@@ -38,6 +84,20 @@ VkDescriptorSet findOrCreatePBRSet(VkImageView albedo, VkSampler albedoSampler,
         }
     }
     if(GN_Vk.descriptorPool == VK_NULL_HANDLE || GN_Vk.descriptorLayoutPBR == VK_NULL_HANDLE) {
+        return GN_Vk.descriptorSetPBR;
+    }
+    // 池总共只有 1024 个描述符（每套 PBR 环集 4 UBO + 8 采样器），无上限地长会把池吃光。
+    // 到顶就不能再分配：此时正在录制命令缓冲，既不能 vkFreeDescriptorSets（会释放本帧
+    // 已绑定的集），也不能写规范集。退化成绑规范集（只支持一种纹理组合），只告警一次。
+    if(s_pbrTextureSets.size() >= kTextureSetCacheCap) {
+        static bool warned = false;
+        if(!warned) {
+            warned = true;
+            fprintf(stderr,
+                    "[GN_Vk] 警告: PBR 纹理环集已达上限 %u，后续 draw 回退共享 set"
+                    "（同一帧内多纹理组合会互相覆盖）\n",
+                    kTextureSetCacheCap);
+        }
         return GN_Vk.descriptorSetPBR;
     }
     VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -95,18 +155,87 @@ void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry) {
         vkUpdateDescriptorSets(GN_Vk.device, 2, writes, 0, nullptr);
 }
 
+// 前向环集同步：descriptorLayout3D 的 5 个绑定（0 场景/1 纹理/2 光源/3 雾/4 GI）连续，
+// 一次 copy 搞定，再覆盖 binding 1 的纹理与采样器。
+void syncForwardTextureSet(const sFORWARD_TEXTURE_SET &entry) {
+        VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
+        copy.srcSet = GN_Vk.descriptorSet3D;
+        copy.srcBinding = 0;
+        copy.dstSet = entry.aSet;
+        copy.dstBinding = 0;
+        copy.descriptorCount = 5;
+        vkUpdateDescriptorSets(GN_Vk.device, 0, nullptr, 1, &copy);
+
+        VkDescriptorImageInfo info = {};
+        info.sampler = entry.aSampler ? entry.aSampler : GN_Vk.defaultSampler;
+        info.imageView = entry.aAlbedo ? entry.aAlbedo : GN_Vk.defaultImageView;
+        info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        write.dstSet = entry.aSet;
+        write.dstBinding = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.descriptorCount = 1;
+        write.pImageInfo = &info;
+        vkUpdateDescriptorSets(GN_Vk.device, 1, &write, 0, nullptr);
+}
+
+// G-Buffer 环集：由 vk3dPasses.cpp 维护（layout 是 0/1/3 非连续，需要分开拷）。
 } // namespace
 
-// 帧首（命令缓冲尚未开始录制）把规范 set 的 12 个绑定同步到所有纹理 set。
+// 帧首（命令缓冲尚未开始录制、且规范集代际号已变）把规范 set 的 12 个绑定同步到所有纹理 set。
 // 校验层结论：在录制中改写「已绑定」的描述符集（未开 UPDATE_AFTER_BIND）会让命令缓冲进入
 // invalid state，之后的 bind/draw 全被丢弃 —— 这是 cull.debugLine 全图 0 像素的根因。
 void refreshPBRTextureSets() {
     if(GN_Vk.descriptorSetPBR == VK_NULL_HANDLE) {
         return;
     }
+    // 代际号没变 = 规范集的静态绑定没改过，环集里的内容仍然有效，直接跳过。
+    // 这一条以前每帧对每套环集做 12 次 copy + 2 次 write，纹理一多就是纯浪费。
+    const uint32_t gen = GN_VkCanonicalDescGeneration();
+    if(gen == s_pbrSyncedGen) return;
     for(size_t i = 0; i < s_pbrTextureSets.size(); ++i) {
         syncPBRTextureSet(s_pbrTextureSets[i]);
     }
+    s_pbrSyncedGen = gen;
+}
+
+// 前向路径的环集同步（同上：只在帧首、命令缓冲尚未录制时调用）。
+void refreshForwardTextureSets() {
+    if(GN_Vk.descriptorSet3D == VK_NULL_HANDLE) {
+        return;
+    }
+    const uint32_t gen = GN_VkCanonicalDescGeneration();
+    if(gen == s_forwardSyncedGen) return;
+    for(size_t i = 0; i < s_forwardTextureSets.size(); ++i) {
+        syncForwardTextureSet(s_forwardTextureSets[i]);
+    }
+    s_forwardSyncedGen = gen;
+}
+
+// 释放一套环集（池开了 FREE_DESCRIPTOR_SET_BIT，必须显式归还，否则描述符永久占用）。
+
+// 纹理解放会让环集里缓存的 image view / sampler 句柄失效，整体作废重。
+// 只做标记、不在录制中释放，避开「释放仍被引用的描述符集」的时机问题。
+void GN_VkRequestTextureSetCacheReset() { s_ringResetRequested = true; }
+
+// 帧首调用：把上帧标记的重置真正做掉（此时上一帧的 fence 已等过）。
+void applyRingResetIfRequested() {
+    if(!s_ringResetRequested) return;
+    s_ringResetRequested = false;
+    ReleaseRingSets(s_pbrTextureSets, GN_Vk.descriptorPool, GN_Vk.device);
+    ReleaseRingSets(s_forwardTextureSets, GN_Vk.descriptorPool, GN_Vk.device);
+    resetGBufferTextureSetCache();
+    s_pbrSyncedGen = 0;
+    s_forwardSyncedGen = 0;
+}
+
+void resetTextureSetCaches() {
+    ReleaseRingSets(s_pbrTextureSets, GN_Vk.descriptorPool, GN_Vk.device);
+    ReleaseRingSets(s_forwardTextureSets, GN_Vk.descriptorPool, GN_Vk.device);
+    resetGBufferTextureSetCache(); // 定义在 vk3dPasses.cpp
+    s_pbrSyncedGen = 0;
+    s_forwardSyncedGen = 0;
+    s_ringResetRequested = false;
 }
 
 // P10：最近一次 PBR 绘制提交的 indexCount（诊断/验收钩子）。
@@ -217,6 +346,10 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     s_inRenderPass = true; // 3D 渲染通道活跃
 }
 
+bool GN_VkIsIn3DPass() {
+    return s_in3DPass;
+}
+
 void GN_VkEnd3DPass() {
     if(!GN_Vk.initialized || !s_in3DPass) return;
 
@@ -237,33 +370,20 @@ void GN_VkDraw3D(const void *vertices, uint32_t vertexCount,
                  float shininess, const sIMAGE *texture) {
     if(!GN_Vk.initialized || !s_in3DPass || !vertices || vertexCount == 0) return;
 
-    // ── 更新纹理描述符 (binding 1) ──
-    // 有纹理→用纹理, 无纹理→用默认白色 (与 diffuse 相乘无影响)
+    // ── 绑定本 draw 的纹理描述符集 ──
+    // 不能改写已绑定的 descriptorSet3D：本帧命令缓冲已把它绑定并录制过，
+    // 再 vkUpdateDescriptorSets 会触发 VUID-vkUpdateDescriptorSets-None-03047，
+    // 部分驱动会把整条命令缓冲判为 invalid 并丢弃其后的 draw。
+    // 改为每个纹理组合一个私有 set（帧首从规范集同步），这里只做绑定。
     {
-        VkImageView imgView = (texture && texture->vkImageView)
-                                  ? texture->vkImageView
-                                  : GN_Vk.defaultImageView;
-        VkSampler sampler = (texture && texture->vkSampler)
-                                ? texture->vkSampler
-                                : GN_Vk.defaultSampler;
-
-        VkDescriptorImageInfo dii = {};
-        dii.sampler = sampler;
-        dii.imageView = imgView;
-        dii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        w.dstSet = GN_Vk.descriptorSet3D;
-        w.dstBinding = 1;
-        w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        w.descriptorCount = 1;
-        w.pImageInfo = &dii;
-        vkUpdateDescriptorSets(GN_Vk.device, 1, &w, 0, nullptr);
-
-        // 重新绑定描述符集以确保更新生效
+        const VkImageView imgView = (texture && texture->vkImageView) ? texture->vkImageView
+                                                                     : GN_Vk.defaultImageView;
+        const VkSampler sampler =
+            (texture && texture->vkSampler) ? texture->vkSampler : GN_Vk.defaultSampler;
+        VkDescriptorSet set = findOrCreateForwardSet(imgView, sampler);
         vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame],
-                                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                GN_Vk.pipelineLayout3D, 0, 1, &GN_Vk.descriptorSet3D, 0, nullptr);
+                                VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout3D, 0, 1,
+                                &set, 0, nullptr);
     }
 
     // 上传顶点数据 (动态缓冲, 每 draw call 独立区域)

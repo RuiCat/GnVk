@@ -1,5 +1,6 @@
 // GPU 像素回读实现：只做图像布局转换 + 拷贝，不修改渲染结果。
 #include "gpuPixelRead.h"
+#include "gpuTestHooks.h"
 
 #include <GN.h>
 #include "GN_Vk.h"
@@ -23,7 +24,7 @@ uint32_t FormatBytes(VkFormat format) {
 
 uint32_t FindMemoryTypeIndex(uint32_t typeBits, VkMemoryPropertyFlags props) {
     VkPhysicalDeviceMemoryProperties mp;
-    vkGetPhysicalDeviceMemoryProperties(GNg::GN_Vk.physicalDevice, &mp);
+    vkGetPhysicalDeviceMemoryProperties(PhysDev(), &mp);
     for(uint32_t i = 0; i < mp.memoryTypeCount; ++i) {
         if((typeBits & (1u << i)) && (mp.memoryTypes[i].propertyFlags & props) == props) return i;
     }
@@ -36,17 +37,17 @@ bool CreateStaging(VkDeviceSize size, VkBuffer *buffer, VkDeviceMemory *memory) 
     bi.size = size;
     bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if(vkCreateBuffer(GNg::GN_Vk.device, &bi, 0, buffer) != VK_SUCCESS) return false;
+    if(vkCreateBuffer(Dev(), &bi, 0, buffer) != VK_SUCCESS) return false;
     VkMemoryRequirements mr;
-    vkGetBufferMemoryRequirements(GNg::GN_Vk.device, *buffer, &mr);
+    vkGetBufferMemoryRequirements(Dev(), *buffer, &mr);
     VkMemoryAllocateInfo ai = {};
     ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     ai.allocationSize = mr.size;
     ai.memoryTypeIndex = FindMemoryTypeIndex(mr.memoryTypeBits,
                                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if(vkAllocateMemory(GNg::GN_Vk.device, &ai, 0, memory) != VK_SUCCESS) return false;
-    vkBindBufferMemory(GNg::GN_Vk.device, *buffer, *memory, 0);
+    if(vkAllocateMemory(Dev(), &ai, 0, memory) != VK_SUCCESS) return false;
+    vkBindBufferMemory(Dev(), *buffer, *memory, 0);
     return true;
 }
 
@@ -71,7 +72,7 @@ void RecordBarrier(VkCommandBuffer cb, VkImage image, VkImageAspectFlags aspect,
 } // namespace
 
 uint32_t SwapchainBytesPerPixel() {
-    switch(GNg::GN_Vk.swapchainFormat) {
+    switch(SwapFormat()) {
     case VK_FORMAT_R16G16B16A16_SFLOAT: return 8;
     case VK_FORMAT_B8G8R8A8_UNORM:
     case VK_FORMAT_B8G8R8A8_SRGB:
@@ -98,10 +99,10 @@ sFLOAT_PIXEL SampleSwapchain(const std::vector<uint8_t> &pixels, int width, int 
         return out;
     }
 
-    const bool bgra = GNg::GN_Vk.swapchainFormat == VK_FORMAT_B8G8R8A8_UNORM ||
-                      GNg::GN_Vk.swapchainFormat == VK_FORMAT_B8G8R8A8_SRGB;
-    const bool srgb = GNg::GN_Vk.swapchainFormat == VK_FORMAT_B8G8R8A8_SRGB ||
-                      GNg::GN_Vk.swapchainFormat == VK_FORMAT_R8G8B8A8_SRGB;
+    const bool bgra = SwapFormat() == VK_FORMAT_B8G8R8A8_UNORM ||
+                      SwapFormat() == VK_FORMAT_B8G8R8A8_SRGB;
+    const bool srgb = SwapFormat() == VK_FORMAT_B8G8R8A8_SRGB ||
+                      SwapFormat() == VK_FORMAT_R8G8B8A8_SRGB;
     const uint8_t c0 = pixels[offset + 0u];
     const uint8_t c1 = pixels[offset + 1u];
     const uint8_t c2 = pixels[offset + 2u];
@@ -123,8 +124,8 @@ sFLOAT_PIXEL SampleSwapchain(const std::vector<uint8_t> &pixels, int width, int 
 bool ReadSwapchain(int x, int y, int width, int height, std::vector<uint8_t> &out) {
     const uint32_t bytes = SwapchainBytesPerPixel();
     if(bytes == 0) return false;
-    const uint32_t sw = GNg::GN_Vk.swapchainExtent.width;
-    const uint32_t sh = GNg::GN_Vk.swapchainExtent.height;
+    const uint32_t sw = Extent().width;
+    const uint32_t sh = Extent().height;
     if(x < 0) {
         width += x;
         x = 0;
@@ -139,7 +140,7 @@ bool ReadSwapchain(int x, int y, int width, int height, std::vector<uint8_t> &ou
 
     // 引擎 GN_VkReadBack 固定按 4 字节/像素分配，RGBA16F swapchain 会被截断；
     // 这里按实际格式自行拷贝。
-    const VkImage image = GNg::GN_Vk.swapchainImages[GNg::GN_Vk.currentFrame];
+    const VkImage image = SwapImage();
     const VkDeviceSize size = (VkDeviceSize)width * (VkDeviceSize)height * bytes;
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -147,11 +148,11 @@ bool ReadSwapchain(int x, int y, int width, int height, std::vector<uint8_t> &ou
 
     VkCommandBufferAllocateInfo ai = {};
     ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ai.commandPool = GNg::GN_Vk.commandPool;
+    ai.commandPool = CmdPool();
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
     VkCommandBuffer cb = VK_NULL_HANDLE;
-    if(vkAllocateCommandBuffers(GNg::GN_Vk.device, &ai, &cb) != VK_SUCCESS) return false;
+    if(vkAllocateCommandBuffers(Dev(), &ai, &cb) != VK_SUCCESS) return false;
 
     VkCommandBufferBeginInfo bi = {};
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -174,20 +175,20 @@ bool ReadSwapchain(int x, int y, int width, int height, std::vector<uint8_t> &ou
     si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cb;
-    vkQueueSubmit(GNg::GN_Vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueSubmit(Queue(), 1, &si, VK_NULL_HANDLE);
+    vkQueueWaitIdle(Queue());
 
     void *mapped = 0;
     out.resize((size_t)size);
-    if(vkMapMemory(GNg::GN_Vk.device, memory, 0, size, 0, &mapped) != VK_SUCCESS) {
+    if(vkMapMemory(Dev(), memory, 0, size, 0, &mapped) != VK_SUCCESS) {
         out.clear();
     } else {
         std::memcpy(out.data(), mapped, (size_t)size);
-        vkUnmapMemory(GNg::GN_Vk.device, memory);
+        vkUnmapMemory(Dev(), memory);
     }
-    vkFreeCommandBuffers(GNg::GN_Vk.device, GNg::GN_Vk.commandPool, 1, &cb);
-    vkDestroyBuffer(GNg::GN_Vk.device, buffer, 0);
-    vkFreeMemory(GNg::GN_Vk.device, memory, 0);
+    vkFreeCommandBuffers(Dev(), CmdPool(), 1, &cb);
+    vkDestroyBuffer(Dev(), buffer, 0);
+    vkFreeMemory(Dev(), memory, 0);
     return !out.empty();
 }
 
@@ -202,11 +203,11 @@ bool ReadColorImage(VkImage image, VkFormat format, VkImageLayout currentLayout,
 
     VkCommandBufferAllocateInfo ai = {};
     ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ai.commandPool = GNg::GN_Vk.commandPool;
+    ai.commandPool = CmdPool();
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
     VkCommandBuffer cb = VK_NULL_HANDLE;
-    if(vkAllocateCommandBuffers(GNg::GN_Vk.device, &ai, &cb) != VK_SUCCESS) return false;
+    if(vkAllocateCommandBuffers(Dev(), &ai, &cb) != VK_SUCCESS) return false;
 
     VkCommandBufferBeginInfo bi = {};
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -227,18 +228,18 @@ bool ReadColorImage(VkImage image, VkFormat format, VkImageLayout currentLayout,
     si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cb;
-    vkQueueSubmit(GNg::GN_Vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueSubmit(Queue(), 1, &si, VK_NULL_HANDLE);
+    vkQueueWaitIdle(Queue());
 
     void *mapped = 0;
     out.resize((size_t)size);
-    if(vkMapMemory(GNg::GN_Vk.device, memory, 0, size, 0, &mapped) == VK_SUCCESS) {
+    if(vkMapMemory(Dev(), memory, 0, size, 0, &mapped) == VK_SUCCESS) {
         std::memcpy(out.data(), mapped, (size_t)size);
-        vkUnmapMemory(GNg::GN_Vk.device, memory);
+        vkUnmapMemory(Dev(), memory);
     }
-    vkFreeCommandBuffers(GNg::GN_Vk.device, GNg::GN_Vk.commandPool, 1, &cb);
-    vkDestroyBuffer(GNg::GN_Vk.device, buffer, 0);
-    vkFreeMemory(GNg::GN_Vk.device, memory, 0);
+    vkFreeCommandBuffers(Dev(), CmdPool(), 1, &cb);
+    vkDestroyBuffer(Dev(), buffer, 0);
+    vkFreeMemory(Dev(), memory, 0);
     return true;
 }
 
@@ -252,11 +253,11 @@ bool ReadDepthImage(VkImage image, VkImageLayout currentLayout, uint32_t width, 
 
     VkCommandBufferAllocateInfo ai = {};
     ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ai.commandPool = GNg::GN_Vk.commandPool;
+    ai.commandPool = CmdPool();
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
     VkCommandBuffer cb = VK_NULL_HANDLE;
-    if(vkAllocateCommandBuffers(GNg::GN_Vk.device, &ai, &cb) != VK_SUCCESS) return false;
+    if(vkAllocateCommandBuffers(Dev(), &ai, &cb) != VK_SUCCESS) return false;
 
     VkCommandBufferBeginInfo bi = {};
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -277,18 +278,18 @@ bool ReadDepthImage(VkImage image, VkImageLayout currentLayout, uint32_t width, 
     si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cb;
-    vkQueueSubmit(GNg::GN_Vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueSubmit(Queue(), 1, &si, VK_NULL_HANDLE);
+    vkQueueWaitIdle(Queue());
 
     void *mapped = 0;
     out.resize((size_t)width * height);
-    if(vkMapMemory(GNg::GN_Vk.device, memory, 0, size, 0, &mapped) == VK_SUCCESS) {
+    if(vkMapMemory(Dev(), memory, 0, size, 0, &mapped) == VK_SUCCESS) {
         std::memcpy(out.data(), mapped, (size_t)size);
-        vkUnmapMemory(GNg::GN_Vk.device, memory);
+        vkUnmapMemory(Dev(), memory);
     }
-    vkFreeCommandBuffers(GNg::GN_Vk.device, GNg::GN_Vk.commandPool, 1, &cb);
-    vkDestroyBuffer(GNg::GN_Vk.device, buffer, 0);
-    vkFreeMemory(GNg::GN_Vk.device, memory, 0);
+    vkFreeCommandBuffers(Dev(), CmdPool(), 1, &cb);
+    vkDestroyBuffer(Dev(), buffer, 0);
+    vkFreeMemory(Dev(), memory, 0);
     return true;
 }
 

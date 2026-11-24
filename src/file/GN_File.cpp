@@ -895,11 +895,20 @@ static sFileLogContext gFileLogContext;
 GN_API void GN_Log(const char *fmt, ...) {
     if(!GN_RunErrorOutputOn) return;
 
+    // run_filename 缓存的是「路径解析结果」，但 GN_RunErrorFileName 是可以被调用方改的
+    // （头文件注释明说了支持改日志名，服务器场景要带日期）。
+    // 旧实现只看 run_filename 是否为空，改了 GN_RunErrorFileName 不会重新解析，
+    // 日志继续写到旧文件——由 testLog 暴露。
     static char run_filename[256] = {0};
-    if(!run_filename[0]) {
+    static char cached_target[128] = {0};
+    const char *want = GN_RunErrorFileName ? GN_RunErrorFileName : "RunLog.txt";
+    if(!run_filename[0] || strncmp(cached_target, want, sizeof(cached_target) - 1) != 0) {
+        strncpy(cached_target, want, sizeof(cached_target) - 1);
+        cached_target[sizeof(cached_target) - 1] = 0;
         GNf_DirStatePush(false);
-        GN_StrToSysFilePath(run_filename, GN_RunErrorFileName, "w", false);
+        GN_StrToSysFilePath(run_filename, want, "w", false);
         GNf_DirStatePop();
+        gFileLogContext.aRunLogOpenMode[0] = 'w'; // 换了文件就重新开头写
     }
     FILE *fp = fopen(run_filename, gFileLogContext.aRunLogOpenMode);
     if(fp) {
@@ -922,6 +931,38 @@ GN_API void GN_Log(const char *fmt, ...) {
     }
 }
 GN_API char *GN_RunErrorFileName = "RunLog.txt";
+
+// 同时写 RunLog.txt 与 stderr：前者供事后排查，后者让用户/CI 当场看得到。
+// 实现上直接复用 GN_Log（不重复那段写文件的逻辑），再补一次 stderr 输出；
+// 两个 va_list 各自独立（va_start 不能用两次同一个 list）。
+GN_API void GN_LogErr(const char *fmt, ...) {
+    // 两个通道都要完整内容：用 vsnprintf 先量长度，超过栈缓冲
+    // 就动态分配，避免长消息被截断（日志里的堆栈临界一行很容被切掉后半段）。
+    va_list vaLen;
+    va_start(vaLen, fmt);
+    char stackBuf[1024];
+    const int need = vsnprintf(stackBuf, sizeof(stackBuf), fmt, vaLen);
+    va_end(vaLen);
+    if(need <= 0) return;
+
+    if(need < (int)sizeof(stackBuf)) {
+        GN_Log("%s", stackBuf);
+        fputs(stackBuf, stderr);
+        fflush(stderr);
+        return;
+    }
+
+    // 长消息：分配 need+1 字节，两个通道都写完整内容。
+    char *heapBuf = new char[(size_t)need + 1];
+    va_list va2;
+    va_start(va2, fmt);
+    vsnprintf(heapBuf, (size_t)need + 1, fmt, va2);
+    va_end(va2);
+    GN_Log("%s", heapBuf);
+    fputs(heapBuf, stderr);
+    fflush(stderr);
+    delete[] heapBuf;
+}
 
 /************************************************************ 插件加载 **********************************************************/
 

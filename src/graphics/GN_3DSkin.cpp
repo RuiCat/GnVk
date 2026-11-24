@@ -110,4 +110,22 @@ uint32_t packPalette(const GNg::sMAT44 *palette, uint32_t paletteCount, sSKIN_UB
     return copyCount;
 }
 
+uint32_t skinPaletteCapacity(eSKIN_PALETTE_PATH path) {
+    if(path == eSKIN_PATH_UBO) return SKIN_MAX_JOINTS;
+    if(path == eSKIN_PATH_SSBO) return SKIN_SSBO_MAX_JOINTS;
+    return 0;
+}
+
+eSKIN_PALETTE_PATH selectSkinPalettePath(uint32_t jointCount) {
+    if(jointCount == 0) return eSKIN_PATH_NONE;
+    if(jointCount <= SKIN_MAX_JOINTS) return eSKIN_PATH_UBO;
+    if(jointCount <= SKIN_SSBO_MAX_JOINTS) return eSKIN_PATH_SSBO;
+    return eSKIN_PATH_NONE;
+}
+
+bool skinPaletteTruncated(uint32_t jointCount) {
+    const eSKIN_PALETTE_PATH path = selectSkinPalettePath(jointCount);
+    return path == eSKIN_PATH_NONE && jointCount > SKIN_SSBO_MAX_JOINTS;
+}
+
 } // namespace GN3d

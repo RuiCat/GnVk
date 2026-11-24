@@ -17,6 +17,8 @@
 //#define GN_USING_OPENGLes_ANDROID_JAVA     //★适用于Android系统经java层调用 可兼容更多系统层面的交互
 //#define GN_USING_OPENGLes_ANDROID          //Android系统全C++原生程序应用
 //#define GN_USING_VULKAN_GLFW_LINUX      //★Vulkan+GLFW Linux (替代OpenGL+GLUT)
+//#define GN_USING_VULKAN_GLFW_WINDOWS    //★Vulkan+GLFW Windows（同一套 Vulkan 后端，不需要 GLUT）
+//#define GN_USING_VULKAN_GLFW_MAC        //★Vulkan+GLFW macOS（需 MoltenVK，GLFW 给出 VK_EXT_metal_surface）
 
 /*--------------------------------- !! 关于使用 DIRECTDRAW 图形模式注意事项 !! ------------------------------------*\
 |                                                                                                                   |
@@ -66,6 +68,13 @@
 #elif defined GN_USING_VULKAN_GLFW_LINUX
 #define GT_USING_VULKAN 1
 #define _LINUX_
+#elif defined GN_USING_VULKAN_GLFW_WINDOWS
+#define GT_USING_VULKAN 1
+#define _WIN32_
+#elif defined GN_USING_VULKAN_GLFW_MAC
+#define GT_USING_VULKAN 1
+#define _MAC_
+#define HAVE_NANOSLEEP 1
 #elif defined GN_USING_OPENGL_SDL_LINUX
 #define GT_USING_OPENGL 1
 #define GT_USING_GLsdl

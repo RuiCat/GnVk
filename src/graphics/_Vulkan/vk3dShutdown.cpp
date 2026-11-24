@@ -137,6 +137,9 @@ void GN_VkShutdown3D() {
 
     if(GN_Vk.descriptorSet3D) { GN_Vk.descriptorSet3D = VK_NULL_HANDLE; } // pool freed elsewhere
     if(GN_Vk.descriptorSetPBR) { GN_Vk.descriptorSetPBR = VK_NULL_HANDLE; }
+    // 三套纹理环集缓存里的句柄随描述符池一起失效，必须清掉，否则下次 init 会
+    // 拿着悬垂句柄去比对/绑定（旧 image view 也已销毁）。
+    resetTextureSetCaches();
     if(GN_Vk.uniformBuffer3D) {
         vkDestroyBuffer(GN_Vk.device, GN_Vk.uniformBuffer3D, 0);
         GN_Vk.uniformBuffer3D = VK_NULL_HANDLE;

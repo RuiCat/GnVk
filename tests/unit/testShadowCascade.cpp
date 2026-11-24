@@ -2,7 +2,7 @@
 // texel snapping 不改变投影中心覆盖（契约 docs/L4_L3_CONTRACT.md §8）。
 #include "testFramework.h"
 
-#include "vkShadowCascade.h"
+#include "GN_ShadowCascade.h"
 
 #include <cmath>
 

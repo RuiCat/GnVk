@@ -52,7 +52,7 @@ void init3DHdr() {
             cad.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             cad.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
             cad.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            cad.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            cad.finalLayout = GN_Vk.swapFinalLayout; // 窗口=PRESENT_SRC；无窗口=TRANSFER_SRC
             VkAttachmentReference car = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
             VkSubpassDescription csp = {};
             csp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;

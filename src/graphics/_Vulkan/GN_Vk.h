@@ -19,6 +19,12 @@
 #include "postParams.h" // L1：sPOST_UBO 契约（GN_VkSetPost 参数类型）
 #include "atmosphereParams.h" // L4：sATMOSPHERE_PARAMS 契约（GN_VkSetAtmosphere 参数类型）
 
+// GN3d 前向声明（放在 GNg 外层，否则会变成 GNg::GN3d）
+namespace GN3d {
+class cMODEL;
+struct sSHADOW_CASCADE_RESULT;
+} // namespace GN3d
+
 namespace GNg {
 // ═══════════════════════════════════════════════════════════
 //  sIMAGE — 图像 (完整定义，替代旧 _Graphics/GN_G2D.h 中的定义)
@@ -51,7 +57,13 @@ struct sIMAGE {
     ~sIMAGE();
     sIMAGE &operator=(const sIMAGE &s);
     sIMAGE(const sIMAGE &s);
-    void Release(bool immed = false);
+    // 释放 GPU 资源（image / memory / view / sampler）。
+    // 与其他类型对齐的规范名：`Release()` 在本类型历史上就等于“释放 GPU”，
+    // 而 `sMESH::Release()` 却是“释放 CPU”——同名反义。新代码请用 ReleaseGPU()。
+    // Release() 保留为等价别名（现有 56 处调用与析构函数都依赖它）。
+    // 设备已销毁时会跳过所有 vkDestroy*，只把句柄清空（见 GN_VkDeviceAlive）。
+    void ReleaseGPU();
+    void Release(bool immed = false); // 兼容别名：等价于 ReleaseGPU()
     void InitToData(char *filename, unsigned short imgnum = 1, int fmt = 0,
                     bool mip = false, unsigned char lv = 1);
     void CreateEmptyToData(int w, int h, unsigned short imgnum = 0, int fmt = 0,
@@ -91,6 +103,7 @@ struct sIMAGE;
 class cVIEW2D;
 struct sRECT;
 struct sVEC2;
+
 struct sDRAW_RANGE;
 struct sVEC3;
 struct sMAT44;
@@ -167,247 +180,258 @@ static_assert(sizeof(VkSkyParams) == 80, "VkSkyParams 必须为 80 字节");
 // sWINDOW 定义在 GN_2Dtype.h 中
 
 struct GN_VkContext {
-    VkInstance instance;
-    VkPhysicalDevice physicalDevice;
-    VkDevice device;
-    VkQueue graphicsQueue;
-    uint32_t graphicsFamily;
-    VkSurfaceKHR surface;
-    VkSwapchainKHR swapchain;
-    VkFormat swapchainFormat;
-    VkExtent2D swapchainExtent;
-    uint32_t swapchainImageCount;
-    VkImage *swapchainImages;
-    VkImageView *swapchainViews;
-    VkFramebuffer *framebuffers;
-    VkRenderPass renderPass;
-    VkPipelineLayout pipelineLayout;
-    // P1b：2D 4 条 + 3D 前向/PBR 管线由缓存创建并持有（Release 必须在 vkDestroyDevice 之前）
+    // ═══════════════════════════════════════════════════════════
+    //  按子系统分组的 GPU 资源（A5）。
+    //
+    //  为什么用匿名 struct：字段名与字段集合都没变，所以 3155 处
+    //  `GN_Vk.xxx` 调用与 sizeof（2008 字节）都不受影响；但物理上已经按
+    //  子系统切开，能一眼看出「每个 pass 到底要哪些资源」。
+    //  新增资源请放进对应组，不要再往顶层加字段。
+    //
+    //  ⚠ 匿名 struct 是 GNU/MS 扩展（ISO C++ 不允许）。本项目不用 -Wpedantic，
+    //    且 GCC/Clang/MSVC 均支持；换来的是零调用点改动。
+    // ═══════════════════════════════════════════════════════════
+    //  非平凡成员（有构造/析构，不能放进匿名 struct）
+    //  管线缓存持有所有 VkPipeline；须在 vkDestroyDevice 之前 Release。
+    // ═══════════════════════════════════════════════════════════
     GN3d::cPIPELINE_CACHE aPipelineCache;
-    VkPipeline pipeline;
-    VkPipeline pipelineBright; // additive blend for eBLEND_BRIGHT
-    VkPipeline pipelineMultiply; // multiply blend for eBLEND_MODULATE
-    VkPipeline pipelineNull; // no blend for eBLEND_NULL
-    VkCommandPool commandPool;
-    VkCommandBuffer *commandBuffers;
-    VkDescriptorPool descriptorPool;
-    VkDescriptorSetLayout descriptorLayout;
-    VkBuffer uniformBuffer;
-    VkDeviceMemory uniformMemory;
-    VkBuffer vertexBuffer;
-    VkDeviceMemory vertexMemory;
-    uint32_t vertexCount;
-    uint32_t vertexCapacity;
-    VkBuffer indexBuffer;
-    VkDeviceMemory indexMemory;
-    uint32_t indexCount;
-    uint32_t indexCapacity;
-    VkSampler defaultSampler;
-    VkImage defaultImage; // 1×1 白色默认纹理图像
-    VkDeviceMemory defaultImageMemory; // 1×1 白色默认纹理内存
-    VkImageView defaultImageView; // 1×1 白色默认纹理视图 (纯色/无纹理绘制降级)
-    VkDescriptorSet defaultDS;
-    VkSemaphore imageAvailable;
-    VkSemaphore renderFinished;
-    VkFence inFlightFence;
-    uint32_t currentFrame;
-    bool initialized;
-    int viewWidth, viewHeight;
-    // 设备是否已启用 VK_KHR_acceleration_structure + ray_query（硬件光追加速）。
-    bool rayQuerySupported;
 
-#ifdef GN_USING_3D
-    // — MSAA —
-    VkSampleCountFlagBits msaaSamples; // 多重采样数 (默认 4×)
+    // ── sDeviceRes：设备与队列：Vulkan 实例、物理设备、逻辑设备、队列族。子系统存活的根本前提
+    struct {
+        VkInstance instance;
+        VkPhysicalDevice physicalDevice;
+        VkDevice device;
+        VkQueue graphicsQueue;
+        uint32_t graphicsFamily;
+        bool initialized;
+        bool rayQuerySupported;
+    };
 
-    // — 深度缓冲 (MSAA) —
-    VkImage depthImage;
-    VkDeviceMemory depthMemory;
-    VkImageView depthView;
-    VkFormat depthFormat;
+    // ── sSwapchainRes：交换链与帧：窗口/离屏图、帧同步、帧计数、逻辑尺寸
+    struct {
+        VkSurfaceKHR surface;
+        VkSwapchainKHR swapchain;
+        VkFormat swapchainFormat;
+        VkExtent2D swapchainExtent;
+        uint32_t swapchainImageCount;
+        VkImage *swapchainImages;
+        VkImageView *swapchainViews;
+        VkFramebuffer *framebuffers;
+        VkSemaphore imageAvailable;
+        VkSemaphore renderFinished;
+        VkFence inFlightFence;
+        uint32_t currentFrame;
+        int viewWidth, viewHeight;
+        bool headless;
+        VkImageLayout swapFinalLayout;
+        VkDeviceMemory *swapchainMemories;
+    };
 
-    // — MSAA 颜色缓冲 (resolve target = swapchain image) —
-    VkImage msaaColorImage;
-    VkDeviceMemory msaaColorMemory;
-    VkImageView msaaColorView;
+    // ── sFrameRes：每帧录制：命令池/命令缓冲/描述符池
+    struct {
+        VkCommandPool commandPool;
+        VkCommandBuffer *commandBuffers;
+        VkDescriptorPool descriptorPool;
+    };
 
-    // — 3D 管线 —
-    VkRenderPass renderPass3D;
-    VkPipelineLayout pipelineLayout3D;
-    VkPipeline pipeline3D;
-    VkDescriptorSetLayout descriptorLayout3D;
-    VkDescriptorSet descriptorSet3D;
+    // ── s2DRes：2D 渲染：render pass、批绘管线（normal/bright/multiply/null）、动态顶点索引、默认白纹理
+    struct {
+        VkRenderPass renderPass;
+        VkPipelineLayout pipelineLayout;
+        VkPipeline pipeline;
+        VkPipeline pipelineBright;                                             // additive blend for eBLEND_BRIGHT
+        VkPipeline pipelineMultiply;                                           // multiply blend for eBLEND_MODULATE
+        VkPipeline pipelineNull;                                               // no blend for eBLEND_NULL
+        VkDescriptorSetLayout descriptorLayout;
+        VkBuffer uniformBuffer;
+        VkDeviceMemory uniformMemory;
+        VkBuffer vertexBuffer;
+        VkDeviceMemory vertexMemory;
+        uint32_t vertexCount;
+        uint32_t vertexCapacity;
+        VkBuffer indexBuffer;
+        VkDeviceMemory indexMemory;
+        uint32_t indexCount;
+        uint32_t indexCapacity;
+        VkSampler defaultSampler;
+        VkImage defaultImage;                                                  // 1×1 白色默认纹理图像
+        VkDeviceMemory defaultImageMemory;                                     // 1×1 白色默认纹理内存
+        VkImageView defaultImageView;                                          // 1×1 白色默认纹理视图 (纯色/无纹理绘制降级)
+        VkDescriptorSet defaultDS;
+    };
 
-    // — 3D UBO —
-    VkBuffer uniformBuffer3D;
-    VkDeviceMemory uniformMemory3D;
-    VkBuffer lightBuffer3D;
-    VkDeviceMemory lightMemory3D;
+    // ── sForwardRes：3D 前向：MSAA/深度、3D 管线与 UBO、PBR（含透明变体）、阴影 CSM、3D 动态顶点索引
+    struct {
+        VkSampleCountFlagBits msaaSamples;                                     // 多重采样数 (默认 4×)
+        VkImage depthImage;
+        VkDeviceMemory depthMemory;
+        VkImageView depthView;
+        VkFormat depthFormat;
+        VkImage msaaColorImage;
+        VkDeviceMemory msaaColorMemory;
+        VkImageView msaaColorView;
+        VkRenderPass renderPass3D;
+        VkPipelineLayout pipelineLayout3D;
+        VkPipeline pipeline3D;
+        VkDescriptorSetLayout descriptorLayout3D;
+        VkDescriptorSet descriptorSet3D;
+        VkBuffer uniformBuffer3D;
+        VkDeviceMemory uniformMemory3D;
+        VkBuffer lightBuffer3D;
+        VkDeviceMemory lightMemory3D;
+        VkPipelineLayout pipelineLayoutPBR;
+        VkPipeline pipelinePBR;
+        VkPipeline pipelinePBRBlend;                                           // 透明变体：srcAlpha/oneMinusSrcAlpha、深度写关、双面（BLEND 材质）
+        VkDescriptorSetLayout descriptorLayoutPBR;
+        VkDescriptorSet descriptorSetPBR;                                      // PBR 专用描述符集 (含 normal + shadow)
+        VkImage shadowImage;
+        VkDeviceMemory shadowMemory;
+        VkImageView shadowView;
+        VkSampler shadowSampler;
+        VkRenderPass shadowRenderPass;
+        VkFramebuffer shadowFramebuffer;
+        VkPipelineLayout shadowPipelineLayout;
+        VkPipeline shadowPipeline;
+        VkDescriptorSetLayout shadowDescriptorLayout;
+        VkDescriptorSet shadowDescriptorSet;
+        VkBuffer shadowUBOBuffer;
+        VkDeviceMemory shadowUBOMemory;
+        uint32_t shadowMapSize;                                                // 默认 2048
+        VkBuffer vertexBuffer3D;
+        VkDeviceMemory vertexMemory3D;
+        VkBuffer indexBuffer3D;
+        VkDeviceMemory indexMemory3D;
+    };
 
-    // — PBR 管线 —
-    VkPipelineLayout pipelineLayoutPBR;
-    VkPipeline pipelinePBR;
-    VkPipeline pipelinePBRBlend; // 透明变体：srcAlpha/oneMinusSrcAlpha、深度写关、双面（BLEND 材质）
-    VkDescriptorSetLayout descriptorLayoutPBR;
-    VkDescriptorSet descriptorSetPBR; // PBR 专用描述符集 (含 normal + shadow)
+    // ── sPostRes：后处理：HDR 离屏目标 + 合成管线（色调映射/Bloom/Gamma）
+    struct {
+        VkImage hdrImage;
+        VkDeviceMemory hdrMemory;
+        VkImageView hdrView;
+        VkSampler hdrSampler;
+        VkRenderPass hdrRenderPass;
+        VkFramebuffer *hdrFramebuffers;
+        VkPipelineLayout compositePipelineLayout;
+        VkPipeline compositePipeline;
+        VkDescriptorSetLayout compositeDescriptorLayout;
+        VkDescriptorSet compositeDescriptorSet;
+        VkRenderPass compositeRenderPass;
+        VkFramebuffer *compositeFramebuffers;
+    };
 
-    // — 阴影映射 —
-    VkImage shadowImage;
-    VkDeviceMemory shadowMemory;
-    VkImageView shadowView;
-    VkSampler shadowSampler;
-    VkRenderPass shadowRenderPass;
-    VkFramebuffer shadowFramebuffer;
-    VkPipelineLayout shadowPipelineLayout;
-    VkPipeline shadowPipeline;
-    VkDescriptorSetLayout shadowDescriptorLayout;
-    VkDescriptorSet shadowDescriptorSet;
-    VkBuffer shadowUBOBuffer;
-    VkDeviceMemory shadowUBOMemory;
-    uint32_t shadowMapSize; // 默认 2048
+    // ── sAtmosphereRes：大气与间接光基础：天空盒、环境 6 面烘焙、预滤波 cubemap、BRDF LUT、GI UBO
+    struct {
+        VkImage skyboxImage;
+        VkDeviceMemory skyboxMemory;
+        VkImageView skyboxView;
+        VkSampler skyboxSampler;
+        VkPipelineLayout skyboxPipelineLayout;
+        VkPipeline skyboxPipeline;
+        VkDescriptorSetLayout skyboxDescriptorLayout;
+        VkDescriptorSet skyboxDescriptorSet;
+        VkBuffer skyboxUBOBuffer;
+        VkDeviceMemory skyboxUBOMemory;
+        VkImage envBakeImage;                                                  // 128²×6 RGBA16F 源 cubemap（烘焙目标）
+        VkDeviceMemory envBakeMemory;
+        VkImageView envBakeFaceViews[6];                                       // 每面 2D 视图（render pass 附件）
+        VkRenderPass envBakeRenderPass;
+        VkFramebuffer *envBakeFramebuffers;                                    // 6 个面各一个
+        VkPipelineLayout envBakePipelineLayout;
+        VkPipeline envBakePipeline;                                            // 归 aPipelineCache
+        VkDescriptorSetLayout envBakeDescriptorLayout;
+        VkDescriptorSet envBakeDescriptorSets[6];                              // 每面一个 128 B UBO（逐面绑定）
+        VkBuffer envBakeUBOBuffer;
+        VkDeviceMemory envBakeUBOMemory;
+        int envBakeSize;
+        VkImage envPrefilteredImage;
+        VkDeviceMemory envPrefilteredMemory;
+        VkImageView envPrefilteredView;
+        VkSampler envPrefilteredSampler;
+        int envPrefilteredMipCount;
+        VkImage brdfLutImage;
+        VkDeviceMemory brdfLutMemory;
+        VkImageView brdfLutView;
+        VkSampler brdfLutSampler;
+        VkBuffer giUBOBuffer;
+        VkDeviceMemory giUBOMemory;
+    };
 
-    // — 3D 顶点/索引缓冲 —
-    VkBuffer vertexBuffer3D;
-    VkDeviceMemory vertexMemory3D;
-    VkBuffer indexBuffer3D;
-    VkDeviceMemory indexMemory3D;
+    // ── sDeferredRes：延迟渲染：G-Buffer 四附件、延迟光照、SSAO、SSGI、SH9 探针、G-Buffer 调试视图
+    struct {
+        VkImage ssaoRawImage;
+        VkDeviceMemory ssaoRawMemory;
+        VkImageView ssaoRawView;
+        VkImage ssaoBlurImage;
+        VkDeviceMemory ssaoBlurMemory;
+        VkImageView ssaoBlurView;
+        VkSampler ssaoSampler;
+        VkRenderPass ssaoRenderPass;
+        VkRenderPass ssaoBlurRenderPass;
+        VkFramebuffer ssaoFramebuffer;
+        VkFramebuffer ssaoBlurFramebuffer;
+        VkDescriptorSetLayout ssaoDescriptorLayout;
+        VkDescriptorSet ssaoDescriptorSet;
+        VkDescriptorSetLayout ssaoBlurDescriptorLayout;
+        VkDescriptorSet ssaoBlurDescriptorSet;
+        VkPipelineLayout ssaoPipelineLayout;
+        VkPipeline ssaoPipeline;
+        VkPipelineLayout ssaoBlurPipelineLayout;
+        VkPipeline ssaoBlurPipeline;
+        VkBuffer ssaoUBOBuffer;                                                // 400 B：sSSAO_UBO
+        VkDeviceMemory ssaoUBOMemory;
+        VkImage ssgiRawImage;
+        VkDeviceMemory ssgiRawMemory;
+        VkImageView ssgiRawView;
+        VkImage ssgiDenoisedImage;
+        VkDeviceMemory ssgiDenoisedMemory;
+        VkImageView ssgiDenoisedView;
+        VkSampler ssgiSampler;                                                 // 颜色/raw/denoise 上采样：LINEAR
+        VkSampler ssgiNearestSampler;                                          // 全分辨率 G-Buffer 深度/法线/albedo：NEAREST
+        VkRenderPass ssgiRenderPass;
+        VkRenderPass ssgiDenoiseRenderPass;
+        VkFramebuffer ssgiFramebuffer;
+        VkFramebuffer ssgiDenoiseFramebuffer;
+        VkDescriptorSetLayout ssgiDescriptorLayout;
+        VkDescriptorSet ssgiDescriptorSet;
+        VkDescriptorSetLayout ssgiDenoiseDescriptorLayout;
+        VkDescriptorSet ssgiDenoiseDescriptorSet;
+        VkPipelineLayout ssgiPipelineLayout;
+        VkPipeline ssgiPipeline;
+        VkPipelineLayout ssgiDenoisePipelineLayout;
+        VkPipeline ssgiDenoisePipeline;
+        VkBuffer ssgiUBOBuffer;                                                // 160 B：sSSGI_UBO
+        VkDeviceMemory ssgiUBOMemory;
+        VkImage probeImages[9];
+        VkDeviceMemory probeMemories[9];
+        VkImageView probeViews[9];
+        VkSampler probeSampler;
+        VkBuffer probeUBOBuffer;                                               // 48 B：sPROBE_UBO
+        VkDeviceMemory probeUBOMemory;
+        VkImage gNormalRoughImage, gAlbedoMetalImage, gAoImage, gDepthImage;
+        VkDeviceMemory gNormalRoughMemory, gAlbedoMetalMemory, gAoMemory, gDepthMemory;
+        VkImageView gNormalRoughView, gAlbedoMetalView, gAoView, gDepthView;
+        VkSampler gBufferSampler;
+        VkRenderPass gBufferRenderPass;
+        VkFramebuffer *gBufferFramebuffers;
+        VkPipelineLayout gBufferPipelineLayout;
+        VkPipeline gBufferPipeline;
+        VkDescriptorSetLayout gBufferDescriptorLayout;
+        VkDescriptorSet gBufferDescriptorSet;
+        VkPipelineLayout deferredLightPipelineLayout;
+        VkPipeline deferredLightPipeline;
+        VkDescriptorSetLayout deferredLightDescriptorLayout;
+        VkDescriptorSet deferredLightDescriptorSet;
+        VkRenderPass deferredLightRenderPass;
+        VkFramebuffer *deferredLightFramebuffers;
+        VkPipelineLayout gBufferDebugPipelineLayout;
+        VkPipeline gBufferDebugPipeline;
+    };
 
-    // — HDR 离屏目标 + 合成管线 —
-    VkImage hdrImage;
-    VkDeviceMemory hdrMemory;
-    VkImageView hdrView;
-    VkSampler hdrSampler;
-    VkRenderPass hdrRenderPass;
-    VkFramebuffer *hdrFramebuffers;
-    // 合成管线 (HDR→Swapchain: 色调映射+Bloom+Gamma)
-    VkPipelineLayout compositePipelineLayout;
-    VkPipeline compositePipeline;
-    VkDescriptorSetLayout compositeDescriptorLayout;
-    VkDescriptorSet compositeDescriptorSet;
-    VkRenderPass compositeRenderPass;
-    VkFramebuffer *compositeFramebuffers;
-
-    // — 天空盒 —
-    VkImage skyboxImage;
-    VkDeviceMemory skyboxMemory;
-    VkImageView skyboxView;
-    VkSampler skyboxSampler;
-    VkPipelineLayout skyboxPipelineLayout;
-    VkPipeline skyboxPipeline;
-    VkDescriptorSetLayout skyboxDescriptorLayout;
-    VkDescriptorSet skyboxDescriptorSet;
-    VkBuffer skyboxUBOBuffer;
-    VkDeviceMemory skyboxUBOMemory;
-
-    // — 环境烘焙与 GI 资源（G1a：GPU 6 面烘焙 → 回读 → CPU 预滤波 → 上传）—
-    VkImage envBakeImage;         // 128²×6 RGBA16F 源 cubemap（烘焙目标）
-    VkDeviceMemory envBakeMemory;
-    VkImageView envBakeFaceViews[6]; // 每面 2D 视图（render pass 附件）
-    VkRenderPass envBakeRenderPass;
-    VkFramebuffer *envBakeFramebuffers; // 6 个面各一个
-    VkPipelineLayout envBakePipelineLayout;
-    VkPipeline envBakePipeline; // 归 aPipelineCache
-    VkDescriptorSetLayout envBakeDescriptorLayout;
-    VkDescriptorSet envBakeDescriptorSets[6]; // 每面一个 128 B UBO（逐面绑定）
-    VkBuffer envBakeUBOBuffer;
-    VkDeviceMemory envBakeUBOMemory;
-    int envBakeSize;
-    // 预滤波环境 cubemap（RGBA16F、多级 mip、CUBE 视图）
-    VkImage envPrefilteredImage;
-    VkDeviceMemory envPrefilteredMemory;
-    VkImageView envPrefilteredView;
-    VkSampler envPrefilteredSampler;
-    int envPrefilteredMipCount;
-    // BRDF LUT（128² RG16F）
-    VkImage brdfLutImage;
-    VkDeviceMemory brdfLutMemory;
-    VkImageView brdfLutView;
-    VkSampler brdfLutSampler;
-    // GI UBO（256 B host-visible）
-    VkBuffer giUBOBuffer;
-    VkDeviceMemory giUBOMemory;
-
-    // — SSAO（G2b：raw R8 → 4×4 双边模糊 → 延迟合成）—
-    VkImage ssaoRawImage;
-    VkDeviceMemory ssaoRawMemory;
-    VkImageView ssaoRawView;
-    VkImage ssaoBlurImage;
-    VkDeviceMemory ssaoBlurMemory;
-    VkImageView ssaoBlurView;
-    VkSampler ssaoSampler;
-    VkRenderPass ssaoRenderPass;
-    VkRenderPass ssaoBlurRenderPass;
-    VkFramebuffer ssaoFramebuffer;
-    VkFramebuffer ssaoBlurFramebuffer;
-    VkDescriptorSetLayout ssaoDescriptorLayout;
-    VkDescriptorSet ssaoDescriptorSet;
-    VkDescriptorSetLayout ssaoBlurDescriptorLayout;
-    VkDescriptorSet ssaoBlurDescriptorSet;
-    VkPipelineLayout ssaoPipelineLayout;
-    VkPipeline ssaoPipeline;
-    VkPipelineLayout ssaoBlurPipelineLayout;
-    VkPipeline ssaoBlurPipeline;
-    VkBuffer ssaoUBOBuffer; // 400 B：sSSAO_UBO
-    VkDeviceMemory ssaoUBOMemory;
-
-    // — SSGI（G4：半分辨率 raw → 5×5 单帧双边 → 延迟合成；默认关）—
-    VkImage ssgiRawImage;
-    VkDeviceMemory ssgiRawMemory;
-    VkImageView ssgiRawView;
-    VkImage ssgiDenoisedImage;
-    VkDeviceMemory ssgiDenoisedMemory;
-    VkImageView ssgiDenoisedView;
-    VkSampler ssgiSampler;        // 颜色/raw/denoise 上采样：LINEAR
-    VkSampler ssgiNearestSampler; // 全分辨率 G-Buffer 深度/法线/albedo：NEAREST
-    VkRenderPass ssgiRenderPass;
-    VkRenderPass ssgiDenoiseRenderPass;
-    VkFramebuffer ssgiFramebuffer;
-    VkFramebuffer ssgiDenoiseFramebuffer;
-    VkDescriptorSetLayout ssgiDescriptorLayout;
-    VkDescriptorSet ssgiDescriptorSet;
-    VkDescriptorSetLayout ssgiDenoiseDescriptorLayout;
-    VkDescriptorSet ssgiDenoiseDescriptorSet;
-    VkPipelineLayout ssgiPipelineLayout;
-    VkPipeline ssgiPipeline;
-    VkPipelineLayout ssgiDenoisePipelineLayout;
-    VkPipeline ssgiDenoisePipeline;
-    VkBuffer ssgiUBOBuffer; // 160 B：sSSGI_UBO
-    VkDeviceMemory ssgiUBOMemory;
-
-    // — SH9 探针 9× 3D 纹理（G5b-2；固定 8×4×8，不随 resize）—
-    VkImage probeImages[9];
-    VkDeviceMemory probeMemories[9];
-    VkImageView probeViews[9];
-    VkSampler probeSampler;
-    VkBuffer probeUBOBuffer; // 48 B：sPROBE_UBO
-    VkDeviceMemory probeUBOMemory;
-
-    // — 延迟渲染 G-Buffer（附件顺序见 vkInternal.h 的 eGBUFFER_ATTACHMENT）—
-    // 命名与内容一致：0=Normal+Rough、1=Albedo+Metal、2=AO、3=Depth；旧名与内容错位已更正。
-    VkImage gNormalRoughImage, gAlbedoMetalImage, gAoImage, gDepthImage;
-    VkDeviceMemory gNormalRoughMemory, gAlbedoMetalMemory, gAoMemory, gDepthMemory;
-    VkImageView gNormalRoughView, gAlbedoMetalView, gAoView, gDepthView;
-    VkSampler gBufferSampler;
-    VkRenderPass gBufferRenderPass;
-    VkFramebuffer *gBufferFramebuffers;
-    // G-Buffer 管线
-    VkPipelineLayout gBufferPipelineLayout;
-    VkPipeline gBufferPipeline;
-    VkDescriptorSetLayout gBufferDescriptorLayout;
-    VkDescriptorSet gBufferDescriptorSet;
-    // 延迟光照管线
-    VkPipelineLayout deferredLightPipelineLayout;
-    VkPipeline deferredLightPipeline;
-    VkDescriptorSetLayout deferredLightDescriptorLayout;
-    VkDescriptorSet deferredLightDescriptorSet;
-    VkRenderPass deferredLightRenderPass;
-    VkFramebuffer *deferredLightFramebuffers;
-    // G0b：G-Buffer 四通道调试视图（复用延迟 render pass/描述符集；管线归 aPipelineCache）
-    VkPipelineLayout gBufferDebugPipelineLayout;
-    VkPipeline gBufferDebugPipeline;
-#endif
-
-    GN_VkContext() : initialized(false), rayQuerySupported(false), swapchainImages(0), swapchainViews(0),
+    // 说明：粒子 / 布料 / 贴花 / 降水的 GPU 资源不在本结构体内，
+    // 它们各自持有文件内静态资源（见 vkParticleCompute.cpp 等）。
+    GN_VkContext() : initialized(false), rayQuerySupported(false), headless(false),
+                     swapFinalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR), swapchainMemories(0),
+                     swapchainImages(0), swapchainViews(0),
                      framebuffers(0), commandBuffers(0),
                      defaultImage(VK_NULL_HANDLE), defaultImageMemory(VK_NULL_HANDLE),
                      defaultImageView(VK_NULL_HANDLE), defaultDS(VK_NULL_HANDLE),
@@ -426,8 +450,13 @@ extern GN_VkContext GN_Vk;
 // ═══════════════════════════════════════════════════════════
 //  Vulkan 初始化 (由 _Main 调用)
 // ═══════════════════════════════════════════════════════════
+// window 传 0 即走无窗口（离屏）路径：不建 VkSurface、不建 swapchain，渲染到自建图像，
+// 之后靠 GN_VkReadBack 回读。此路径不需要任何窗口系统（X11/Wayland 都不用）。
 void GN_VkInit(GLFWwindow *window, int w, int h);
 void GN_VkShutdown();
+// 等待 GPU 空闲。必须在销毁任何可能仍被在飞帧引用的 GPU 资源之前调（例如程序退出时
+// 先等空闲、再释放模型 AS/网格）；GN_VkShutdown 内部也会先等，但那时用户资源已释放过了。
+void GN_VkWaitIdle();
 void GN_VkResize(int w, int h);
 // 当前交换链是否为 8-bit sRGB 格式（决定 2D 层是否需要按 sRGB 纹理解码）。
 bool GN_VkSwapchainIsSrgb();
@@ -497,6 +526,12 @@ bool ImageToData(sIMAGE *img, void *out, int fmt);
 // 辅助
 void VkCheck(VkResult err, const char *msg);
 
+// 设备是否还活着（已初始化且未销毁）。
+// 用途：所有“释放 GPU 资源”的入口都要先问一句。对象可能在 GN_VkShutdown 之后才被析构
+// （静态/全局对象、AppUnInit 较晚释放的模型），此时拿旧句柄去 vkDestroy* 是未定义行为。
+// 返回 false 时调用方应当只把句柄清空、不做任何 GPU 操作。
+bool GN_VkDeviceAlive();
+
 // ═══════════════════════════════════════════════════════════
 //  Vulkan Scissor 裁剪 (替代 OpenGL glScissor)
 // ═══════════════════════════════════════════════════════════
@@ -505,6 +540,14 @@ void GN_VkSetScissor(int x, int y, int w, int h, bool enable);
 // 帧缓冲回读 (替代 OpenGL glReadPixels → GT_CopyToDataFromFrameBuffer)
 uint8_t *GN_VkReadBack(int x, int y, int w, int h, int *size_out);
 void GN_VkReadBackFree(uint8_t *data);
+
+// ── 描述符改写体检（vkDescriptorGuard）───────────────────
+// 统计 vkUpdateDescriptorSets 总次数，以及其中「渲染通道内改写已绑定规范集」的违规次数。
+// 后者必须为 0；gpuCheck 的 desc.noUpdateWhileBound 就是断言它。
+uint32_t GN_VkDescriptorUpdatesTotal();
+uint32_t GN_VkDescriptorUpdatesWhileBound();
+const char *GN_VkDescriptorUpdateSite();    // 首个违规站点（文件路径），无违规为 nullptr
+const char *GN_VkDescriptorUpdateSetName(); // 首个违规涉及的规范集名
 
 } // namespace GNg
 
@@ -570,6 +613,44 @@ void GN_VkBegin3DPassPBR_HDR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
 // L3c CSM：cascadeIndex 选择 0..3 级（越界钳制；默认 0 与旧单级行为等价）。
 // 每次 Begin/End 对应一级；查看器每帧按级循环提交。
 void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex = 0);
+
+// 当前是否处于 3D pass 内部。
+// 用途：GN_VkBegin3DPass 失败时（设备未初始化 / 重复进入）是静默返回的，
+// 调用方（尤其是 RAII 守卫）必须能问一句“到底进去了没”，否则会误以为在 pass 内。
+bool GN_VkIsIn3DPass();
+
+// 逐级提交 shadow pass，绘制给定模型的所有投影体。
+// 这是两个示例（mmdViewer / imoScene）逐字相同的循环，收到引擎里：
+//     for (i < count) { ShadowPassBegin(vp[i], i); model.DrawShadow(); ShadowPassEnd(); }
+// count 钓到 GN_VkShadowCascadeCount()；0 时什么都不做（安全）。
+// 只接受裸数组而不要求 sSHADOW_CASCADE_RESULT：示例里光矩阵可能是自己存的，
+// 强制它们改保存结构体是不必要的侵入。
+void GN_VkDrawShadowCascades(const GN3d::cMODEL &caster, const sMAT44 *lightVPs,
+                             uint32_t count);
+
+// ── 3D pass 作用域守卫 ────────────────────────────────
+// 为什么需要它：GN_VkBegin3DPass / End3DPass 靠引擎内部的 s_in3DPass 标记成对维持。
+// 漏调 End3DPass 的后果不是“少画一点”，而是：
+//   1) s_in3DPass 永远为 true ⇒ 之后所有 Begin3DPass 都静默失效（画面永久冻结）；
+//   2) GN_VkCompositeToSwapchain 不被调用 ⇒ HDR 从不合成到交换链（纯黑）。
+// 两个都是“静默黑屏”级的难查问题。而“在绘制循环里加个 early return”是很自然的写法。
+// 这个 RAII 对象保证：只要构造成功，无论怎么退出作用域（包括 return / 抛异常），
+// End3DPass + Begin2DPass 都会被调用。
+struct sFRAME_3D_SCOPE {
+    bool aActive;
+
+    // drawSkybox = true 时自动画天空盒（两边示例都是“天空盒永远第一”）。
+    sFRAME_3D_SCOPE(const sMAT44 *viewProj, const sVEC3 *cameraPos, const void *lightUBO,
+                    uint32_t lightUBOSize, bool drawSkybox = true);
+    ~sFRAME_3D_SCOPE();
+
+    // 未成功进入 3D pass（例如设备未初始化/重复进入）；调用方应直接 return。
+    bool Valid() const { return aActive; }
+
+    // 生命周期唯一，不得拷贝（拷贝会导致双重 End3DPass）。
+    sFRAME_3D_SCOPE(const sFRAME_3D_SCOPE &) = delete;
+    sFRAME_3D_SCOPE &operator=(const sFRAME_3D_SCOPE &) = delete;
+};
 // L3c：阴影级联层数（固定 4；gpuCheck 用它断言按层 framebuffer 已建）。
 uint32_t GN_VkShadowCascadeCount();
 void GN_VkShadowPassEnd();
@@ -842,5 +923,84 @@ void GN_VkClothDestroy();
 
 } // namespace GNg
 #endif // GN_USING_3D
+
+// ═══════════════════════════════════════════════════════════
+//  测试钩子（A1）
+//  目的：让验收程序不再直读 GN_VkContext 的字段。以后重排/分组内部状态时，
+//  只需维持这里的稳定面不变，不必同步改 17 个 gpuCheck 文件。
+//  约定：
+//    * 只暴露“测断言需要的东西”，不暴露整个 context；新增字段需写清用途；
+//    * GetTestHooks 在无设备时返回零值快照（device == VK_NULL_HANDLE）。
+// ═══════════════════════════════════════════════════════════
+namespace GNg {
+
+// 测试需要的管线（名字对应引擎内部固定管线）。
+enum eTEST_PIPE {
+    eTEST_PIPE_2D = 0,
+    eTEST_PIPE_2D_BRIGHT,
+    eTEST_PIPE_2D_MULTIPLY,
+    eTEST_PIPE_2D_NULL,
+    eTEST_PIPE_3D_FORWARD,
+    eTEST_PIPE_3D_PBR,
+    eTEST_PIPE_SHADOW,
+    eTEST_PIPE_COMPOSITE,
+    eTEST_PIPE_SKYBOX,
+    eTEST_PIPE_GBUFFER,
+    eTEST_PIPE_DEFERRED_LIGHT,
+    eTEST_PIPE_COUNT
+};
+
+struct sTEST_HOOKS {
+    // ── 设备与队列 ──
+    VkDevice device;
+    VkPhysicalDevice physicalDevice;
+    VkQueue graphicsQueue;
+    uint32_t graphicsFamily;
+    bool initialized;
+
+    // ── 帧内录制 ──
+    VkCommandPool commandPool;
+    VkDescriptorPool descriptorPool;
+    VkCommandBuffer commandBuffer; // = commandBuffers[currentFrame]
+    uint32_t currentFrame;
+
+    // ── 交换链 ──
+    VkExtent2D extent;
+    VkFormat format;
+    VkImage currentSwapImage; // = swapchainImages[currentFrame]
+
+    // ── 内部图像（像素/深度回读用）──
+    VkImage shadowImage;
+    uint32_t shadowMapSize;
+    VkImage hdrImage;
+    VkImage gAlbedoMetalImage;
+    VkImage gNormalRoughImage;
+    VkDescriptorSet gBufferDescriptorSet;
+    VkPipelineLayout gBufferPipelineLayout;
+
+    // ── 3D 动态顶点/索引缓冲 ──
+    // 仅供 "绕开引擎高层 draw、直接录 G-Buffer 命令" 的用例（gpuCheck3D 的
+    // DrawGBufferQuadRaw）；正常绘制路径不该用。
+    VkBuffer vertexBuffer3D;
+    VkDeviceMemory vertexMemory3D;
+    VkBuffer indexBuffer3D;
+    VkDeviceMemory indexMemory3D;
+
+    // ── 管线缓存统计 ──
+    unsigned pipelineCount;
+    unsigned long long pipelineMiss;
+    unsigned long long pipelineHit;
+};
+
+// 取当前钩子快照（每次调用重新填充；无设备时全零）。
+void GN_VkGetTestHooks(sTEST_HOOKS *out);
+// 按 id 查管线（每次实时查，resize 安全）；未创建返回 VK_NULL_HANDLE。
+VkPipeline GN_VkTestPipeline(int pipeId);
+
+} // namespace GNg
+
+// 一帧的编排（阴影 → 3D pass → 2D 叠层起点）。定义在 vkRenderFrame.cpp，
+// 依赖上面的 sFRAME_3D_SCOPE / GN_VkDrawShadowCascades，所以放在文件末尾包含。
+#include "vkRenderFrame.h"
 
 #endif // _GN_VK_H_

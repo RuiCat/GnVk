@@ -1,5 +1,6 @@
 // P1b 3D 站点验收实现：用 identity VP 的全屏四边形固定绕序/深度，逐站点回读像素与深度。
 #include "gpuCheck3D.h"
+#include "gpuTestHooks.h"
 
 #include <GN.h>
 #include "GN_Vk.h"
@@ -77,12 +78,12 @@ bool BeginFrame() {
 
 void EndFrameAndWait() {
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
 }
 
 bool ReadCenter(std::vector<uint8_t> &pixels, sFLOAT_PIXEL &center) {
-    const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
-    const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
+    const uint32_t width = Extent().width;
+    const uint32_t height = Extent().height;
     if(!ReadSwapchain(0, 0, (int)width, (int)height, pixels)) return false;
     center = SampleSwapchain(pixels, (int)width, (int)(width / 2), (int)(height / 2));
     return true;
@@ -136,7 +137,7 @@ bool CheckBlack(const char *name, const sFLOAT_PIXEL &p) {
 
 void RunForwardChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
                       const GNg::sVEC3 &eye, const GN3d::sLIGHT_UBO &light) {
-    if(!GNg::GN_Vk.pipeline3D) {
+    if(!Pipe(GNg::eTEST_PIPE_3D_FORWARD)) {
         ReportSkip("3d.forward", "pipeline3D missing (see pipe.3d.forward)");
         return;
     }
@@ -187,7 +188,7 @@ void RunForwardChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
 }
 
 void RunShadowCheck(const GNg::sMAT44 &identity, const GNg::sMAT44 &model) {
-    if(!GNg::GN_Vk.shadowPipeline) {
+    if(!Pipe(GNg::eTEST_PIPE_SHADOW)) {
         ReportSkip("3d.shadow", "shadowPipeline missing (see pipe.3d.shadow)");
         return;
     }
@@ -203,12 +204,12 @@ void RunShadowCheck(const GNg::sMAT44 &identity, const GNg::sMAT44 &model) {
     EndFrameAndWait();
 
     std::vector<float> depth;
-    if(!ReadDepthImage(GNg::GN_Vk.shadowImage, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                       GNg::GN_Vk.shadowMapSize, GNg::GN_Vk.shadowMapSize, depth)) {
+    if(!ReadDepthImage(Hooks().shadowImage, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                       Hooks().shadowMapSize, Hooks().shadowMapSize, depth)) {
         ReportFail("3d.shadow", "depth readback failed");
         return;
     }
-    const uint32_t size = GNg::GN_Vk.shadowMapSize;
+    const uint32_t size = Hooks().shadowMapSize;
     const float center = depth[(size / 2) * size + size / 2];
     char detail[128];
     std::snprintf(detail, sizeof(detail), "shadowDepth=%.3f expected~0.5", center);
@@ -218,7 +219,7 @@ void RunShadowCheck(const GNg::sMAT44 &identity, const GNg::sMAT44 &model) {
 
 void RunPbrChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
                   const GNg::sVEC3 &eye, const GN3d::sLIGHT_UBO &light) {
-    if(!GNg::GN_Vk.pipelinePBR) {
+    if(!Pipe(GNg::eTEST_PIPE_3D_PBR)) {
         ReportSkip("3d.pbr", "pipelinePBR missing (see pipe.3d.pbr)");
         return;
     }
@@ -257,11 +258,11 @@ void RunPbrChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
 void DrawGBufferQuadRaw(const sQUAD &quad, const GNg::sMAT44 &model,
                         float albedoR, float albedoG, float albedoB,
                         float roughness, float metallic, float ao) {
-    const VkDevice device = GNg::GN_Vk.device;
-    VkCommandBuffer cb = GNg::GN_Vk.commandBuffers[GNg::GN_Vk.currentFrame];
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, GNg::GN_Vk.gBufferPipeline);
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, GNg::GN_Vk.gBufferPipelineLayout,
-                            0, 1, &GNg::GN_Vk.gBufferDescriptorSet, 0, 0);
+    const VkDevice device = Dev();
+    VkCommandBuffer cb = CmdBuf();
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, Pipe(GNg::eTEST_PIPE_GBUFFER));
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, Hooks().gBufferPipelineLayout,
+                            0, 1, &Hooks().gBufferDescriptorSet, 0, 0);
 
     GNg::VkModelPushConstPBR pc;
     std::memset(&pc, 0, sizeof(pc));
@@ -273,28 +274,28 @@ void DrawGBufferQuadRaw(const sQUAD &quad, const GNg::sMAT44 &model,
     pc.pbrParams[0] = roughness;
     pc.pbrParams[1] = metallic;
     pc.pbrParams[2] = ao;
-    vkCmdPushConstants(cb, GNg::GN_Vk.gBufferPipelineLayout,
+    vkCmdPushConstants(cb, Hooks().gBufferPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(pc), &pc);
 
     void *mapped = 0;
-    vkMapMemory(device, GNg::GN_Vk.vertexMemory3D, 0, sizeof(quad.verts), 0, &mapped);
+    vkMapMemory(device, Hooks().vertexMemory3D, 0, sizeof(quad.verts), 0, &mapped);
     std::memcpy(mapped, quad.verts, sizeof(quad.verts));
-    vkUnmapMemory(device, GNg::GN_Vk.vertexMemory3D);
+    vkUnmapMemory(device, Hooks().vertexMemory3D);
     // G-Buffer 管线 frontFace=CCW；identity VP（无 Y 翻转）下 BA 才是帧缓冲 CCW ⇒ 正面。
-    vkMapMemory(device, GNg::GN_Vk.indexMemory3D, 0, sizeof(kQuadIndexBA), 0, &mapped);
+    vkMapMemory(device, Hooks().indexMemory3D, 0, sizeof(kQuadIndexBA), 0, &mapped);
     std::memcpy(mapped, kQuadIndexBA, sizeof(kQuadIndexBA));
-    vkUnmapMemory(device, GNg::GN_Vk.indexMemory3D);
+    vkUnmapMemory(device, Hooks().indexMemory3D);
 
     VkDeviceSize vertexOffset = 0;
-    vkCmdBindVertexBuffers(cb, 0, 1, &GNg::GN_Vk.vertexBuffer3D, &vertexOffset);
-    vkCmdBindIndexBuffer(cb, GNg::GN_Vk.indexBuffer3D, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindVertexBuffers(cb, 0, 1, &Hooks().vertexBuffer3D, &vertexOffset);
+    vkCmdBindIndexBuffer(cb, Hooks().indexBuffer3D, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cb, 6, 1, 0, 0, 0);
 }
 
 void RunDeferredChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
                        const GNg::sVEC3 &eye, const GN3d::sLIGHT_UBO &light) {
-    if(!GNg::GN_Vk.gBufferPipeline || !GNg::GN_Vk.deferredLightPipeline) {
+    if(!Pipe(GNg::eTEST_PIPE_GBUFFER) || !Pipe(GNg::eTEST_PIPE_DEFERRED_LIGHT)) {
         ReportSkip("3d.deferred", "gBuffer/deferredLight pipeline missing");
         return;
     }
@@ -322,15 +323,15 @@ void RunDeferredChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
 
     std::vector<uint8_t> albedo;
     // G2a：附件 1 = RGBA8_SRGB（4 B/px）；读取原始 sRGB 字节后用 srgbDecode 还原线性值比较。
-    if(!ReadColorImage(GNg::GN_Vk.gAlbedoMetalImage, VK_FORMAT_R8G8B8A8_SRGB,
+    if(!ReadColorImage(Hooks().gAlbedoMetalImage, VK_FORMAT_R8G8B8A8_SRGB,
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                       GNg::GN_Vk.swapchainExtent.width, GNg::GN_Vk.swapchainExtent.height,
+                       Extent().width, Extent().height,
                        albedo)) {
         ReportFail("3d.deferred.gbuffer", "albedo readback failed");
         return;
     }
-    const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
-    const size_t offset = ((size_t)(GNg::GN_Vk.swapchainExtent.height / 2) * width +
+    const uint32_t width = Extent().width;
+    const size_t offset = ((size_t)(Extent().height / 2) * width +
                            width / 2) * 4u;
     const float r = GN3d::srgbDecode((float)albedo[offset + 0] / 255.0f);
     const float g = GN3d::srgbDecode((float)albedo[offset + 1] / 255.0f);
@@ -348,7 +349,7 @@ void RunDeferredChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
 
 void RunCompositeCheck(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
                        const GNg::sVEC3 &eye, const GN3d::sLIGHT_UBO &light) {
-    if(!GNg::GN_Vk.compositePipeline || !GNg::GN_Vk.pipelinePBR) {
+    if(!Pipe(GNg::eTEST_PIPE_COMPOSITE) || !Pipe(GNg::eTEST_PIPE_3D_PBR)) {
         ReportSkip("3d.composite", "composite/PBR pipeline missing");
         return;
     }
@@ -372,7 +373,7 @@ void RunCompositeCheck(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
 
 void RunSkyboxCheck(const GNg::sMAT44 &identity, const GNg::sVEC3 &eye,
                     const GN3d::sLIGHT_UBO &light) {
-    if(!GNg::GN_Vk.skyboxPipeline) {
+    if(!Pipe(GNg::eTEST_PIPE_SKYBOX)) {
         ReportSkip("3d.skybox", "skyboxPipeline missing (see pipe.skybox)");
         return;
     }
@@ -415,7 +416,7 @@ void RunSkyboxCheck(const GNg::sMAT44 &identity, const GNg::sVEC3 &eye,
 // 期望值来自 postParams.cpp 的 CPU 参考公式（ACES(1)=2.54/3.16、Reinhard(1)=0.5、ACES(2)=10.1/11.04）。
 void RunPostChecks(const GNg::sMAT44 &identity, const GNg::sMAT44 &model,
                    const GNg::sVEC3 &eye, const GN3d::sLIGHT_UBO &light) {
-    if(!GNg::GN_Vk.compositePipeline) {
+    if(!Pipe(GNg::eTEST_PIPE_COMPOSITE)) {
         ReportSkip("3d.post.aces", "compositePipeline missing (see pipe.3d.composite)");
         return;
     }
@@ -552,8 +553,8 @@ void RunShadowCascadeCheck() {
     const uint32_t count = GNg::GN_VkShadowCascadeCount();
     char detail[128];
     std::snprintf(detail, sizeof(detail), "cascadeCount=%u shadowImage=%s", count,
-                  GNg::GN_Vk.shadowImage != VK_NULL_HANDLE ? "ready" : "missing");
-    if(count == 4u && GNg::GN_Vk.shadowImage != VK_NULL_HANDLE) ReportPass("3d.shadow.cascades", detail);
+                  Hooks().shadowImage != VK_NULL_HANDLE ? "ready" : "missing");
+    if(count == 4u && Hooks().shadowImage != VK_NULL_HANDLE) ReportPass("3d.shadow.cascades", detail);
     else ReportFail("3d.shadow.cascades", detail);
 }
 

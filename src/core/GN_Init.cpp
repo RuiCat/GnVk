@@ -503,6 +503,19 @@ GN_INIT_API void GN_StartRun(const char *caption, short view_w, short view_h, sh
                      back_src_left, back_src_top, back_src_right, back_src_bottom,
                      full_screen, window_zoom, dp_buf, ms_buf);
 }
+GN_INIT_API bool GN_StartRunHeadless(short view_w, short view_h, int frame_count, void (*frame_proc)(int frame_index)) {
+    return GT_InitAllAndRunHeadless(view_w, view_h, frame_count, frame_proc);
+}
+GN_INIT_API unsigned char *GN_GrabFrame(int *width, int *height, int *size) {
+    const int w = (int)GNg::GN_Vk.swapchainExtent.width;
+    const int h = (int)GNg::GN_Vk.swapchainExtent.height;
+    if(width) *width = w;
+    if(height) *height = h;
+    return GNg::GN_VkReadBack(0, 0, w, h, size);
+}
+GN_INIT_API void GN_GrabFrameFree(unsigned char *data) {
+    GNg::GN_VkReadBackFree(data);
+}
 GN_INIT_API void GN_StartRunFromWindow(const GN_sINIT *_init_arg, const char *tg_dir, const int *hwnd) {
     if(GT_SystemInited & (1 << 31)) return;
     GN_sINIT init_arg;

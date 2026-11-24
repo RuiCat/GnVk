@@ -23,6 +23,23 @@
 | FFmpeg (libavcodec/format/swscale) | 视频播放 |
 | zlib, X11, ALSA | 系统支持 |
 
+## 项目规模（自动生成）
+
+<!-- AUTO-STATS:BEGIN -->
+<!-- 本段由 tests/tools/gen_stats.sh 生成，不要手改；改数字请跑 make stats -->
+
+| 项 | 数值 |
+|----|------|
+| 单元测试用例 | **599**（67 个文件）|
+| gpuCheck 文件 | 18 |
+| gpuCheck 实跑 | `pass=116 fail=0 skip=0` |
+| 单测实跑 | `599 cases, 0 failed, 0 assertions failed` |
+| src 源文件 | 174 个 .cpp |
+| src 总行数 | 95966 |
+| 编译产物着色器 | 47 个 .spv |
+
+<!-- AUTO-STATS:END -->
+
 ## 编译
 
 ```bash
@@ -41,12 +58,44 @@ make asan
 # 构建 + 单元测试 + 全部示例编译
 make check
 
+# 无窗口渲染验收（离屏，不需要 X11/Wayland）
+# 含两条：2D 四象限像素断言 + 帧编排等价性（cRENDER_FRAME vs 裸 sFRAME_3D_SCOPE 逐字节比对）
+make headlessCheck
+
+# 示例无窗口冒烟（五个二进制各 8 帧；无 Vulkan 设备时 SKIP）
+make smoke
+
+# 一条命令全跑：check + smoke
+make ci
+
+# 交叉平台编译检查（MinGW-w64 把 src/ 全量按 Windows 目标编一遍；没工具链时 SKIP）
+make crosscheck
+
 # 着色器编译
 make shaders
 
 # 清理
 make clean
 ```
+
+## 平台与图形后端
+
+`PLATFORM`（操作系统）与 `BACKEND`（图形后端）分开选择，`BACKEND` 缺省 `vulkan`：
+
+| 平台 | 默认 | 说明 |
+|------|------|------|
+| Linux | `Vulkan + GLFW` | 已实测（RADV / lavapipe） |
+| Windows | `Vulkan + GLFW` | MinGW-w64 交叉编译已验证能编；链接/运行需在 Windows 上做 |
+| macOS | `Vulkan + GLFW` | 需自行安装 MoltenVK；**未实测** |
+| Android | `GLES` | 无 Vulkan 后端 |
+
+```bash
+make PLATFORM=windows          # Vulkan 后端（默认）
+make PLATFORM=windows BACKEND=opengl   # 旧的 GLUT/OpenGL 路径（需自行提供窗口层）
+```
+
+Vulkan 后端是唯一带**无窗口（离屏）渲染**能力的后端，且不依赖任何窗口系统
+（`make headlessCheck` / `make smoke` / `GN_HEADLESS_FRAMES=N`）。
 
 ## 目录结构
 

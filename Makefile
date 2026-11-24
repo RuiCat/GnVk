@@ -96,6 +96,30 @@ ifeq ($(PLATFORM),android)
   endif
 endif
 
+# ═══════════════════════════════════════════════════════════
+#  2b. 图形后端（BACKEND=vulkan | opengl，缺省 vulkan）
+#      Vulkan 后端是唯一带离屏/无窗口能力的后端，且完全不依赖窗口系统；
+#      Windows 用 VK_KHR_win32_surface、macOS 用 MoltenVK 的 VK_EXT_metal_surface
+#      （都由 glfwGetRequiredInstanceExtensions 自动给出，引擎侧无需分支）。
+#      BACKEND=opengl 保留原有的 GLUT/GLES 老路径（platform/_Main 目前是 GLFW 层，
+#      选 opengl 需自行提供对应的窗口层）。
+#      注：这段必须放在所有 per-platform 块之后——那些块会重新定义 DEFINES/LIBS。
+# ══════════════════════════════════════════════════════════
+BACKEND ?= vulkan
+
+ifeq ($(BACKEND),vulkan)
+  ifeq ($(PLATFORM),macos)
+    DEFINES        := -DGN_USING_VULKAN_GLFW_MAC -DHAVE_NANOSLEEP
+    LIBS           := -lglfw -lvulkan -lpng -lopenal -lz
+    CXXFLAGS_EXTRA :=
+  endif
+  ifeq ($(PLATFORM),windows)
+    DEFINES        := -DGN_USING_VULKAN_GLFW_WINDOWS
+    LIBS           := -lglfw -lvulkan -lpng -lopenal -lz -lws2_32
+    CXXFLAGS_EXTRA := -msse2
+  endif
+endif
+
 # ── 模块级宏（每模块独立控制源码/DLL/SDK模式）───────────
 # 定义 _USING_SOURCE_CODE 使所有模块的 __declspec 为空
 MODULE_DEFINES := -DGN_USING_SOURCE_CODE \
@@ -226,33 +250,154 @@ TEST_LIBS  := -L. -l$(LIB_STEM) $(LIBS)
 
 # ── 单元测试（纯逻辑，无 GPU/窗口依赖）──────────────────
 UNIT_DIR   := tests/unit
-UNIT_SRC   := $(wildcard $(UNIT_DIR)/*.cpp)
+# 示例的键位绑定表（P0）也要被单测直接验：把这两个 TU 一起编进单测二进制，
+# 保证"改绑定表"与"跑绑定用例"永远是同一份代码。
+UNIT_DEMO_SRC := tests/mmdViewer/mmdViewerActions.cpp tests/imoScene/imoSceneActions.cpp
+# 程序化测试资产（P1）：单测与 `make fixtures` 共用同一份生成器。
+UNIT_FIXTURE_SRC := tests/fixtures/fixtures.cpp
+UNIT_SRC   := $(wildcard $(UNIT_DIR)/*.cpp) $(UNIT_DEMO_SRC) $(UNIT_FIXTURE_SRC)
 UNIT_BIN   := build/unit_tests
-UNIT_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) -I$(UNIT_DIR) $(INCLUDES)
+# 单测要复用两个示例的键位绑定表（P0）与程序化资产生成器（P1）：把它们所在目录加进 include 路径
+UNIT_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) -I$(UNIT_DIR) -Itests/mmdViewer -Itests/imoScene -Itests/fixtures $(INCLUDES)
+
+# ── 程序化测试资产（P1）：仓库不含 PMX/GLB，所以骨架/蒙皮资产由代码生成 ──
+FIXTURE_SRC   := $(wildcard tests/fixtures/*.cpp)
+FIXTURE_BIN   := build/fixtures
+FIXTURE_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) -Itests/fixtures $(INCLUDES)
+
+.PHONY: fixtures
+fixtures: $(FIXTURE_BIN)
+	@echo "$(YELLOW)🧱 生成程序化测试资产 → .local/fixtures/...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(FIXTURE_BIN) .local/fixtures
+
+$(FIXTURE_BIN): $(FIXTURE_SRC) $(TARGET)
+	@echo "$(YELLOW)🧱 编译测试资产生成器...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(FIXTURE_FLAGS) $(FIXTURE_SRC) $(TEST_LIBS) -o $(FIXTURE_BIN)
 
 .PHONY: unit
 unit: $(TARGET)
 	@echo "$(YELLOW)🧪 编译并运行单元测试...$(RESET)"
 	@mkdir -p build
 	$(CXX) $(UNIT_FLAGS) $(UNIT_SRC) $(TEST_LIBS) -o $(UNIT_BIN)
-	@LD_LIBRARY_PATH=. ./$(UNIT_BIN)
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(UNIT_BIN)
 
 .PHONY: check
-check: all unit
-	@echo "$(GREEN)✅ check 通过: 构建 + 单元测试$(RESET)"
+check: all unit physicsBoxes characterDemo
+	@echo "$(GREEN)✅ check 通过: 构建 + 单元测试 + 物理场景 + 角色场景$(RESET)"
 
 # ── P1b GPU 验收（需要 Vulkan 设备与可见窗口；无 GPU 时退出码 2 = SKIP）──
 GPU_CHECK_SRC   := $(wildcard tests/gpu/*.cpp)
 GPU_CHECK_BIN   := build/gpuCheck
-GPU_CHECK_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+# gpuCheck 复用 tests/fixtures（P1 程序化资产）验证实体层蒙皮接线（P2）
+GPU_CHECK_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) -Itests/fixtures $(INCLUDES)
 
 .PHONY: gpuCheck
-gpuCheck: $(TARGET)
+# 编译与运行拆开：smoke 只该依赖二进制，不该顺带以窗口模式跑一次
+# （无显示时会 SKIP 并让 make 直接失败）。
+gpuCheck: $(GPU_CHECK_BIN)
+	@echo "$(YELLOW)▶ 运行 GPU 验收（无 /dev/dri 时会 SKIP）...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(GPU_CHECK_BIN)
+
+$(GPU_CHECK_BIN): $(GPU_CHECK_SRC) $(TARGET)
 	@echo "$(YELLOW)🖥  编译 GPU 管线验收程序...$(RESET)"
 	@mkdir -p build
-	$(CXX) $(GPU_CHECK_FLAGS) $(GPU_CHECK_SRC) $(TEST_LIBS) -o $(GPU_CHECK_BIN)
-	@echo "$(YELLOW)▶ 运行 GPU 验收（无 /dev/dri 时会 SKIP）...$(RESET)"
-	@LD_LIBRARY_PATH=. ./$(GPU_CHECK_BIN)
+	$(CXX) $(GPU_CHECK_FLAGS) $(GPU_CHECK_SRC) $(UNIT_FIXTURE_SRC) $(TEST_LIBS) -o $(GPU_CHECK_BIN)
+
+# ── 无窗口渲染验收（不需要窗口/X11，只要 Vulkan 设备；可跑 lavapipe）──
+HEADLESS_SRC   := $(wildcard tests/headless/*.cpp)
+HEADLESS_BIN   := build/headlessCheck
+HEADLESS_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+
+.PHONY: headlessCheck
+headlessCheck: $(HEADLESS_BIN)
+	@echo "$(YELLOW)▶ 运行无窗口渲染验收（不需要 DISPLAY）...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(HEADLESS_BIN)
+	@mkdir -p .local/tmp
+	@echo "$(YELLOW)▶ 帧编排等价性（cRENDER_FRAME vs 裸 sFRAME_3D_SCOPE 逐字节比对）...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(HEADLESS_BIN) 640 400 4 .local/tmp/frame_parity.png frame; \
+		rc=$$?; if [ $$rc -eq 2 ]; then echo "  [SKIP] 无 Vulkan 设备"; elif [ $$rc -ne 0 ]; then exit $$rc; fi
+
+$(HEADLESS_BIN): $(HEADLESS_SRC) $(TARGET)
+	@echo "$(YELLOW)🪟  编译无窗口渲染验收程序...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(HEADLESS_FLAGS) $(HEADLESS_SRC) $(TEST_LIBS) -o $(HEADLESS_BIN)
+
+# ── 物理场景验收（P4：20 个箱子堆叠 + 球撞倒；纯 CPU，不需要 GPU/窗口）──
+PHYSICS_BOXES_SRC   := $(wildcard tests/physicsBoxes/*.cpp)
+PHYSICS_BOXES_BIN   := build/physicsBoxes
+PHYSICS_BOXES_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+
+.PHONY: physicsBoxes
+physicsBoxes: $(PHYSICS_BOXES_BIN)
+	@echo "$(YELLOW)📦 物理场景验收（20 箱堆叠 + 球撞倒，120 帧）...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(PHYSICS_BOXES_BIN)
+
+$(PHYSICS_BOXES_BIN): $(PHYSICS_BOXES_SRC) $(TARGET)
+	@echo "$(YELLOW)📦 编译物理场景验收程序...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(PHYSICS_BOXES_FLAGS) $(PHYSICS_BOXES_SRC) $(TEST_LIBS) -o $(PHYSICS_BOXES_BIN)
+
+# ── 角色场景验收（P5：台阶 + 斜坡 + 跳跃；纯 CPU，不需要 GPU/窗口）──
+CHARACTER_DEMO_SRC   := $(wildcard tests/characterDemo/*.cpp)
+CHARACTER_DEMO_BIN   := build/characterDemo
+CHARACTER_DEMO_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+
+.PHONY: characterDemo
+characterDemo: $(CHARACTER_DEMO_BIN)
+	@echo "$(YELLOW)🚶 角色场景验收（台阶 + 斜坡 + 跳跃，240 帧）...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(CHARACTER_DEMO_BIN)
+
+$(CHARACTER_DEMO_BIN): $(CHARACTER_DEMO_SRC) $(TARGET)
+	@echo "$(YELLOW)🚶 编译角色场景验收程序...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(CHARACTER_DEMO_FLAGS) $(CHARACTER_DEMO_SRC) $(TEST_LIBS) -o $(CHARACTER_DEMO_BIN)
+
+# ── 示例无窗口冒烟（所有示例在 GN_HEADLESS_FRAMES 下跑固定帧数）──
+# 依赖只取「编译」产物：不能依赖 headlessCheck/gpuCheck 这些 .PHONY 运行目标，
+# 否则它们会先以窗口模式跑一次（无显示时 SKIP → make 直接失败）。
+# 没有 Vulkan 设备时整体 SKIP（退出码 2）。
+.PHONY: smoke
+smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene
+	@echo "$(YELLOW)🚦 示例无窗口冒烟...$(RESET)"
+	@GN_HEADLESS_FRAMES=$(if $(SMOKE_FRAMES),$(SMOKE_FRAMES),8) \
+		LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH bash tests/smoke/runSamples.sh
+
+# ── CI 一条命令：构建 + 单测 + 无窗口渲染验收 + 示例冒烟 ──
+# 与 check 的区别：check 只跑纯逻辑单测（不需要 GPU）；ci 额外验真实渲染。
+.PHONY: ci
+ci: check smoke doc-check
+	@echo "$(GREEN)✅ ci 通过: 构建 + 单测 + 物理场景 + 无窗口渲染 + 示例冒烟 + 文档数字一致$(RESET)"
+
+# ── 分层依赖检查（只报告；架构重组完成后改 --strict 进 make ci）──
+.PHONY: lint
+lint:
+	@echo "$(YELLOW)🧭 分层依赖检查...$(RESET)"
+	@bash tests/lint/layers.sh $(LINT_FLAGS)
+	@echo "$(YELLOW)📢 输出通道检查...$(RESET)"
+	@bash tests/lint/output.sh
+	@echo "$(YELLOW)🗂  GN_VkContext 分组检查...$(RESET)"
+	@bash tests/lint/context_groups.sh
+	@echo "$(YELLOW)⌨  示例输入访问面检查（P0：只准走动作映射）...$(RESET)"
+	@bash tests/lint/input.sh
+
+# ── 文档数字：唯一来源是实测。改数字不要手改，跑 make stats ──
+.PHONY: stats doc-check
+stats:
+	@echo "$(YELLOW)📊 生成文档统计数字...$(RESET)"
+	@bash tests/tools/gen_stats.sh --write
+
+doc-check:
+	@echo "$(YELLOW)🔍 校验文档统计数字是否过时...$(RESET)"
+	@bash tests/tools/gen_stats.sh
+
+# ── 交叉平台编译检查（只编译不链接）──
+# 用 MinGW-w64 把 src/ 全量按 Windows 目标编一遍，确保 Vulkan 后端不只"在 Linux 上能编"。
+# 没有交叉工具链时退出码 2 = SKIP（没装 g++-mingw-w64-x86-64 就跳过）。
+.PHONY: crosscheck
+crosscheck:
+	@echo "$(YELLOW)🌐 交叉编译检查（$(if $(CROSS),$(CROSS),x86_64-w64-mingw32-))$(RESET)"
+	@JOBS=$(if $(JOBS),$(JOBS),2) bash tests/crosscompile/checkCross.sh
 
 # ── MMD 查看器（编译不依赖 GPU；运行需要 Vulkan 设备与窗口）────────
 MMD_VIEWER_SRC := $(wildcard tests/mmdViewer/*.cpp)
@@ -465,7 +610,7 @@ debug: clean all
 .PHONY: clean
 clean:
 	@echo "$(YELLOW)🧹 清理编译产物...$(RESET)"
-	rm -rf $(BUILD_DIR) build/obj-asan libGN_mini*.* build/test_* build/unit_tests* build/gpuCheck build/cornellBox build/cornellPt build/cornellCompare build/cornellRtProbe build/cornellGpuRtProbe build/cornellHwRtProbe
+	rm -rf $(BUILD_DIR) build/obj-asan build/cross-* libGN_mini*.* build/test_* build/unit_tests* build/gpuCheck build/headlessCheck build/mmdViewer build/imoScene build/cornellBox build/cornellPt build/cornellCompare build/cornellRtProbe build/cornellGpuRtProbe build/cornellHwRtProbe
 	@echo "$(GREEN)✅ 清理完成$(RESET)"
 
 # ═══════════════════════════════════════════════════════════
@@ -510,7 +655,14 @@ help:
 	@echo "║    make unit                编译并运行单元测试   ║"
 	@echo "║    make asan                ASan/UBSan 单测      ║"
 	@echo "║    make check               构建+单元测试        ║"
+	@echo "║    make headlessCheck       无窗口渲染验收       ║"
+	@echo "║    make smoke               示例无窗口冒烟       ║"
+	@echo "║    make ci                  check + smoke 全跑   ║"
 	@echo "║    make gpuCheck            P1b GPU 管线验收     ║"
+	@echo "║    make crosscheck          Windows 交叉编译检查 ║"
+	@echo "║    make lint                分层依赖检查           ║"
+	@echo "║    make stats               生成文档统计数字       ║"
+	@echo "║    make doc-check           校验文档数字是否过时   ║"
 	@echo "║    make cornellBox          Cornell Box 测试程序 ║"
 	@echo "║    make cornellPt           Cornell CPU 路径追踪 ║"
 	@echo "║    make cornellCompare      Cornell 误差对比     ║"

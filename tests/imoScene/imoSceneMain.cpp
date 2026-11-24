@@ -346,21 +346,25 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
             imoScene::shadowDrawCaster(gScene.aModel);
         }
     }
-    GNg::GN_VkBegin3DPass(&viewProjection, &eye, gLight->GetUBO(), sizeof(GN3d::sLIGHT_UBO));
-    GNg::GN_VkDrawSkybox(&viewProjection);
-    // 房间自带地板与家具：再画一块 60×60 的虚拟地面会与木地板 z-fighting 并盖住房间。
-    if (!gRoomLoaded) {
-        drawGround();
+    // 3D pass 用作用域守卫：析构时保证 End3DPass（内含 HDR→交换链合成）+ Begin2DPass。
+    {
+        GNg::sFRAME_3D_SCOPE frame3D(&viewProjection, &eye, gLight->GetUBO(),
+                                     sizeof(GN3d::sLIGHT_UBO));
+        if (!frame3D.Valid()) {
+            return;
+        }
+        // 房间自带地板与家具：再画一块 60×60 的虚拟地面会与木地板 z-fighting 并盖住房间。
+        if (!gRoomLoaded) {
+            drawGround();
+        }
+        if (gRoomLoaded) {
+            gRoom.aModel.DrawPBRSorted(eye); // 房间先画（静态背景），角色再叠上去
+        }
+        if (gBlobShadowReady) {
+            imoScene::blobShadowDraw(gBlobShadow, 0.0f, 0.0f); // 角色站在世界原点
+        }
+        gScene.aModel.DrawPBRSorted(eye); // OPAQUE/MASK 先画，BLEND 按网格距离由远到近
     }
-    if (gRoomLoaded) {
-        gRoom.aModel.DrawPBRSorted(eye); // 房间先画（静态背景），角色再叠上去
-    }
-    if (gBlobShadowReady) {
-        imoScene::blobShadowDraw(gBlobShadow, 0.0f, 0.0f); // 角色站在世界原点
-    }
-    gScene.aModel.DrawPBRSorted(eye); // OPAQUE/MASK 先画，BLEND 按网格距离由远到近
-    GNg::GN_VkEnd3DPass();
-    GNg::GN_VkBegin2DPass(); // 交还给 2D 叠层通道（保持 LOAD，不清屏）
     if (firstFrame) {
         std::fprintf(stderr, "[imoScene] 首帧: 录制完成（此后卡住 = present/swapchain）\n");
         firstFrame = false;
@@ -390,5 +394,7 @@ if (inspectCode >= 0) {
 }
 GN_InitLoadCallBackFunc(AppInit, AppUnInit);
 GN_InitLoopCallBackFunc(AppDisplay2D, AppDisplay3D, AppRun);
+// GN_HEADLESS_FRAMES=N：无窗口跑 N 帧后退出（CI/容器无显示环境的冒烟用；缺模型时不渲染但不崩）。
+if(GN_TryRunHeadlessFromEnv(1280, 800)) return;
 GN_StartRun("imo_chan Scene (glTF)", 1280, 800, 0, false, true, true, 0, 0, 0, 0);
 GN_EXIT;

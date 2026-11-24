@@ -5,6 +5,7 @@
 //   2) batch.switches：乱序 3 次切换 → 排序后 1 次；
 //   3) batch.draw：同一场景按乱序与排序各画一帧，两个采样点颜色一致（±0.02）。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 #include "GN_3Dlight.h"
 #include "GN_3Dbatch.h"
@@ -103,13 +104,13 @@ bool drawCubes(const GNg::sMAT44 &viewProj, const GN3d::sLIGHT_UBO &light,
     }
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     return true;
 }
 
 bool readFrame(std::vector<uint8_t> &pixels, int &width, int &height) {
-    width = (int)GNg::GN_Vk.swapchainExtent.width;
-    height = (int)GNg::GN_Vk.swapchainExtent.height;
+    width = (int)Extent().width;
+    height = (int)Extent().height;
     return ReadSwapchain(0, 0, width, height, pixels);
 }
 
@@ -225,7 +226,7 @@ void reportDrawCheck() {
 } // namespace
 
 void RunBatchChecks() {
-    if(!GNg::GN_Vk.initialized) {
+    if(!EngineReady()) {
         ReportSkip("batch.setup", "GN_Vk not initialized");
         return;
     }

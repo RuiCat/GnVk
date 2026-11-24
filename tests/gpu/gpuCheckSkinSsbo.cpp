@@ -6,6 +6,7 @@
 //   3) skin.ssbo.paletteRing：同一帧两次绘制用不同调色板（槽位轮转），两块都在预期位置；
 //   4) skin.ssbo.invalid：paletteCount 0/4097、空指针、3D pass 外调用全部返回 false。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 #include "GN_3DSkin.h"
 
@@ -79,9 +80,9 @@ bool drawAndRead(const GNg::sMAT44 &viewProj, bool twoDraws, const GN3d::sSKINNE
     }
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
-    width = (int)GNg::GN_Vk.swapchainExtent.width;
-    height = (int)GNg::GN_Vk.swapchainExtent.height;
+    vkQueueWaitIdle(Queue());
+    width = (int)Extent().width;
+    height = (int)Extent().height;
     if(!drew) return false;
     return ReadSwapchain(0, 0, width, height, pixels);
 }
@@ -100,14 +101,14 @@ void reportPipelineAndJoints() {
     int width = 0;
     int height = 0;
 
-    const unsigned missBefore = (unsigned)GNg::GN_Vk.aPipelineCache.GetMissCount();
+    const unsigned missBefore = (unsigned)Hooks().pipelineMiss;
     if(!drawAndRead(viewProj, false, quad, &palette[0], 200, 0, 0, 0, pixels, width, height)) {
         ReportFail("skin.ssbo.pipeline", "first draw failed");
         ReportFail("skin.ssbo.joint200", "first draw failed");
         return;
     }
     // 管线在 GN_VkInit3D 已预建：这里要求绘制不再新增缓存项（同一内容的键命中）。
-    const unsigned missAfterFirst = (unsigned)GNg::GN_Vk.aPipelineCache.GetMissCount();
+    const unsigned missAfterFirst = (unsigned)Hooks().pipelineMiss;
     char pipelineDetail[160];
     std::snprintf(pipelineDetail, sizeof(pipelineDetail),
                   "pipeline pre-created at init; miss %u->%u (expected unchanged)", missBefore,
@@ -200,7 +201,7 @@ void reportInvalid() {
 } // namespace
 
 void RunSkinSsboChecks() {
-    if(!GNg::GN_Vk.initialized) {
+    if(!EngineReady()) {
         ReportSkip("skin.ssbo.setup", "GN_Vk not initialized");
         return;
     }

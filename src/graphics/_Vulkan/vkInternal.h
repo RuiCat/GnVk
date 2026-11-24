@@ -18,8 +18,56 @@ namespace GNg {
 
 struct sIMAGE;
 
-// 帧首同步 PBR 纹理描述符集（定义在 vk3dForward.cpp），必须在命令缓冲开始录制之前调用。
-void refreshPBRTextureSets();
+// 帧首同步纹理环集（定义在 vk3dForward.cpp / vk3dPasses.cpp），必须在命令缓冲开始录制之前调用。
+// 三条路径（PBR / 前向 Blinn-Phong / G-Buffer）各自维护按纹理组合分配的私有描述符集：
+// 渲染通道内只做绑定，绝不再改写规范集（VUID-vkUpdateDescriptorSets-None-03047）。
+GN_VK_INTERNAL void refreshPBRTextureSets();
+GN_VK_INTERNAL void refreshForwardTextureSets();
+GN_VK_INTERNAL void refreshGBufferTextureSets();
+// 帧首调用：把上帧标记的环集重置真正执行（含 vkFreeDescriptorSets）。
+GN_VK_INTERNAL void applyRingResetIfRequested();
+// 设备销毁前清空三套环集缓存（描述符集随池释放，缓存里的句柄会悬垂）。
+GN_VK_INTERNAL void resetTextureSetCaches();
+GN_VK_INTERNAL void resetGBufferTextureSetCache();
+
+// 归还一批环集：池开了 FREE_DESCRIPTOR_SET_BIT，必须显式 vkFreeDescriptorSets。
+// 三套环集结构不同但都有 aSet 成员，用模板统一。
+template <typename T>
+void ReleaseRingSets(std::vector<T> &sets, VkDescriptorPool pool, VkDevice device) {
+    if(!sets.empty() && pool != VK_NULL_HANDLE) {
+        std::vector<VkDescriptorSet> handles;
+        handles.reserve(sets.size());
+        for(size_t i = 0; i < sets.size(); ++i) handles.push_back(sets[i].aSet);
+        vkFreeDescriptorSets(device, pool, (uint32_t)handles.size(), handles.data());
+    }
+    sets.clear();
+}
+
+// ── 环集缓存的两条效率/寿命约束 ─────────────────────────
+// 1) 每个环集拷的是「规范集的静态绑定」，而它只在 init / 大气 LUT 接线 / GI-探针更新 /
+//    resize 时变化。用代际号跳过绝大多数帧的全量重同步（否则每帧要做
+//    N套 × 14 次描述符操作）。代际号由 GuardedUpdateDescriptorSets 在写到规范集时自增。
+GN_VK_INTERNAL uint32_t GN_VkCanonicalDescGeneration();
+// 2) 纹理解放时视图句柄会失效，环集里缓存的旧句柄必须作废。标记为「下帧帧首重置」，
+//    避开「录制中释放描述符集」的时机问题。
+GN_VK_INTERNAL void GN_VkRequestTextureSetCacheReset();
+const uint32_t kTextureSetCacheCap = 32; // 每套环集的条目上限（池只有 1024 描述符）
+
+// ═══════════════════════════════════════════════════════
+//  描述符改写守卫（VUID-vkUpdateDescriptorSets-None-03047）
+//  已录制进命令缓冲并绑定的描述符集不得再被改写，否则命令缓冲进入 invalid state，
+//  驱动会丢弃其后的 bind/draw。这里把所有 vkUpdateDescriptorSets 调用改为经过守卫，
+//  统计「渲染通道内改写规范集」的次数，由 gpuCheck 断言为 0（可重复回归）。
+// ═══════════════════════════════════════════════════════
+GN_VK_INTERNAL void GuardedUpdateDescriptorSets(const char *file, int line, VkDevice device,
+                                               uint32_t writeCount,
+                                               const VkWriteDescriptorSet *writes,
+                                               uint32_t copyCount,
+                                               const VkCopyDescriptorSet *copies);
+#ifndef GN_VK_NO_DESC_GUARD
+#define vkUpdateDescriptorSets(device, wc, pw, cc, pc)                                  \
+    ::GNg::GuardedUpdateDescriptorSets(__FILE__, __LINE__, (device), (wc), (pw), (cc), (pc))
+#endif
 
 // 2D 顶点格式（vkFrame2d/vkDraw2d 共享）
 struct VkVertex {

@@ -58,7 +58,10 @@ struct sMESH {
 
     sMESH();
     ~sMESH();
+    // 释放 CPU 侧数据（顶点/索引/LOD）。与 sIMAGE 同名但语义不同：
+    // sIMAGE::Release() 释放的是 GPU。本类型用 ReleaseGPU() 释放 GPU。
     void Release();
+    // 释放 GPU 缓冲。设备已销毁时只清句柄（GN_VkRelease3DMesh 内部已判 initialized）。
     void ReleaseGPU();
     void UploadToGPU();
     void Draw(const GNg::sMAT44 *modelMatrix) const;

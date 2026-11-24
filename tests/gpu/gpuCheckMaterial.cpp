@@ -7,6 +7,7 @@
 //   4) 全屏四边形回读中心像素 ≈ UBO 颜色（±0.02）；
 //   5) 非法描述（binding 0 不是 UBO / 缺 binding 1）返回 false 且不改材料。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 #include "GN_Material.h"
 
@@ -39,7 +40,7 @@ struct sMATERIAL_TEST_RES {
 
 uint32_t findMemoryTypeIndex(uint32_t typeBits, VkMemoryPropertyFlags props) {
     VkPhysicalDeviceMemoryProperties mp;
-    vkGetPhysicalDeviceMemoryProperties(GNg::GN_Vk.physicalDevice, &mp);
+    vkGetPhysicalDeviceMemoryProperties(PhysDev(), &mp);
     for(uint32_t i = 0; i < mp.memoryTypeCount; ++i) {
         if((typeBits & (1u << i)) && (mp.memoryTypes[i].propertyFlags & props) == props) return i;
     }
@@ -52,16 +53,16 @@ bool createHostBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
     bi.size = size;
     bi.usage = usage;
     bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if(vkCreateBuffer(GNg::GN_Vk.device, &bi, 0, &buffer) != VK_SUCCESS) return false;
+    if(vkCreateBuffer(Dev(), &bi, 0, &buffer) != VK_SUCCESS) return false;
     VkMemoryRequirements mr;
-    vkGetBufferMemoryRequirements(GNg::GN_Vk.device, buffer, &mr);
+    vkGetBufferMemoryRequirements(Dev(), buffer, &mr);
     VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = mr.size;
     ai.memoryTypeIndex = findMemoryTypeIndex(mr.memoryTypeBits,
                                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if(vkAllocateMemory(GNg::GN_Vk.device, &ai, 0, &memory) != VK_SUCCESS) return false;
-    return vkBindBufferMemory(GNg::GN_Vk.device, buffer, memory, 0) == VK_SUCCESS;
+    if(vkAllocateMemory(Dev(), &ai, 0, &memory) != VK_SUCCESS) return false;
+    return vkBindBufferMemory(Dev(), buffer, memory, 0) == VK_SUCCESS;
 }
 
 // 8×8 纯白纹理：LINEAR tiling + host-visible 内存，写入后转为 SHADER_READ_ONLY_OPTIMAL。
@@ -77,41 +78,41 @@ bool createWhiteTexture(sMATERIAL_TEST_RES &res) {
     ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
     ii.samples = VK_SAMPLE_COUNT_1_BIT;
     ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if(vkCreateImage(GNg::GN_Vk.device, &ii, 0, &res.aImage) != VK_SUCCESS) return false;
+    if(vkCreateImage(Dev(), &ii, 0, &res.aImage) != VK_SUCCESS) return false;
 
     VkMemoryRequirements mr;
-    vkGetImageMemoryRequirements(GNg::GN_Vk.device, res.aImage, &mr);
+    vkGetImageMemoryRequirements(Dev(), res.aImage, &mr);
     VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = mr.size;
     ai.memoryTypeIndex = findMemoryTypeIndex(mr.memoryTypeBits,
                                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if(vkAllocateMemory(GNg::GN_Vk.device, &ai, 0, &res.aImageMemory) != VK_SUCCESS) return false;
-    if(vkBindImageMemory(GNg::GN_Vk.device, res.aImage, res.aImageMemory, 0) != VK_SUCCESS) {
+    if(vkAllocateMemory(Dev(), &ai, 0, &res.aImageMemory) != VK_SUCCESS) return false;
+    if(vkBindImageMemory(Dev(), res.aImage, res.aImageMemory, 0) != VK_SUCCESS) {
         return false;
     }
 
     // 写入白色像素（按线性 tiling 的 rowPitch 逐行填充）。
     VkImageSubresource sub = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0};
     VkSubresourceLayout layout = {};
-    vkGetImageSubresourceLayout(GNg::GN_Vk.device, res.aImage, &sub, &layout);
+    vkGetImageSubresourceLayout(Dev(), res.aImage, &sub, &layout);
     void *mapped = 0;
-    if(vkMapMemory(GNg::GN_Vk.device, res.aImageMemory, 0, VK_WHOLE_SIZE, 0, &mapped) != VK_SUCCESS) {
+    if(vkMapMemory(Dev(), res.aImageMemory, 0, VK_WHOLE_SIZE, 0, &mapped) != VK_SUCCESS) {
         return false;
     }
     unsigned char *base = (unsigned char *)mapped + layout.offset;
     for(uint32_t y = 0; y < kTextureSize; ++y) {
         std::memset(base + (size_t)y * layout.rowPitch, 0xFF, kTextureSize * 4u);
     }
-    vkUnmapMemory(GNg::GN_Vk.device, res.aImageMemory);
+    vkUnmapMemory(Dev(), res.aImageMemory);
 
     // PREINITIALIZED → SHADER_READ_ONLY_OPTIMAL。
     VkCommandBufferAllocateInfo cbai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    cbai.commandPool = GNg::GN_Vk.commandPool;
+    cbai.commandPool = CmdPool();
     cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cbai.commandBufferCount = 1;
     VkCommandBuffer cb = VK_NULL_HANDLE;
-    if(vkAllocateCommandBuffers(GNg::GN_Vk.device, &cbai, &cb) != VK_SUCCESS) return false;
+    if(vkAllocateCommandBuffers(Dev(), &cbai, &cb) != VK_SUCCESS) return false;
     VkCommandBufferBeginInfo cbbi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     cbbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cb, &cbbi);
@@ -132,9 +133,9 @@ bool createWhiteTexture(sMATERIAL_TEST_RES &res) {
     VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cb;
-    vkQueueSubmit(GNg::GN_Vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
-    vkFreeCommandBuffers(GNg::GN_Vk.device, GNg::GN_Vk.commandPool, 1, &cb);
+    vkQueueSubmit(Queue(), 1, &si, VK_NULL_HANDLE);
+    vkQueueWaitIdle(Queue());
+    vkFreeCommandBuffers(Dev(), CmdPool(), 1, &cb);
 
     VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     vi.image = res.aImage;
@@ -143,7 +144,7 @@ bool createWhiteTexture(sMATERIAL_TEST_RES &res) {
     vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     vi.subresourceRange.levelCount = 1;
     vi.subresourceRange.layerCount = 1;
-    if(vkCreateImageView(GNg::GN_Vk.device, &vi, 0, &res.aImageView) != VK_SUCCESS) return false;
+    if(vkCreateImageView(Dev(), &vi, 0, &res.aImageView) != VK_SUCCESS) return false;
 
     VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     sci.magFilter = VK_FILTER_LINEAR;
@@ -152,11 +153,11 @@ bool createWhiteTexture(sMATERIAL_TEST_RES &res) {
     sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    return vkCreateSampler(GNg::GN_Vk.device, &sci, 0, &res.aSampler) == VK_SUCCESS;
+    return vkCreateSampler(Dev(), &sci, 0, &res.aSampler) == VK_SUCCESS;
 }
 
 void destroyTestResources(sMATERIAL_TEST_RES &res) {
-    VkDevice device = GNg::GN_Vk.device;
+    VkDevice device = Dev();
     if(!device) return;
     if(res.aSampler) vkDestroySampler(device, res.aSampler, 0);
     if(res.aImageView) vkDestroyImageView(device, res.aImageView, 0);
@@ -173,10 +174,10 @@ bool createTestResources(sMATERIAL_TEST_RES &res) {
         return false;
     }
     void *mapped = 0;
-    if(vkMapMemory(GNg::GN_Vk.device, res.aUboMemory, 0, 16, 0, &mapped) != VK_SUCCESS) return false;
+    if(vkMapMemory(Dev(), res.aUboMemory, 0, 16, 0, &mapped) != VK_SUCCESS) return false;
     const float baseColor[4] = {0.25f, 0.5f, 0.75f, 1.0f};
     std::memcpy(mapped, baseColor, sizeof(baseColor));
-    vkUnmapMemory(GNg::GN_Vk.device, res.aUboMemory);
+    vkUnmapMemory(Dev(), res.aUboMemory);
 
     res.aUboRes.aBuffer = res.aUboBuffer;
     res.aUboRes.aOffset = 0;
@@ -230,14 +231,14 @@ bool drawMaterialQuad(const GNg::sMAT44 &model, const GN3d::sMATERIAL_RES &mater
     GNg::GN_VkDraw3DMaterial(quad, 4, kQuadIndexCCW, 6, &model, &material);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     return true;
 }
 
 bool readCenterPixel(sFLOAT_PIXEL &out) {
     std::vector<uint8_t> pixels;
-    const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
-    const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
+    const uint32_t width = Extent().width;
+    const uint32_t height = Extent().height;
     if(!ReadSwapchain(0, 0, (int)width, (int)height, pixels)) return false;
     out = SampleSwapchain(pixels, (int)width, (int)(width / 2), (int)(height / 2));
     return true;
@@ -290,8 +291,8 @@ void reportInvalidChecks(const GN3d::sMATERIAL_DESC &validDesc) {
 }
 
 void reportCacheCheck(unsigned long long missBefore, unsigned countBefore) {
-    const unsigned long long missAfter = GNg::GN_Vk.aPipelineCache.GetMissCount();
-    const unsigned countAfter = (unsigned)GNg::GN_Vk.aPipelineCache.GetCount();
+    const unsigned long long missAfter = Hooks().pipelineMiss;
+    const unsigned countAfter = (unsigned)Hooks().pipelineCount;
     char detail[192];
     std::snprintf(detail, sizeof(detail),
                   "pipeline ready (create ok), 2 draws: miss %llu->%llu count %u->%u",
@@ -303,8 +304,8 @@ void reportCacheCheck(unsigned long long missBefore, unsigned countBefore) {
 void reportDrawCheck(GN3d::sMATERIAL_RES &material) {
     GNg::sMAT44 model;
     GNg::Mat44Identity(&model);
-    unsigned long long missBefore = GNg::GN_Vk.aPipelineCache.GetMissCount();
-    unsigned countBefore = (unsigned)GNg::GN_Vk.aPipelineCache.GetCount();
+    unsigned long long missBefore = Hooks().pipelineMiss;
+    unsigned countBefore = (unsigned)Hooks().pipelineCount;
     bool drew = drawMaterialQuad(model, material);
     if(drew) drew = drawMaterialQuad(model, material);
     reportCacheCheck(missBefore, countBefore);
@@ -344,7 +345,7 @@ void reportDestroyCheck(GN3d::sMATERIAL_RES &material) {
 } // namespace
 
 void RunMaterialChecks() {
-    if(!GNg::GN_Vk.initialized) {
+    if(!EngineReady()) {
         ReportSkip("material.setup", "GN_Vk not initialized");
         return;
     }

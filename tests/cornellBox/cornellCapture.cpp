@@ -495,4 +495,14 @@ bool hasPendingCapture() {
     return s_pending.aPending;
 }
 
+// 无窗口模式专用：拿到 RGBA8 像素后直接写 PNG（不走两阶段 swapchain 截图）。
+bool writeRgbaPngFile(const char *path, const unsigned char *rgba, int width, int height) {
+    if (!path || !rgba || width <= 0 || height <= 0) return false;
+    const bool ok = writeRgbPng(path, rgba, width, height);
+    if (ok) {
+        std::printf("[cornellBox] 无窗口截图: %s (%dx%d)\n", path, width, height);
+    }
+    return ok;
+}
+
 } // namespace Cornell

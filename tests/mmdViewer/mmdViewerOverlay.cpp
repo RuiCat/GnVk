@@ -7,20 +7,14 @@
 #include "mmdViewerShared.h"
 #include "GN_Physics.h" // sDEBUG_LINE（粒子四边形调试线框）
 #include "GN_Vk.h"      // L0c：读取当前 POST（曝光/色调映射/Bloom）用于叠层显示
-#include "vkShadowCascade.h" // L3c：SHADOW_CASCADE_MAX（级联状态数组长度）
+#include "GN_ShadowCascade.h" // L3c：SHADOW_CASCADE_MAX（级联状态数组长度）
 
 #include <cmath>
 #include <cstdio>
 
 // L3c/L4 状态：定义分别在 mmdViewer.cpp（阴影）与 mmdViewerWeather.cpp（大气）。
 // 共享头 mmdViewerShared.h 属其他写域（只读），因此跨模块声明落在使用方 TU。
-extern bool gShadowValid;
-extern bool gShadowsEnabled;
-extern uint32_t gShadowCascadeCount;
-extern float gShadowCascadeSplits[GN3d::SHADOW_CASCADE_MAX];
-extern float gShadowTexelWorld[GN3d::SHADOW_CASCADE_MAX];
-extern uint32_t gShadowMapSize;
-extern float gShadowFar;
+// P1：阴影状态收进引擎结构（原先这里 extern 了 6 个散装全局量）。
 extern bool gAtmosphereEnabled;
 extern bool gCloudsEnabled;
 extern uint32_t gCloudCubeCount;
@@ -126,13 +120,13 @@ void drawCoordOverlay() {
     }
 
     // L3c：4 级 CSM 状态（K 键开关；分割点 / 每级 texel 世界尺寸由主循环每帧拟合写入）。
-    if (gShadowValid) {
+    if (gShadow.aValid) {
         std::snprintf(line, sizeof(line),
                       "shadow  cascades=%u/%u  %s  far=%.1fm  map=%u  splits %.2f/%.2f/%.2f/%.2f",
-                      gShadowCascadeCount, GN3d::SHADOW_CASCADE_MAX,
-                      gShadowsEnabled ? "on " : "off", gShadowFar, gShadowMapSize,
-                      gShadowCascadeSplits[0], gShadowCascadeSplits[1],
-                      gShadowCascadeSplits[2], gShadowCascadeSplits[3]);
+                      gShadow.aCount, GN3d::SHADOW_CASCADE_MAX,
+                      gShadowsEnabled ? "on " : "off", gShadow.aFar, gShadow.aMapSize,
+                      gShadow.aSplits[0], gShadow.aSplits[1],
+                      gShadow.aSplits[2], gShadow.aSplits[3]);
     } else {
         std::snprintf(line, sizeof(line), "shadow  (no fit: model AABB invalid)  K=%s",
                       gShadowsEnabled ? "on" : "off");
@@ -140,8 +134,8 @@ void drawCoordOverlay() {
     gInfoText.OutText(line, 0, x, y, 0, 0, 0xFFFF66AA, GNg::eBLEND_NORMAL);
     y += lineHeight;
     std::snprintf(line, sizeof(line), "        texel %.4f/%.4f/%.4f/%.4f m/texel per cascade",
-                  gShadowTexelWorld[0], gShadowTexelWorld[1], gShadowTexelWorld[2],
-                  gShadowTexelWorld[3]);
+                  gShadow.aTexelWorld[0], gShadow.aTexelWorld[1], gShadow.aTexelWorld[2],
+                  gShadow.aTexelWorld[3]);
     gInfoText.OutText(line, 0, x, y, 0, 0, 0xFFAA66FF, GNg::eBLEND_NORMAL);
     y += lineHeight;
 

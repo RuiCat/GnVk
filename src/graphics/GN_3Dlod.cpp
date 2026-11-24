@@ -85,4 +85,39 @@ uint32_t selectLodForModel(const cMODEL &model, const sLOD_VIEW &view, float max
     return count;
 }
 
+sLOD_POLICY::sLOD_POLICY()
+    : aMaxScreenErrorPx(1.0f), aMinCoverageForLod0(0.25f), aErrorScale(1.0f) {}
+
+float lodScreenCoverage(const sAABB &worldAabb, const sLOD_VIEW &view) {
+    if(!worldAabb.IsValid() || !validView(view)) return 0.0f;
+    const float distance = distanceToAabb(view.aCamPos, worldAabb);
+    if(distance <= LOD_MIN_DISTANCE) return 1.0f; // 相机在盒内/贴脸：占满屏幕
+    const float halfFovTan = std::tan(view.aFovYRad * 0.5f);
+    if(!(halfFovTan > 0.0f)) return 0.0f;
+    const GNg::sVEC3 extent = worldAabb.Extent();
+    const float hx = extent.x * 0.5f;
+    const float hy = extent.y * 0.5f;
+    const float hz = extent.z * 0.5f;
+    const float radius = std::sqrt(hx * hx + hy * hy + hz * hz);
+    if(!(radius > 0.0f)) return 0.0f;
+    const float fraction = radius / (distance * halfFovTan);
+    return fraction > 1.0f ? 1.0f : fraction;
+}
+
+uint32_t selectLodWithPolicy(const sMESH &mesh, const sAABB &worldAabb, const sLOD_VIEW &view,
+                             const sLOD_POLICY &policy, uint32_t prevLevel) {
+    const float errorScale = policy.aErrorScale > 0.0f ? policy.aErrorScale : 1.0f;
+    const float threshold = (policy.aMaxScreenErrorPx > 0.0f ? policy.aMaxScreenErrorPx
+                                                             : LOD_DEFAULT_MAX_ERROR_PX) *
+                            errorScale;
+    uint32_t level = selectLod(mesh, worldAabb, view, threshold, prevLevel);
+
+    // 覆盖率修正：只在"物体足够大"时把级别拉回 LOD0（更精细，不会更粗）
+    if(policy.aMinCoverageForLod0 > 0.0f && level > 0) {
+        const float coverage = lodScreenCoverage(worldAabb, view);
+        if(coverage >= policy.aMinCoverageForLod0) level = 0;
+    }
+    return level;
+}
+
 } // namespace GN3d

@@ -14,6 +14,13 @@
 | B3 | DDGI：2f 法线偏置（code done，A/B 不判定）→ 2e relocation（CPU v1-lite + GPU 6 轴 done，视觉不判定）→ 2d 异步更新（**软件 compute done + parity/收敛/inactive/切光已验**；HW ray-query 变体未做） | **in-progress（仅剩 HW 变体与视觉）** |
 | B4 | 引擎 RT GI S2–S5、G5 探针动态化 | planned（GPU） |
 | B5 | 残余缺陷/文档漂移清理（HDR 双 tonemap、延迟上传 TODO、审计 P2、DEFECT_AUDIT 遗留项） | **done（B5b–B5g）**；残余 DA-M2 planned / DA-M3 blocked / DA-M1r blocked（需 ABI 决策） |
+| **P0** | 控制器规划 P0：`cINPUT_MAP` + `cGAME_CLOCK` + 两个示例的键位迁移（取代 42 处 `GN::Key1/Mouse` 直读） | **done（2026-11-24）** |
+| **P1** | 控制器规划 P1：`GN_Entity`（cENTITY + 四控制器）+ `cRENDER_FRAME` + `sSHADOW_STATE` + `tests/fixtures` 程序化资产 + 两个示例接线（画面逐字节不变） | **done（2026-11-24）** |
+| **P2** | 控制器规划 P2：`selectSkinPalettePath` 分流（UBO≤128/SSBO≤4096/超限拒绝）+ `cSKELETON_CONTROLLER::PalettePath` + `GN_VkDrawSkinnedAuto` + GPU 6 站验收（轮廓逐采样点比对） | **done（2026-11-24）** |
+| **P3** | 控制器规划 P3：`cANIM_STATE_MACHINE`（参数→状态转换 + 优先级 + 事件 + 级联上限）+ `sANIM_PARAMS` + 接进 `cANIM_CONTROLLER`/`cENTITY` + GPU `entity.animSwitch` | **done（2026-11-24）** |
+| **P4** | 控制器规划 P4：物理快照插值（`Step(dt, alpha)` + `ApplyTransformInterpolated`）+ 接触事件（实体对 / enter / exit / 睡着 latch）+ `GetContactInfo`/`GetLastSubStepCount` + `tests/physicsBoxes` 场景验收 | **done（2026-11-24）** |
+| **P5** | 控制器规划 P5：`cCHARACTER` 胶囊角色（解穿透 / 斜坡投影 / 台阶抬升 / 地面检测 / 贴墙下滑 / Teleport）+ 公开窄相查询 + `tests/characterDemo` 场景验收 | **done（2026-11-24）** |
+| **P6** | 控制器规划 P6：`cSCENE` 统一剔除/LOD/排序 + `sLOD_POLICY`（像素误差 + 屏幕占比）+ 1000 实体对拍 + `CreateCubeModel` AABB 缺陷修复 | **done（2026-11-24）** |
 
 ## 1. 已完成（本会话）
 
@@ -25,6 +32,39 @@
 | B1-4 | 机检 | `lintCodeModularity` 3 文件 **0 违规 0 告警** |
 | B2a | `sPIPELINE_DESC` 加 `aSpecCount/aSpec[8]/aKeyVersion`；校验/键/相等性纳入；`vkPipeline.cpp` 图形/计算创建注入 `VkSpecializationInfo` | `GN_Pipeline.h/.cpp`、`_Vulkan/vkPipeline.cpp`、`tests/unit/testPipeline.cpp`；`make unit` = **405/0**；lint 4 文件 0 违规 |
 | B3c-1 | DDGI 异步更新 CPU 基座：范围调度（budget/环绕）、temporal alpha、SH9 混合 | `src/graphics/GN_3DprobeUpdate.h/.cpp`；`tests/unit/testProbeUpdate.cpp` 4 例；`make unit` = **413/0**；lint 0 |
+| P0-1 | `GN::cINPUT_MAP`（`src/input/GN_InputMap.h/.cpp`）：动作绑定（键盘+鼠标）、每帧边沿（按住态跳变 或 引擎 `Key1/Mouse1` 脉冲）、`Axis1D/Axis2D`、双击、`CameraInput()`、全局屏蔽；`LoadDefaultWASD()` 便利绑定 | `tests/unit/testInputMap.cpp` 17 例；`make unit` 527/0 |
+| P0-2 | `GN::cGAME_CLOCK`（`src/core/GN_GameClock.h/.cpp`）：固定步长累加器、`FixedSteps/Alpha/DeltaTime`、`timeScale`（0=冻结）、`maxSubSteps` 限幅（剩余整步 `fmod` 丢弃，不做螺旋追赶）、`Alpha()` 兜底 `[0,1)` | `tests/unit/testGameClock.cpp` 11 例；`make unit` 527/0 |
+| P0-3 | 示例键位迁到两张绑定表：`tests/mmdViewer/mmdViewerActions.cpp`、`tests/imoScene/imoSceneActions.cpp`；两个示例的每帧 dt 改由 `cGAME_CLOCK` 给出 | `tests/unit/testDemoBindings.cpp` 4 例逐键验证；`make lint` 的 `tests/lint/input.sh` 实测 0 处直读；`GN_HEADLESS_FRAMES=8 ./build/mmdViewer|imoScene` 均 ok |
+
+| P1-1 | `GN3d::cENTITY` + 四控制器（`src/graphics/GN_Entity.h/.cpp`）：网格（上一帧 LOD 防抖/剔除/排序/绘制）、动画（名字→clip 表）、骨骼（world/palette/packPalette）、物理（entity↔body 映射 + 刚体→模型单向同步）。全部转发既有算法，无新增求解 | `tests/unit/testEntity.cpp` 17 例；`make unit` 544/0 |
+| P1-2 | `GNg::cRENDER_FRAME`（`src/graphics/_Vulkan/vkRenderFrame.h/.cpp`）：阴影提交 + 3D pass（含天空盒）的 RAII 编排；`Begin` 失败时析构不会 End 未开始的 pass | `testEntity.cpp::entityRenderFrameWithoutDevice`（无设备路径）；`make headlessCheck` 的 `frame.parity` |
+| P1-3 | 阴影状态收进引擎：`GN3d::sSHADOW_STATE` / `fitShadowState` / `expandShadowCasterBox`，两个示例的 7 个散装全局量 + 逐字段搬运消失 | `entityShadowStateMatchesLegacyPath` 逐字段比对旧两步路径（含 16 个矩阵元素）；`make headlessCheck` PASS |
+| P1-4 | 程序化测试资产 `tests/fixtures/`（3/129 节骨链 + 8 顶点蒙皮立方体），`make fixtures` 落盘 `.local/fixtures/` | `testEntity.cpp::entityFixturesAreConsistent`；`.local/fixtures/{bone3,bone129,cube_skin}.txt` |
+| P1-5 | 示例接线：mmdViewer 的模型 → `gEntity.aMesh`、主循环 → `cRENDER_FRAME`；imoScene 的 CSM → `sSHADOW_STATE`（画面须不变） | `make ci`（542→544 单测 / gpuCheck 109 / smoke 5）；`frame.parity diffBytes=0/1024000` |
+
+| P2-1 | 调色板路径分流 `selectSkinPalettePath`（`GN_3DSkin.h/.cpp`，纯 CPU）：0→NONE / 1..128→UBO / 129..4096→SSBO / >4096→**NONE**（拒绝而非静默截断）；`SKIN_SSBO_MAX_JOINTS` 提为共享常量，`vkSkinSsbo.cpp` 不再写死 4096 | `tests/unit/testSkin.cpp::skinPalettePathSelection`；`make unit` 545/0 |
+| P2-2 | `cSKELETON_CONTROLLER::PalettePath()`（按骨架关节数报路径）+ `GN_VkDrawSkinnedAuto`（`_Vulkan/vkSkinnedDispatch.*`，选路并提交，带 `GN_VkLastSkinnedPath` 诊断） | `gpuCheck` 的 `entity.skin.path` / `entity.skin.rejects` |
+| P2-3 | GPU 验收 6 站（`tests/gpu/gpuCheckEntity.cpp`）：路径表、绑定位姿调色板=单位阵、CPU/GPU 轮廓逐采样点一致（UBO 3 关节 / SSBO 129 关节，7.5 万点 0 mismatch）、正向差异下限、非法输入全拒 | `make gpuCheck` = **115 pass / 0 fail**（原 109） |
+
+| P3-1 | `GN3d::cANIM_STATE_MACHINE`（`src/graphics/GN_AnimStateMachine.*`）：状态（clip 名/loop/speed）+ 转换（参数比较/触发器/优先级/fade）+ 事件（归一化时间跨越，loop 回绕）+ `ANIM_MAX_CHAIN` 级联上限；`Start(player)` 记住播放器，查询接口不存在第二份时间轴 | `tests/unit/testAnimStateMachine.cpp` 15 例；`make unit` 560/0 |
+| P3-2 | `sANIM_PARAMS`/`eANIM_PARAM` 放进 `GN_3Danim.h`（`GN_Entity` 按值持有；`GN_Entity.h` 不能包含状态机头，否则 `GN.h ⇄ GN_Entity.h` 循环包含）；`cANIM_CONTROLLER` 用 `unique_ptr` 持有状态机并把 clip 表只留一份 | `animStateMachineRejectsBadDefinitions`、`entityAnimManualAndMachineCoexist` |
+| P3-3 | GPU 站 `entity.animSwitch`：参数触发 → 转换 → 姿势 → 调色板 → 蒙皮绘制 → 回读，覆盖像素变化 71.5% | `make gpuCheck` = **116 pass / 0 fail** |
+| P3-4 | 顺带修：`cPHYSICS_WORLD::AddBody` 现在对新刚体一律 `aSleeping=false`（动态刚体带脏 `aSleeping` 时永不积分，"加了却不动"）；用例侧入参显式清零 | `entityUpdateRunsPhysicsAnimSkeleton` 恢复 |
+| P3-5 | 钉住既有行为：`sANIM_CLIP::sample` 会把未覆盖分量重置为默认值（只写旋转通道会让关节平移变 0） | `animClipRotationOnlyResetsTranslation` |
+
+| P4-1 | `cPHYSICS_CONTROLLER` 快照插值：`Step(dt, renderAlpha)` 只在真的跑了子步时提交 (prev, curr)，`ApplyTransformInterpolated` 按 alpha 插值；`ApplyTransform` 保持"最新状态"语义（P1 行为不变） | `tests/unit/testPhysicsSync.cpp`：144Hz 下 movedFrames>130 / 无插值时 identicalFrames>50 的对照；`make unit` 574/0 |
+| P4-2 | 接触事件：`ContactCount/ContactAt/Entered/Exited`，按实体对上报；两端都睡着的接触 latch（不抖）；过滤开关 `SetReportUnmapped` | `physicsSyncContactEnterAndExit`、`physicsSyncContactBetweenEntities`、`physicsSyncLatchCannotRecoverMutedContacts`（钉住"事后打开补不回来"的边界） |
+| P4-3 | 引擎侧补 `cPHYSICS_WORLD::GetContactInfo(index, out)` 与 `GetLastSubStepCount()` | `physicsSyncMultiSubStepScalesAlpha`、`physicsSyncContactBetweenEntities` |
+| P4-4 | 场景验收 `tests/physicsBoxes`（20 箱堆叠 + 球撞倒，60Hz 物理 / 144Hz 渲染，**纯 CPU 不需要 GPU**）：整体向下、不穿地、全部下落、球确实撞到、插值真在写模型、状态有限 | `make physicsBoxes` 6/6；并入 `make check` / `ci` / `smoke`（smoke 6/6） |
+
+| P5-1 | `GN3d::cCHARACTER`（`src/graphics/GN_Character.*`）：每步「重力 → 水平 → 解穿透 → 斜坡投影 → 台阶抬升（落点须站得住）→ 地面检测 → 贴墙下滑」；`Teleport` 清速度；`AddFloor/AddBox/AddRamp/AddStaticMesh` 几何构造 | `tests/unit/testCharacter.cpp` 17 例；`make unit` 591/0 |
+| P5-2 | 公开窄相查询 `querySphereTriangle` / `queryCapsuleTriangle`（`GN_Physics.h`，实现复用 `GN_PhysicsMesh.cpp` 的同一份数学） | `characterClimbs45DegreeRamp`、`characterSlidesDownWall` 等用例；`make unit` 591/0 |
+| P5-3 | 场景验收 `tests/characterDemo`（台阶 → 平台 → 40° 坡 → 1.2 m 高台跳跃 → 终点，**纯 CPU**）：台阶抬升 / 爬坡 / 撞墙+跳跃 / 不穿地 / 到达终点 / 全程着地 / 状态有限 | `make characterDemo` 7/7；并入 `make check` / `ci` / `smoke`（smoke 7/7） |
+
+| P6-1 | `GN3d::cSCENE`（`src/graphics/GN_Scene.*`）：成员管理 + `PrepareRender`（剔除 → LOD → 排序）+ `Draw`/`DrawShadow`；不透明近→远、透明远→近、`stable_sort` 保序；剔除可关/排序可关 | `tests/unit/testScene.cpp` 7 例；`make unit` 599/0 |
+| P6-2 | `sLOD_POLICY` + `lodScreenCoverage` + `selectLodWithPolicy`（`GN_3Dlod.*`）：屏幕占比超阈值强制 LOD0，且只会更精细；`cMESH_CONTROLLER` 接策略 + `HasTransparentMaterial`（按 eALPHA_BLEND 判定，可覆盖） | `sceneLodPolicyCoverageForcesLod0`、`sceneLodCoverageMonotonic`；`gpuCheck` 的 `lod.*` 保持全绿 |
+| P6-3 | 验收"1000 个实体的剔除结果与逐实体暴力判定一致"：真实 `cCAMERA` 视锥，数量与身份双重核对 | `sceneCullMatchesBruteForce1000`（mismatched=0）；另加 1000 实体稳定排序用例 |
+| P6-4 | 缺陷修复：`CreateCubeModel` 的 `aVertexCount` 36→24（后 12 个顶点未初始化 ⇒ 世界 AABB 是 ±1e15 量级垃圾 ⇒ 剔除/排序/LOD/阴影全部静默失效） | `tests/unit/testComputeCubeModel.cpp` 断言 AABB 正好 ±size/2、顶点全在盒内、索引不越界 |
 | B3c-2 | DDGI 异步更新 GPU compute（软件解析路径）：`gn_cornell_probe_update.comp` + 共用 `cornellRayLib.glsl`；host 原地混合 + compute barrier + ProbeState/96B UBO + 回读校验 | parity：一次全量 vs 198 帧×64 探针 SH9 回读 hash 均 `f2447cc68304ca6f`（逐位一致）；DC 均值 0.979943 vs 烘焙 0.979817；ages 3 轮后=3；async=0 截图与改动前逐字节一致；inactive 跳过（前 100 个 SH 与资产逐值相等、age=0）与切光 age 归零（6 帧切光后 max=3 vs 不切光 6）已实测；`make shaders` 46/46、`make unit` 415/0 |
 
 ## 2. 待办（按优先级）

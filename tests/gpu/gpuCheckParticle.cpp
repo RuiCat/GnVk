@@ -9,6 +9,7 @@
 //   6) particle.perf：65536 粒子 CPU 步进 vs GPU dispatch 的耗时对比（信息性，同时校验一致性）；
 //   另加 particle.invalid：dt<=0 / 空指针 / 越界上传 / pass 外绘制 / 重复销毁都安全。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 
 #include "gpuCheckParticle.h"
@@ -157,8 +158,8 @@ void reportDeath() {
 
 bool readCenterPixel(sFLOAT_PIXEL &out) {
     std::vector<uint8_t> pixels;
-    const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
-    const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
+    const uint32_t width = Extent().width;
+    const uint32_t height = Extent().height;
     if(!ReadSwapchain(0, 0, (int)width, (int)height, pixels)) return false;
     out = SampleSwapchain(pixels, (int)width, (int)(width / 2), (int)(height / 2));
     return true;
@@ -199,7 +200,7 @@ void reportDraw() {
     const bool drew = GNg::GN_VkParticleDraw(params);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     if(!drew) {
         ReportFail("particle.draw", "GN_VkParticleDraw returned false");
         return;
@@ -240,7 +241,7 @@ void reportPerf() {
     const float dt = 1.0f / 60.0f;
     const int steps = 4;
 
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue); // 保证上一帧已结束，避免读写竞争
+    vkQueueWaitIdle(Queue()); // 保证上一帧已结束，避免读写竞争
     const Clock::time_point gpuStart = Clock::now();
     bool gpuOk = true;
     for(int i = 0; i < steps; ++i) gpuOk = gpuOk && GNg::GN_VkParticleSimulate(dt);
@@ -306,7 +307,7 @@ void reportInvalid() {
 } // namespace
 
 void RunParticleChecks() {
-    if(!GNg::GN_Vk.initialized) {
+    if(!EngineReady()) {
         ReportSkip("particle.setup", "GN_Vk not initialized");
         return;
     }

@@ -569,15 +569,19 @@ cMODEL *CreateCubeModel(float size, float r, float g, float b) {
 
     m->aMeshCount = 1;
     m->aMeshes = new sMESH[1];
-    m->aMeshes[0].aVertexCount = 36;
+    // 6 面 × 4 顶点 = **24** 个顶点、36 个索引（每面 2 个三角形）。
+    // 这里曾经写成 36 —— 顶点数组因此有 12 个**未初始化**顶点，而 computeWorldAABB
+    // 会把它们算进包围盒，得到 ±1e15 量级的垃圾盒（P6 做场景剔除时被抓住）。
+    // 任何依赖 AABB 的逻辑（剔除/排序/LOD/阴影拟合）都会因此失效。
+    m->aMeshes[0].aVertexCount = 24;
     m->aMeshes[0].aIndexCount = 36;
     m->aMeshes[0].aDiffuse[0] = r;
     m->aMeshes[0].aDiffuse[1] = g;
     m->aMeshes[0].aDiffuse[2] = b;
 
-    float *v = new float[36 * 11];
+    float *v = new float[24 * 11];
     uint32_t *idx = new uint32_t[36];
-    for(int i = 0; i < 36; i++) idx[i] = i;
+    for(int i = 0; i < 36; i++) idx[i] = i; // setFace 会逐面覆盖
 
     auto setFace = [&](int fi, float nx, float ny, float nz,
                        float x0, float y0, float z0, float x1, float y1, float z1,

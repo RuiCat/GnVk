@@ -10,7 +10,7 @@
 #include <cstdlib>
 
 #include "GN_Vk.h"
-#include "vkShadowCascade.h"
+#include "GN_ShadowCascade.h"
 
 namespace imoScene {
 
@@ -18,14 +18,11 @@ namespace {
 
 // 与引擎分配的阴影图一致：2048² × 4 层（vk3dInit.cpp 的 kShadowCascadeCount）。
 const uint32_t ENGINE_SHADOW_MAP_SIZE = 2048;
-const float SHADOW_NEAR = 0.1f;
 // 阴影承接区：角色 AABB 向外扩的余量（米），让脚下地面进入拟合盒。
 const float CATCHER_MARGIN = 2.5f;
 
-GNg::sMAT44 gCascadeViewProj[GN3d::SHADOW_CASCADE_MAX];
-float gCascadeSplits[GN3d::SHADOW_CASCADE_MAX];
-float gCascadeTexelWorld[GN3d::SHADOW_CASCADE_MAX];
-uint32_t gCascadeCount = 0;
+// P1：级联结果收进引擎的 sSHADOW_STATE（原先这里 4 个散装全局量 + 一个逐字段搬运循环）。
+GN3d::sSHADOW_STATE gCascadeState;
 
 // 归一化光线方向；零向量回退成竖直向下。
 GNg::sVEC3 normalizeDirection(const GNg::sVEC3 &direction) {
@@ -69,80 +66,32 @@ bool shadowAttachLight(GN3d::cLIGHT *light, const sShadowOptions &options) {
     return true;
 }
 
+// 拟合策略（far 口径、承接区外扩、抬到地面以上、级联数钳制、写 sLIGHT_UBO）
+// 已收进引擎 GN3d::fitShadowCascades；原先这里有一份 74 行的私有实现，
+// 与 tests/mmdViewer 里的副本逐字相同（那 22 行 farZ 循环完全一样）。
 bool shadowFit(GN3d::cLIGHT *light, const GNg::sMAT44 &cameraView, const GNg::sVEC3 &cameraPos,
                float fovYRad, float aspect, const GN3d::sAABB &casterBox,
                const sShadowOptions &options) {
-    gCascadeCount = 0;
-    if (!options.aEnabled || !(aspect > 0.0f) || !(fovYRad > 0.0f) || !casterBox.IsValid()) {
+    gCascadeState.Clear();
+    if (!options.aEnabled) {
         return false;
     }
-    const GN3d::sAABB catchBox(casterBox.aMin, casterBox.aMax);
-    GN3d::sAABB sceneBox = catchBox;
-    sceneBox.Expand(CATCHER_MARGIN);
-    if (sceneBox.aMin.y < 0.0f) {
-        sceneBox.aMin.y = 0.0f; // 地面高度 0：不要把拟合盒放到地板以下
-    }
-    const GNg::sVEC3 extent = sceneBox.Extent();
-    const float diagonal =
-        2.0f * std::sqrt(extent.x * extent.x + extent.y * extent.y + extent.z * extent.z);
-    // far 口径（契约 §8）：max(盒对角, 相机到盒最远角距离 + 0.5)；只取对角时相机站在
-    // 场景外会让各级切片全落在相机与角色之间，阴影整片消失。
-    float farthestCorner = 0.0f;
-    for (uint32_t corner = 0; corner < 8; ++corner) {
-        const GNg::sVEC3 point = {(corner & 1u) ? sceneBox.aMax.x : sceneBox.aMin.x,
-                                  (corner & 2u) ? sceneBox.aMax.y : sceneBox.aMin.y,
-                                  (corner & 4u) ? sceneBox.aMax.z : sceneBox.aMin.z};
-        const float dx = point.x - cameraPos.x;
-        const float dy = point.y - cameraPos.y;
-        const float dz = point.z - cameraPos.z;
-        const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-        if (distance > farthestCorner) {
-            farthestCorner = distance;
-        }
-    }
-    float farZ = diagonal > farthestCorner + 0.5f ? diagonal : farthestCorner + 0.5f;
-    if (farZ < 1.0f) {
-        farZ = 1.0f;
-    }
-
-    GN3d::sSHADOW_CASCADE_DESC desc;
+    GN3d::sSHADOW_FIT_DESC desc;
     desc.aCameraView = cameraView;
+    desc.aCameraPos = cameraPos;
     desc.aFovYRad = fovYRad;
     desc.aAspect = aspect;
-    desc.aNear = SHADOW_NEAR;
-    desc.aFar = farZ;
     desc.aLightDirection = normalizeDirection(options.aDirection);
-    desc.aSceneAABB = sceneBox;
+    desc.aCasterBox = casterBox;
+    desc.aCatchMargin = CATCHER_MARGIN;   // 让脚下地面进入拟合盒
+    desc.aClampToGround = true;           // 地板建在 y=0，拟合盒不要沉到地下
     desc.aCascadeCount = options.aCascadeCount;
-    const uint32_t layerCount = GNg::GN_VkShadowCascadeCount();
-    if (desc.aCascadeCount > layerCount) {
-        desc.aCascadeCount = layerCount;
-    }
-    if (desc.aCascadeCount < 1u) {
-        desc.aCascadeCount = 1u;
-    }
     desc.aShadowMapSize = options.aMapSize;
     desc.aSplitLambda = 0.5f;
     desc.aTexelSnapping = true;
+    desc.aEngineCascadeLayers = GNg::GN_VkShadowCascadeCount();
 
-    GN3d::sSHADOW_CASCADE_RESULT result;
-    if (!GN3d::buildShadowCascades(desc, &result)) {
-        return false;
-    }
-    for (uint32_t index = 0; index < result.aCount; ++index) {
-        gCascadeViewProj[index] = result.aLightViewProj[index];
-        gCascadeSplits[index] = result.aSplits[index];
-        gCascadeTexelWorld[index] = result.aTexelWorld[index];
-    }
-    gCascadeCount = result.aCount;
-    if (light != 0) {
-        for (uint32_t index = 0; index < gCascadeCount; ++index) {
-            light->SetShadowLightVP(gCascadeViewProj[index], index);
-        }
-        light->SetShadowMapSize(static_cast<float>(ENGINE_SHADOW_MAP_SIZE));
-        light->SetShadowCascades(gCascadeCount, gCascadeSplits, gCascadeTexelWorld);
-    }
-    return gCascadeCount > 0;
+    return GN3d::fitShadowState(desc, light, &gCascadeState);
 }
 
 GNg::sMAT44 shadowCascadeViewProj(uint32_t index) {
@@ -151,19 +100,16 @@ GNg::sMAT44 shadowCascadeViewProj(uint32_t index) {
         GNg::Mat44Identity(&identity);
         return identity;
     }
-    return gCascadeViewProj[index];
+    return gCascadeState.aLightViewProj[index];
 }
 
 uint32_t shadowCascadeCount() {
-    return gCascadeCount;
+    return gCascadeState.aCount;
 }
 
 void shadowDrawCaster(const GN3d::cMODEL &caster) {
-    for (uint32_t index = 0; index < gCascadeCount; ++index) {
-        GNg::GN_VkShadowPassBegin(&gCascadeViewProj[index], index);
-        caster.DrawShadow();
-        GNg::GN_VkShadowPassEnd();
-    }
+    // 逐级 Begin/End 的循环已收进引擎（与 mmdViewer 用的是同一个函数）。
+    GNg::GN_VkDrawShadowCascades(caster, gCascadeState.aLightViewProj, gCascadeState.aCount);
 }
 
 } // namespace imoScene

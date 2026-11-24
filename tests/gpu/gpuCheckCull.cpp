@@ -1,5 +1,6 @@
 // P8 渲染接入验收：cullDrawModelsPBR 的三立方体剔除绘制（可见数 + 像素）与 3D 调试线框（中心像素颜色）。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 #include "GN_3Dlight.h"
 
@@ -102,12 +103,12 @@ bool beginFrame() {
 
 void endFrameAndWait() {
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
 }
 
 bool readPixels(std::vector<uint8_t> &pixels, int &width, int &height) {
-    width = (int)GNg::GN_Vk.swapchainExtent.width;
-    height = (int)GNg::GN_Vk.swapchainExtent.height;
+    width = (int)Extent().width;
+    height = (int)Extent().height;
     return ReadSwapchain(0, 0, width, height, pixels);
 }
 
@@ -219,7 +220,7 @@ void runEmptyCheck(const GN3d::sFRUSTUM &cullFrustum) {
 
 // 过屏幕中心的水平调试线：中心像素 ≈ 请求颜色，线外仍是背景色。
 void runDebugLineCheck(const GNg::sMAT44 &viewProj, const GN3d::sLIGHT_UBO &light) {
-    const int height = (int)GNg::GN_Vk.swapchainExtent.height;
+    const int height = (int)Extent().height;
     // 1px 线必须落在中心像素的行中心：屏幕几何中心是 4 个像素的公共角点，
     // 线恰好压在行边界时光栅化只覆盖相邻两行各一半，MSAA resolve 后颜色会被背景稀释。
     // 正交投影的 bottom/top 已交换（m[5] 为负 = Y 翻转），世界 y 到屏幕 y_ndc 要再取反。
@@ -229,10 +230,10 @@ void runDebugLineCheck(const GNg::sMAT44 &viewProj, const GN3d::sLIGHT_UBO &ligh
     GN3d::sDEBUG_LINE line;
     line.aStart.x = -kViewHalfX;
     line.aStart.y = lineWorldY;
-    line.aStart.z = 0.5f;
+    line.aStart.z = -0.5f; // 相机在原点看向 -z：z_ndc = -z_world，取 z=-0.5 才有 z_ndc=+0.5
     line.aEnd.x = kViewHalfX;
     line.aEnd.y = lineWorldY;
-    line.aEnd.z = 0.5f;
+    line.aEnd.z = -0.5f;
     const unsigned int color = 0xFFFF8000u; // 不透明橙：1.0,0.502,0.0
     const float expectR = 1.0f;
     const float expectG = 128.0f / 255.0f;

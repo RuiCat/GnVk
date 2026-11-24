@@ -123,7 +123,10 @@ bool GN_VkBeginFrame() {
     s_vtxOfs3D = 0;
     s_idxOfs3D = 0;
     // 描述符集同步必须在命令缓冲开始录制之前（录制中改写已绑定的 set 会让 CB 失效）。
+    applyRingResetIfRequested(); // 纹理解放后作废旧环集（含 vkFreeDescriptorSets，必须先于本帧分配）
     refreshPBRTextureSets();
+    refreshForwardTextureSets(); // 前向 Blinn-Phong 的纹理环集
+    refreshGBufferTextureSets(); // G-Buffer 的纹理环集
     // 处理pass内延迟的纹理上传 (必须在vkWaitForFences之后)
     for(int i = 0; i < s_pendingUploadCnt; i++) {
         if(s_pendingUploads[i].img && s_pendingUploads[i].data) {
@@ -134,8 +137,14 @@ bool GN_VkBeginFrame() {
     }
     s_pendingUploadCnt = 0;
     vkResetFences(GN_Vk.device, 1, &GN_Vk.inFlightFence);
-    VkResult res = vkAcquireNextImageKHR(GN_Vk.device, GN_Vk.swapchain, UINT64_MAX, GN_Vk.imageAvailable, 0, &GN_Vk.currentFrame);
-    if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) return false;
+    if(GN_Vk.headless) {
+        // 无窗口：没有交换链可 acquire，离屏图按帧轮转（fence 已在上面等过，复用安全）
+        const uint32_t n = GN_Vk.swapchainImageCount ? GN_Vk.swapchainImageCount : 1u;
+        GN_Vk.currentFrame = (GN_Vk.currentFrame + 1u) % n;
+    } else {
+        VkResult res = vkAcquireNextImageKHR(GN_Vk.device, GN_Vk.swapchain, UINT64_MAX, GN_Vk.imageAvailable, 0, &GN_Vk.currentFrame);
+        if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) return false;
+    }
     vkResetCommandBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0);
     VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -209,6 +218,14 @@ void GN_VkEndFrame() {
         s_inRenderPass = false;
     }
     vkEndCommandBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
+    if(GN_Vk.headless) {
+        // 无窗口：不等待/不信号呈现信号量，也没有 present，提交后由 fence 负责同步
+        VkSubmitInfo hsi = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        hsi.commandBufferCount = 1;
+        hsi.pCommandBuffers = &GN_Vk.commandBuffers[GN_Vk.currentFrame];
+        vkQueueSubmit(GN_Vk.graphicsQueue, 1, &hsi, GN_Vk.inFlightFence);
+        return;
+    }
     VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
     VkPipelineStageFlags ws[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     si.waitSemaphoreCount = 1;

@@ -5,6 +5,7 @@
 //   2) lod.indexCount：按选级结果绘制时，GN_VkLast3DIndexCount() == 该级索引数（36 / 6）；
 //   3) lod.singleLevel：无 LOD 的网格（levels 空）仍提交 LOD0 的 36 个索引（回归保护）。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 #include "GN_3Dlod.h"
 #include "GN_3Dlight.h"
@@ -142,7 +143,7 @@ bool drawFrame(const GNg::sMAT44 &identity, const GN3d::sLIGHT_UBO &light, const
     model.DrawPBRWithLod(levels, levelCount);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     return true;
 }
 
@@ -204,8 +205,8 @@ void reportSelectAndIndexCount() {
     // 像素回归：LOD0 与 LOD1 都包含立方体前面，中心像素应一致（±0.05）。
     std::vector<uint8_t> lod0Pixels;
     std::vector<uint8_t> lod1Pixels;
-    const int width = (int)GNg::GN_Vk.swapchainExtent.width;
-    const int height = (int)GNg::GN_Vk.swapchainExtent.height;
+    const int width = (int)Extent().width;
+    const int height = (int)Extent().height;
     levels[0] = 0;
     bool pixelOk = drawFrame(identity, light, model, levels, 1) &&
                    ReadSwapchain(0, 0, width, height, lod0Pixels);
@@ -235,7 +236,7 @@ void reportSelectAndIndexCount() {
 } // namespace
 
 void RunLodChecks() {
-    if(!GNg::GN_Vk.initialized) {
+    if(!EngineReady()) {
         ReportSkip("lod.setup", "GN_Vk not initialized");
         return;
     }

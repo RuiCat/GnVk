@@ -39,6 +39,27 @@ struct sANIM_CHANNEL {
     std::vector<GNg::sQUAT> aQuatValues; // R 的关键帧值
 };
 
+// ── 状态机的外部输入（P3）──────────────────────────────────
+// 放在本头而不是状态机头里：`cENTITY` 按值持有参数包，而 GN_Entity.h 不能包含
+// GN_AnimStateMachine.h（会形成 GN.h ⇄ GN_Entity.h 的循环包含）。参数类型本身也只
+// 依赖动画层，放这里在语义上是对的。
+//
+// 参数编号是 uint16_t 而非枚举：引擎不预设游戏有哪些参数（否则引擎要随每个游戏改）。
+typedef uint16_t eANIM_PARAM;
+const uint16_t ANIM_PARAM_MAX = 64; // 0 保留为"无参数"
+
+struct sANIM_PARAMS {
+    float aValue[ANIM_PARAM_MAX];  // 数值参数（未设置 = 0）
+    bool aTrigger[ANIM_PARAM_MAX]; // 触发器（"本帧"语义；状态机每帧末清空）
+
+    sANIM_PARAMS();
+    void Reset(); // 数值与触发器全清（切场景时用）
+    void Set(eANIM_PARAM id, float value);
+    float Get(eANIM_PARAM id) const;
+    void Trigger(eANIM_PARAM id); // 置位（同一帧重复置位无副作用）
+    bool Triggered(eANIM_PARAM id) const;
+};
+
 struct sANIM_TRANSFORM {
     GNg::sVEC3 aTranslation;
     GNg::sQUAT aRotation;

@@ -8,7 +8,11 @@
 
 #include <GN.h>
 #include "GN_3Ddecal.h"
+#include "GN_ShadowCascade.h" // P1：阴影状态 sSHADOW_STATE
+#include "GN_GameClock.h"
+#include "GN_InputMap.h"
 #include "weather.h"
+#include "mmdViewerActions.h"
 
 #include <cstdint>
 #include <string>
@@ -16,6 +20,7 @@
 
 // ── 共享状态：定义分别在各模块 .cpp ──────────────────────────────
 extern GN3d::cMODEL gModel;                  // mmdViewer.cpp（场景装配）
+extern GN3d::cENTITY gEntity;                // mmdViewer.cpp（P1：模型的控制器宿主，非拥有 gModel）
 extern GN3d::cLIGHT *gLight;                 // mmdViewer.cpp
 extern std::vector<GNg::sIMAGE *> gTextures; // mmdViewer.cpp
 extern std::string gModelPath;               // mmdViewer.cpp
@@ -73,6 +78,14 @@ extern const float SNOW_STREAK;
 extern const float PRECIP_DIR_Y;
 extern const float RAIN_GRAVITY_Y;
 extern const float SNOW_GRAVITY_Y;
+
+// ── 阴影状态（P1：原先摊在这里的 7 个全局量收进 sSHADOW_STATE）──
+extern GN3d::sSHADOW_STATE gShadow; // 定义在 mmdViewer.cpp；每帧由 updateShadow() 拟合
+extern bool gShadowsEnabled;
+
+// ── 输入与时钟（P0：键位与语义分离 / 统一 dt 来源）──
+extern GN::cINPUT_MAP gInput;  // 定义在 mmdViewer.cpp；AppRun 每帧 Update 一次
+extern GN::cGAME_CLOCK gClock; // 定义在 mmdViewer.cpp；本帧 dt 的唯一来源
 
 // ── 相机与视角（mmdViewerCamera.cpp）──
 extern GN3d::cCAMERA gCamera; // 全查看器唯一的相机实例（定义在 mmdViewerCamera.cpp）

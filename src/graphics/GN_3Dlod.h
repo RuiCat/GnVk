@@ -42,5 +42,29 @@ uint32_t selectLod(const sMESH &mesh, const sAABB &worldAabb, const sLOD_VIEW &v
 uint32_t selectLodForModel(const cMODEL &model, const sLOD_VIEW &view, float maxScreenErrorPx,
                            uint32_t *levels, uint32_t levelCapacity);
 
+// ═══════════════════════════════════════════════════════════
+//  P6：把"选级策略"固化成数据（屏幕占比 + 误差）
+// ═══════════════════════════════════════════════════════════
+// 为什么还要一层策略：单看像素误差会在一种情况上出错 —— 物体占满半个屏幕时，
+// 它的边缘误差仍然可能"看起来"很小（误差是相对几何的），于是被判成可以降级，
+// 结果近处的大物体反而用了粗模。游戏里这条最刺眼。
+// 所以策略 = 像素误差阈值 **且** 屏幕占比超过阈值时强制 LOD0。
+struct sLOD_POLICY {
+    float aMaxScreenErrorPx; // 像素误差阈值，<=0 用引擎默认 1.0
+    float aMinCoverageForLod0; // 屏幕占比（占视口高度比例）超过它就不许降级；<=0 关闭
+    float aErrorScale; // 误差缩放：<1 更倾向高模（整体更精细），>1 更激进降级
+
+    sLOD_POLICY();
+};
+
+// 世界 AABB 在屏幕上占的高度比例（0..1）。AABB 退化成点/视图非法时返回 0。
+// 口径：以 AABB 外接球半径算，fraction = r / (d · tan(fov/2))，d = 相机到盒最近距离。
+float lodScreenCoverage(const sAABB &worldAabb, const sLOD_VIEW &view);
+
+// 带策略的选级：先按 selectLod 算（含降档防抖），再用覆盖率强制修正到 LOD0。
+// 只会"更精细"，不会比 selectLod 更粗 —— 策略不该意外降画质。
+uint32_t selectLodWithPolicy(const sMESH &mesh, const sAABB &worldAabb, const sLOD_VIEW &view,
+                             const sLOD_POLICY &policy, uint32_t prevLevel);
+
 } // namespace GN3d
 #endif // _GN_3DLOD_H_

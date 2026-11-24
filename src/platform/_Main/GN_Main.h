@@ -42,12 +42,19 @@
     }
 
 GN_MAIN_API void GT_AppArgsSet(int *argc, char **argv);
+// 读 GN_HEADLESS_FRAMES 环境变量：>0 表示走无窗口（离屏）运行，返回帧数；否则返回 0。
+// GT_AppArgsSet 据此跳过 glfwInit，因此所有用 GN_MAIN/GN_EXIT 的程序无需改入口即可无窗口启动。
+GN_MAIN_API int GN_HeadlessFramesRequested();
+// 若 GN_HEADLESS_FRAMES>0，则无窗口跑这么多帧后返回 true（调用方应直接 return，不再调 GN_StartRun）。
+GN_MAIN_API bool GN_TryRunHeadlessFromEnv(short vw, short vh);
 
 // 窗口尺寸
 extern GN_MAIN_API GLFWwindow *GT_MainWindow;
 
 // ── 兼容旧 API (替代 GLUT 版本中的函数) ──────────────────
 GN_MAIN_API void GN_InitWindow(int **hwnd = 0, const char *caption = 0, short vw = 800, short vh = 600, bool fs = false, bool zoom = true, bool cursor = true);
+// 无窗口版初始化+运行：不建 GLFW 窗口/surface/交换链，跑完 frames 帧后返回（frame_proc 可为 0）。
+GN_MAIN_API bool GT_InitAllAndRunHeadless(short vw, short vh, int frames, void (*frame_proc)(int frame_index));
 GN_MAIN_API void GN_UnInitWindow(void *hwnd);
 GN_MAIN_API void GN_InitGraphics(void *hwnd = 0, short vw = 800, short vh = 600, short cb = 0, short bl = 0, short bt = 0, short br = 0, short bb = 0, bool fs = false, bool zoom = true, bool db = false, uint8 ms = 0);
 GN_MAIN_API void GN_UnInitGraphics();

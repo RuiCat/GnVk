@@ -38,8 +38,22 @@ bool sIMAGE::RenderTargetSupport() {
     return true;
 }
 
-void sIMAGE::Release(bool immed) {
+void sIMAGE::ReleaseGPU() {
+    // 设备已销毁（GN_VkShutdown 之后对象才析构、或静态/全局对象的析构时机不可控）：
+    // 拿旧句柄调 vkDestroy* 是未定义行为。此时只清句柄，不做 GPU 操作。
+    if(!GN_VkDeviceAlive()) {
+        vkImage = VK_NULL_HANDLE;
+        vkImageMemory = VK_NULL_HANDLE;
+        vkImageView = VK_NULL_HANDLE;
+        vkSampler = VK_NULL_HANDLE;
+        vkDescriptorSet = VK_NULL_HANDLE;
+        texnum = 0;
+        return;
+    }
     if(vkImageView) {
+        // 纹理环集里缓存的 image view / sampler 句柄立即失效，先作废环集（下帧帧首执行），
+        // 否则旧句柄会留在缓存里，下次「相同地址的新纹理」会误命中并绑到已销毁的 view。
+        GN_VkRequestTextureSetCacheReset();
         vkDestroyImageView(GN_Vk.device, vkImageView, 0);
         vkImageView = VK_NULL_HANDLE;
     }
@@ -55,7 +69,13 @@ void sIMAGE::Release(bool immed) {
         vkDestroySampler(GN_Vk.device, vkSampler, 0);
         vkSampler = VK_NULL_HANDLE;
     }
+    vkDescriptorSet = VK_NULL_HANDLE;
     texnum = 0;
+}
+
+void sIMAGE::Release(bool immed) {
+    (void)immed; // 历史参数，已无区别（立即释放）
+    ReleaseGPU();
 }
 
 void sIMAGE::CopyOut(sIMAGE *dst) {

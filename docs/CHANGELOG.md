@@ -1,5 +1,1160 @@
 # Changelog
 
+## 2026-11-24 — 控制器规划 P6：统一剔除 / LOD / 排序（收尾）+ 揪出一个"静默失效"级缺陷
+
+P6 是这条规划的最后一段，也是文档里说的"如果只能做两件事"之一。前面 P1–P5 把**每个实体**的
+控制器做好了，但**"这一帧要画谁、按什么顺序画"仍然散在调用方**；这块收进 `cSCENE` 之后，
+两个示例与任何新场景都不用再抄一遍。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| `GN3d::cSCENE` | `src/graphics/GN_Scene.h/.cpp` | 成员管理 + 一次性完成 **剔除 → LOD → 排序**；`Draw`/`DrawShadow` 按结果遍历；剔除可关、排序可关 |
+| `sLOD_POLICY` | `GN_3Dlod.h/.cpp`：`sLOD_POLICY` / `lodScreenCoverage` / `selectLodWithPolicy` | 把"像素误差 + 屏幕占比"固化：占比超阈值强制 LOD0（**只会更精细，不会更粗**） |
+| `cMESH_CONTROLLER` | `GN_Entity.*`：`SetLodPolicy` / `HasTransparentMaterial` / `SetTransparentOverride` | 选级改走策略；透明材质按 `eALPHA_BLEND` 自动判定（可覆盖） |
+| 单测 9 例 | `tests/unit/testScene.cpp` + `testComputeCubeModel.cpp` | 含 **1000 实体剔除 vs 暴力判定**、1000 实体稳定排序 |
+| 缺陷修复 | `GN_3Dmodel.cpp::CreateCubeModel` | `aVertexCount` 36 → 24（见下） |
+
+### 验收
+
+```
+make unit       599 cases, 0 failed        （591 → +8）
+make gpuCheck   116 pass, 0 fail           cull.* / lod.* 全绿（未改它们的实现）
+make smoke      7/7     make ci  全绿      make lint 0 违规
+```
+
+核心用例 `sceneCullMatchesBruteForce1000`：1000 个实体、真实 `cCAMERA` 视锥，
+`cSCENE::PrepareRender` 的可见集合与"逐实体 `computeWorldAABB` + `frustum.IntersectsAABB`"
+**数量一致且身份逐个一致**（mismatched=0）。两条路径是不同代码：一条走控制器（刷新 AABB、
+读 aVisible、看 cull 开关），一条直接算，任何一边漂移都会红。
+
+### 抓到并修掉的缺陷：`CreateCubeModel` 的世界 AABB 是垃圾
+
+写场景用例时发现"三个立方体排序结果不对"，追下去是：
+`CreateCubeModel` 分配了 `new float[36*11]`（36 个顶点），但 `setFace` 只写 6 面 × 4 顶点 =
+**24** 个，却把 `aVertexCount` 写成 **36**。于是 `computeWorldAABB()` 把后 12 个
+**未初始化顶点**算进包围盒，实测得到一个
+
+```
+min=(-260003730554880, -967418176, -273539199997575168)
+max=(1.309, 231616416884409237504, 17462612451006881238458177540849664)
+```
+
+的盒子。**它不崩、不画错**，只让一切依赖 AABB 的逻辑静默失效：视锥剔除会把物体
+随机剔掉、实体排序距离是 1e15、LOD 选级恒为最粗、阴影级联拟合到天文数字。
+`tests/gpu/gpuCheckCull.cpp` 早就绕开了它（自己造立方体，注释里写着"不要用 CreateCubeModel"），
+但根因一直留在引擎里。修法一行：`aVertexCount = 24`（索引本来就是 0..23），
+并新增 `testComputeCubeModel` 断言 AABB 正好是 ±size/2、所有顶点在盒内、索引不越界。
+
+> 教训：这类"未初始化内存 + 只影响下游数值"的缺陷，单看任何一条用例都能过
+> （两条路径用同一个垃圾盒，比出来还是一致）。必须有一条**对着已知答案**的断言才能抓住。
+
+### 三个设计取舍
+
+**1. 排序键用「相机到实体 AABB 中心的距离」。**
+不用原点距离（模型平移后没意义）、不用任一顶点（顶点分布不均会抖）。AABB 中心对刚体
+平移/缩放的响应是连续的，排序不会在相邻帧之间来回跳。`stable_sort` 保证同距离时保持
+加入顺序 —— 否则同帧两次调用顺序会变，透明物体闪烁。
+
+**2. LOD 策略只会"更精细"。**
+`selectLodWithPolicy` 先跑既有 `selectLod`（含 0.8× 降档防抖），再用屏幕占比把级别
+**拉回 LOD0**，从不推向更粗。这样它不可能让画质比原路径更差，既有的 `lod.*` 验收
+（`lod.select` / `lod.indexCount` / `lod.pixels`）也就不受影响。
+
+**3. 剔除只有一份实现。**
+`cSCENE` 不复制 AABB/视锥判断，一律走 `cMESH_CONTROLLER::Prepare`。两份实现必然漂移，
+而漂移的表现是"某个视角下物体莫名消失"——最难查的那类。用例用**另一条独立路径**
+（直接 `computeWorldAABB` + `IntersectsAABB`）来做对拍，而不是把同一份逻辑抄两遍。
+
+### 一处结构性问题（不是 P6 引入，但踩到了）
+
+`GN_Scene.h` 若 `#include "GN_Entity.h"`，会在"某 TU 先包含 GN_Entity.h（守卫置位）→
+再包含本头"时拿到一个**尚未定义**的 `cENTITY`（守卫让 include 变成空操作）。
+现在改为只前置声明 `class cENTITY;`（接口只需要不透明指针，完整类型只在 .cpp 里用）。
+这跟 `GN_Character.h` 那个循环包含是同一类问题的两个方向，两处都写了注释说明原因。
+
+### 规划收尾
+
+P0–P6 全部完成。剩下的都是明确**不在本规划范围**的东西（写在各阶段文档里）：
+真实 MMD/GLB 资产、布娃娃/IK、混合树、GPU 侧剔除（compute culling）、
+RenderDoc/真机逐像素基线。这些需要外部资产或 GPU 桌面环境，容器里做不了。
+
+## 2026-11-24 — 控制器规划 P5：胶囊角色控制器（斜坡 / 台阶 / 跳跃）
+
+P5 是"能不能开始写游戏"的最后一块地基：**人要能走、能上台阶、不能卡在斜坡上、跳起来要
+落在该落的地方**。这四件事都不能靠给角色加一个刚体解决（刚体会打滑、会被别的刚体推、
+在斜坡上自己滑下去），所以 `cCHARACTER` 与 `cPHYSICS_WORLD` **完全分开**。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| `GN3d::cCHARACTER` | `src/graphics/GN_Character.h/.cpp` | 胶囊移动：解穿透 → 斜坡投影 → 台阶抬升 → 地面检测 → 贴墙下滑；`Teleport` 清速度；台阶/斜坡/盒子/网格几何构造器 |
+| 公开窄相查询 | `GN_Physics.h/.cpp`：`querySphereTriangle` / `queryCapsuleTriangle` | 角色用的是**同一份**三角形数学（内部 `capsuleTriangleContact`），不存在第二套 |
+| 接进实体层 | `cENTITY::aCharacter`（`GN_Entity.h`） | 与四套控制器并列；仍不参与刚体求解 |
+| 单测 17 例 | `tests/unit/testCharacter.cpp` | 见下 |
+| 场景验收 | `tests/characterDemo`（`make characterDemo`，并入 `check`/`ci`/`smoke`） | 台阶 → 平台 → 40° 斜坡 → 1.2 m 高台（跳）→ 终点，**纯 CPU 不需要 GPU** |
+
+### 验收
+
+```
+make unit             591 cases, 0 failed       （574 → +17）
+make characterDemo    7/7
+  character.steppedUp          0.25 m 台阶抬升
+  character.climbedRamp        爬坡，最高 y=4.85
+  character.blockedThenJumped   1.2 m 高台 > stepHeight → 撞墙 + 跳跃
+  character.noPenetration      最低脚底 y=0.002，最小间隙 0.002 m
+  character.reachedGoal        最终 x=15.10（终点线 12）
+make gpuCheck         116/0    make smoke  7/7    make ci  全绿
+```
+
+单测覆盖计划里的每一条判据：平地行走速度 = walkSpeed（含冲刺、对角线不加速）、
+45° 可上 / 60° 被阻、`aStepHeight` 台阶能过而 1 m 台阶不能、跳跃高度 ≈ v²/2g
+（实测 1.274 m ±5%）、贴墙下滑不卡死（含从空中贴墙下落）、Teleport 不残留速度。
+
+### 五个踩出来的坑（都写进代码注释了）
+
+**1. 三角形绕序反了 → "能不能站"静默失效。**
+`AddRamp` 第一版两条三角形绕反，面法线朝下。而 `probeGround` 当时用
+`triangle.aNormal.y <= 0.05` 做前置过滤 —— 于是坡面被当成"不是地面"直接跳过，
+45° 坡上永远 `IsGrounded()==false`、角色一路飘着爬上去。**解穿透却正常**（那条走
+closest-point 法线，不看绕序），所以现象是"能动、能爬，但一直不着地"，很难第一眼看出。
+修法两条：绕序改正 + **删掉绕序法线做过滤**（改用包围盒 y 范围粗筛，最终判定一律用
+接触法线）。
+
+**2. 台阶逻辑会顺手把陡坡爬成墙。**
+台阶抬升的条件原来是"水平被挡 + 站着 + 抬起来能前进"。在 60° 坡前面它也满足：
+抬 0.35 m → 蹭进去 2 cm → 落下来 → 下一帧再来一次，平均每帧上升几毫米，120 帧就爬上去了。
+修法：抬升后必须**落点站得住**（坡度 ≤ maxSlope），否则放弃抬升并报"撞墙"。
+
+**3. 竖直胶囊在 45° 坡上的"坡度读数"不是 45°。**
+接触点在侧下方半球，往上走时会滑到半球更平的位置，读数落到 35° 左右；脚底最低点也比
+"正下方那点坡面"高约 r(√2−1) ≈ 0.12 m。这是**刚体几何**决定的，不是判定错误。
+第一版用例断言"坡度 ∈ [40°,50°]"因此失败——现在断言"明显是斜面（>30°）"+ 脚底间隙
+< 0.2 m，并把这个几何事实写进注释。
+
+**4. 逐帧"不许上升"是错误的贴墙判据。**
+单步穿透修正会把角色沿法线推出去，几个厘米的抬升是正常的。用例改成"全程不高过起点"，
+这才是"贴墙被弹飞"的反面。
+
+**5. `GN_Character.h` 不能自己 `#include <GN.h>`。**
+`GN_Entity.h` 包含它，而 `<GN.h>` 又包含 `GN_Entity.h`：谁先被 .cpp 直接包含，谁就会
+撞上"`GN_Entity.h` 里 `cCHARACTER` 还没声明"。现在 `GN_Character.h` 依赖调用方先包含
+`<GN.h>`（与 `GN_InputMap.h` 同一个约定），并在头文件里写明了原因。
+
+### 边界（写清楚而不是以后才想起来）
+
+- 角色**不推动态刚体**，动态刚体也不推角色（v1）。二者只共用静态三角网。
+- 没有布娃娃（骨骼↔刚体耦合）、没有 IK、没有根运动（root motion）提取。
+- 台阶抬升是"抬-移-落"，不是真正的 capsule sweep；薄台阶（< 胶囊半径）会有轻微穿插感。
+- 相机跟随没接（`cCAMERA::SetTarget` 已存在，缺一个"把角色位置喂给相机"的示例）。
+
+## 2026-11-24 — 控制器规划 P4：快照插值 + 接触事件 + 20 箱物理场景
+
+P4 补的是「物理与渲染之间那条缝」：`cPHYSICS_WORLD` 走固定 60Hz，渲染可能 144Hz，
+直接读最新刚体位置会看到**每两帧才动一次**的台阶；接触也只给了个计数，没人能翻译成
+"谁撞了谁"。这一轮把三件事补齐：快照插值、接触事件、场景级验收。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| `sPHYSICS_CONTROLLER` 快照插值 | `GN_Entity.h/.cpp` | `Step(dt, alpha)` 提交 (prev, curr)，`ApplyTransformInterpolated` 按 alpha 插值；`ApplyTransform` 保留"最新状态"语义 |
+| 接触事件 | 同上 | `ContactCount/ContactAt/EnteredContactCount/ExitedContactCount`，**按实体对**报，带 enter/exit；两端都睡着的接触做 latch |
+| `cPHYSICS_WORLD::GetContactInfo` | `GN_Physics.h/.cpp` | 按索引取接触明细（两端句柄、法线、点、穿透深度） |
+| `cPHYSICS_WORLD::GetLastSubStepCount` | 同上 | 上次 Step 实际跑了几步（插值诊断 + 螺旋追赶检测） |
+| 单测 12 例 | `tests/unit/testPhysicsSync.cpp` | 见下 |
+| 场景验收 | `tests/physicsBoxes/main.cpp`（`make physicsBoxes`，并入 `check`/`ci`/`smoke`） | 20 箱堆叠 + 球撞倒，**纯 CPU 不需要 GPU** |
+
+### 验收
+
+```
+make unit            574 cases, 0 failed        （560 → +14）
+make physicsBoxes    6/6
+  boxes.descendsOverall   净下降最小 0.255 m，单帧最大上抬 0.0026 m
+  boxes.noPenetration     最低 AABB 下沿 y=-0.0104（容差 -0.020）
+  boxes.ballHit           最大水平位移 0.3387 m，球参与接触 221/288 帧
+  boxes.interpolationActive  alpha∈(0,1) 288/288 帧，模型位置≠最新刚体位置 64 帧
+make gpuCheck        116 pass, 0 fail
+make smoke           pass=6 fail=0
+make ci              全绿
+```
+
+### 四条踩出来的实现口径（都写在头文件里了）
+
+**1. 快照只在"真的跑了子步"时才前移。**
+第一版每帧无条件 `prev ← curr`，结果"本帧没跑物理"的帧里 prev 和 curr 相同 ⇒ 位置两帧
+才变一次，插值等于白做（144Hz 下 84 帧不动）。改成只在 `LastSubSteps() > 0` 时提交，
+alpha 在两次子步之间从 0 扫到 1，画面才真正逐帧推进。
+
+**2. `alpha` 不能除以子步数。**
+一帧跑 N 步时，按 N 倍速走完这一段是**连续**的；除以 N 会停在 `t + N·s/N`，
+下一帧又跳到 `t + N·s`——那才是真正的跳帧。第一版想"补偿"反而造了个跳。
+
+**3. 睡着的接触要 latch。**
+物理引擎为了性能会跳过两端都睡着的刚体对，于是"球躺在地上"从某一帧起就查不到接触了。
+游戏语义里这显然是持续接触，所以对"两端都睡着"的已知接触对保持不报 exit。
+**边界**（有用例钉住）：latch 只能延续已经见过的接触对，事后打开过滤补不回来——
+过滤开关要在落地之前就设好。
+
+**4. 接触事件是"控制器视角"的。**
+一个 `cPHYSICS_CONTROLLER` 只认自己登记过的实体。所以"球 vs 箱子"的事件要求**两个刚体
+登记在同一个控制器里**。第一版场景里每个 `cENTITY` 各带一个控制器，球那一侧看不到箱子，
+接触帧数一直是 0。真实游戏通常就是"一个物理控制器管全部刚体"，示例已按这个写。
+
+### 场景参数是量出来的，不是拍的
+
+`make physicsBoxes` 最初用 8 m/s × 2 kg 的球，结果箱子被打飞并插进地面 **28 cm**：
+CCD v1 只扫掠**静态/运动学**目标，动态-动态的高能撞击没有保护。逐组试了
+speed/mass/层高之后取 3.5 m/s × 1 kg —— 穿透 ≤ 1 cm，同时仍把箱子推出去 0.34 m
+（撞击真实发生过，不是"球没碰到"）。这段取舍写在了示例源码里。
+
+另外计划里写的判据是「箱子最终 Y **单调下降**」，实际做不到：求解器的位置修正会把
+箱子往上顶一点（本场景实测单帧最大上抬 2.6 mm）。现在改成「净位移必须向下 + 单帧上抬
+不超过 5 cm」，并把这个差异记在这里，而不是把容差调到能过为止。
+
+### 仍然没做的
+
+- 布娃娃（骨骼↔刚体双向约束）、角色推挤动态刚体：明确不在 v1（P5 只做角色 vs 静态三角网）。
+- 物理调试线框在示例里的可视化（`cPHYSICS_WORLD::DebugDraw` 已有，缺一个 GPU 侧消费者）。
+- 真实资产的多形状复合刚体。
+
+## 2026-11-24 — 控制器规划 P3：动画状态机（参数 → 状态 → 事件）+ 顺手挖出一个真 bug
+
+P3 补的是「现在该播哪段」这一层。`cANIM_PLAYER` 只有 play/crossFade，判断散落在每个角色、
+每个动作里；这一轮把它收成一张表：**参数 → 转换 → 驱动播放器 → 事件**。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| `cANIM_STATE_MACHINE` | `src/graphics/GN_AnimStateMachine.h/.cpp` | 状态（clip 名 + loop/speed）、转换（参数比较 + 触发器 + 优先级 + fade）、事件（归一化时间跨越）、级联上限 |
+| `sANIM_PARAMS` / `eANIM_PARAM` | `GN_3Danim.h` | 64 个数值 + 64 个触发器；触发器是"本帧"语义，`Update` 末清空 |
+| 接进 `cANIM_CONTROLLER` | `GN_Entity.*` | clip 表**只有一份**（`RegisterClip` 转发给状态机）；`StartStateMachine` / `UpdateWithStateMachine`；`Stop()` 同时退出状态驱动 |
+| `cENTITY::aParams` + 状态机优先 | `GN_Entity.*` | `Update` 里状态机激活时走 `UpdateWithStateMachine`，否则走手工播放 |
+| 单测 15 例 | `tests/unit/testAnimStateMachine.cpp` | 见下 |
+| GPU 站 1 条 | `gpuCheckEntity.cpp::entity.animSwitch` | 状态切换后**画面**必须变（71.5% 覆盖像素变化） |
+
+### 验收
+
+```
+make unit           560 cases, 0 failed        （545 → +15）
+make gpuCheck       116 pass, 0 fail           （115 → +1）
+entity.animSwitch   state=pose90 coveredA=9408 coveredB=18760 changed=15662/21915 (71.5%)
+make ci             全绿
+```
+
+`entity.animSwitch` 是这条链唯一的端到端证据：参数触发 → 转换 → 播放器 → 局部姿势 →
+调色板 → GPU 蒙皮绘制 → 回读像素，一次跑完，而且用"覆盖像素变了 71.5%"证明不是空转。
+
+### 两个设计取舍
+
+**1. 状态机记住播放器，而不是自己拿一个。**
+第一版写成 `Update(dt, params, player)` 把播放器当参数传，于是 `InTransition()` /
+`BlendWeight()` / `Finished()` 都拿不到真实状态，只能返回常量——那是假的接口。
+改成 `Start(player)` 时记住指针，所有查询都读同一个播放器。**不存在第二份时间轴**，
+这也顺手决定了 `cANIM_CONTROLLER::Stop()` 必须同时把状态机停掉（否则下一帧状态机会把
+播放器重新拉起来，"停下了又在播"）。
+
+**2. 并列优先级取"先注册"，而不是"后注册"。**
+游戏里改注册顺序是常事（读表顺序变了、脚本加载顺序变了）。如果并列时后者覆盖前者，
+"加一条无关的转换"就会悄悄改掉已有行为。现在并列取先注册 + 专门的用例
+`animStateMachineTieTakesFirstRegistered` 钉住。
+
+### 顺带挖出的两个真问题
+
+**① `cPHYSICS_WORLD::AddBody` 不保证新刚体是醒的。**
+`P1` 的 `entityUpdateRunsPhysicsAnimSkeleton` 这次红了，现象是"球加了但一直在 y=4 不动"。
+根因：`sRIGID_BODY` 没有默认构造函数，`aSleeping` 是入参里的脏值；`AddBody` 只对
+**非动态**刚体清 `aSleeping`，于是动态刚体带着 `sleeping=垃圾` 进世界，永远不积分。
+之前这条用例能过纯属运气（栈上那块内存恰好是 0），本轮 `cENTITY` 多了 320 字节的
+`sANIM_PARAMS`，栈布局一变就暴露了。修法：`AddBody` 对新加入的刚体一律
+`aSleeping = false`（刚体加进世界就该动起来），并在用例里显式 `memset` 初始化入参。
+
+**② `sANIM_CLIP::sample` 会把"没写通道的分量"重置成默认值。**
+只写旋转通道的 clip 会让该关节的**平移变成 0**（关节被挪到原点）。这是既有契约
+（"未覆盖的分量保持默认"），但它是写夹具/接资产时的大坑。本轮的处理是：
+- 加 `makeRotationClipAt()`（带平移通道，等价于真实资产里 T+R 都有的骨骼）；
+- 加 `animClipRotationOnlyResetsTranslation` 把这个行为**钉住**，以后谁改它都会红。
+
+另外重申 P1 那条教训：**父关节旋转不会移动它自己的原点**，只有子节点会被带走。
+`entityAnimSwitch` 第一版断言"关节 1 的世界位置变了"，结果纹丝不动——现在改成断言
+子关节（joint 2）从 (0,3,0) 到 (-1,2,0)，并额外验蒙皮顶点。
+
+### 仍然没做的
+
+- **真实动画资产的确认**：MMD VMD / glTF animation 都没导入（无资产）。
+- 混合树（1D/2D blend space）：P3 只做离散状态 + crossFade，混合树另算一层。
+- 动画层遮罩（上下半身分离）、镜像、事件参数载荷：v1 不含。
+- `cRENDER_FRAME` 里没有"按实体列表遍历绘制"的入口，示例仍是手写调用。
+
+## 2026-11-24 — 控制器规划 P2：蒙皮链路首次在运行时跑通 + 关节数自动分流
+
+P2 是这套规划里**风险最高**的一段：`computePalette → packPalette → 上传 → 绘制` 这条链
+此前只在单测里逐段验过，从未有任何东西在运行时把它接起来；两个蒙皮绘制入口
+（8KB UBO / SSBO）也一直没人决定"该用哪个"。这一轮把它接通，并且**用像素证明它不是画错的**。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| 调色板路径分流（纯 CPU） | `GN_3DSkin.h/.cpp`：`eSKIN_PALETTE_PATH` / `selectSkinPalettePath` / `skinPaletteCapacity` / `skinPaletteTruncated` | 0→NONE、1..128→UBO、129..4096→SSBO、>4096→**NONE（明确拒绝，不静默截断）** |
+| `SKIN_SSBO_MAX_JOINTS` 提为共享常量 | `GN_3DSkin.h`；`vkSkinSsbo.cpp` 改为引用它 | CPU 分流与 GPU 缓冲容量原来是两个 `4096` 字面量，漂移后会在运行时才炸 |
+| `cSKELETON_CONTROLLER::PalettePath()` | `GN_Entity.h/.cpp` | 按**骨架关节数**（不是缓存的 palette 大小）报路径，换骨架后也能提前告警 |
+| `GN_VkDrawSkinnedAuto` | `_Vulkan/vkSkinnedDispatch.h/.cpp` | 按调色板大小选 UBO/SSBO 并提交；带 `GN_VkLastSkinnedPath()` 诊断 |
+| GPU 验收 6 站 | `tests/gpu/gpuCheckEntity.cpp`（`RunEntityChecks`） | 见下 |
+
+### 验收：115 项 GPU 站点全绿（原 109 → +6）
+
+```
+entity.skin.path              0/1/3/128/129/4096/4097 + controller(3/129/5000) wrong=0
+entity.skin.bindPose          palette maxDev=0.00e+00 vertex maxDev=0.00e+00 joints=3 path=1
+entity.skin.silhouetteDiffers differingSamples=2358
+entity.skin.silhouette.ubo    samples=75426(inside=1682) mismatch=0 path=1
+entity.skin.silhouette.ssbo   samples=75426(inside=1682) mismatch=0 path=2
+entity.skin.rejects           nullPose/uncomputed/nullVerts/noSkeleton/overCapacity accepted=0x0
+```
+
+判定方法是**轮廓逐采样点比对**：CPU 端 `skinVertices` 的结果按同一 model 变换投影到屏幕，
+得到期望轮廓；GPU 渲一遍后用 `GN_GrabFrame` 类回读，逐点比对「是否被绘制」。
+离任意三角形边 ≥3 px 的 7.5 万个采样点必须完全一致，同时要求有效采样点 ≥1200
+（防止"全被死区跳掉"的空过）。
+
+### 三个必须记下来的坑
+
+**1. 计划里的"顶点位置差 ≤1e-4"在这条路上做不到，我没有假装做到。**
+蒙皮顶点输出没有 transform feedback / 计算回写，唯一可观测的是像素；1e-4 世界单位在
+640 宽下远小于 1 个像素，物理上不可分辨。所以验收改成"轮廓一致 + 3 px 死区"，
+能力边界写在文件头里。`entity.skin.silhouetteDiffers` 补了一条反向保证：绑定位姿与
+转 60° 的 CPU 轮廓必须有 >100 个采样点不同——否则"两边一致"可能只是因为两边都一样错。
+
+**2. Vulkan 的回读行方向：`y_fb = (y_ndc + 1) / 2 × H`，NDC **+y 在下方**。**
+第一版按"图像行 0 在顶部所以 y 取反"写成 `0.5 - y*0.5`，结果 CPU 轮廓与 GPU 覆盖正好
+上下镜像（`cpuBox=[264,493]-[99,282]` vs `gpuBox=[265,198]-[491,379]`）。
+两边的 x 完全吻合、y 整体镜像，这个特征一眼就能定位到映射而不是蒙皮本身。
+注意这是 **identity viewProj** 下的换算：引擎的投影矩阵自带 Y 翻转，所以屏幕上看着是
+"y 向上"的正常画面；只有绕过投影直接喂 identity 时才需要按规范换算。
+
+**3. 超容量要拒绝，不能截断。**
+UBO 到 128 时 `packPalette` 是静默截断的（着色器也把索引钳到 127），这条既有行为对
+"129 关节模型"是安全的退化；但 4096 以上若也照此办理，结果是角色缺肢体，而画面
+"看起来只是有点怪"——最难查的那类。所以 `selectSkinPalettePath` 对 >4096 返回 NONE，
+`GN_VkDrawSkinnedAuto` 直接失败，`entity.skin.rejects` 用 5000 关节的骨架钉住这条。
+
+### 仍然没做的
+
+- **真实 MMD/GLB 蒙皮模型的画面确认**：仓库与容器都没有资产。P2 的验收是 fixtures
+  （3 节 / 129 节骨链 + 蒙皮立方体），真实模型的关节权重分布、法线方向、多网格材质
+  都要等有资产的机器。
+- 布娃娃（骨骼↔刚体双向约束）、IK、动画压缩：明确不在 v1。
+- 把蒙皮网格接进 mmdViewer/imoScene：缺资产导入层，P2 只做"引擎侧链路 + 验收"。
+
+## 2026-11-24 — 控制器规划 P1：实体骨架 + 一帧编排上台（画面逐字节不变）
+
+P1 的定义是「骨架与回归基线」：**先把接缝立起来，不改行为**。所以这一轮所有改动都能用
+一句话验收——*渲染结果必须一模一样*。容器里没模型资产，这条就用「同一帧两条路径各渲一次、
+逐字节比像素」来验，见下面的 `frame.parity`。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| `GN3d::cENTITY` + 四套控制器 | `src/graphics/GN_Entity.h/.cpp` | 网格（LOD 选级/剔除/排序/绘制）、动画（clip 表 + 播放器）、骨骼（world/palette/UBO 打包）、物理（step + entity↔body 映射 + 单向同步）；全部**转发壳**，不写新算法 |
+| `GNg::cRENDER_FRAME` | `src/graphics/_Vulkan/vkRenderFrame.h/.cpp` | 一帧的编排：阴影提交 → 3D pass（含天空盒）→ 收尾。RAII，`Begin` 失败时析构**不会**去 End 一个没开始的 pass |
+| `GN3d::sSHADOW_STATE` / `fitShadowState` / `expandShadowCasterBox` | `GN_ShadowCascade.h/.cpp` | 示例里那 7 个散装全局量 + 逐字段搬运循环收进一份结构；`far` 回填与拟合同口径 |
+| 程序化测试资产 | `tests/fixtures/`（`make fixtures` → `.local/fixtures/`） | 3 节/129 节骨链、8 顶点蒙皮立方体；P2/P3 的验收不再依赖外部 PMX/GLB |
+| 单测 | `tests/unit/testEntity.cpp`（17 例） | 含一条"新旧路径逐字段一致"的等价性用例 |
+| 帧等价性验收 | `tests/headless/main.cpp` 的 `frame` 模式（并入 `make headlessCheck`） | 同一帧用 `cRENDER_FRAME` 与裸 `sFRAME_3D_SCOPE` 各渲一次，逐字节比对 |
+| 示例迁移 | `tests/mmdViewer/*`、`tests/imoScene/imoSceneShadow.cpp` | 模型挂到 `gEntity.aMesh`；阴影走 `sSHADOW_STATE`；主循环走 `cRENDER_FRAME` |
+
+### 验收
+
+```
+make unit           542 → 544 cases, 0 failed
+make gpuCheck       pass=109 fail=0
+make smoke          pass=5 fail=0
+make headlessCheck  frame.parity diffBytes=0/1024000, lit=256000/256000
+```
+
+`frame.parity` 是这一轮唯一有分量的证据：两条路径不是"看起来一样"，是**逐字节相同**，
+而且同时断言了画面不是全黑（两张全黑图也逐字节相同，光比像素会漏掉这种失败）。
+回读的 PNG 是真实天空渐变（顶部 183,212,230 → 近地平线 222,231,236 → 地面灰），
+说明确实走了「进 pass → 画天空盒 → 收 pass」全程。
+
+### 三个值得记的决定
+
+**1. 控制器是壳，但壳里必须有状态。**
+四个控制器里唯一"有逻辑"的是三处状态：网格的**上一帧 LOD**（`selectLod` 的降档防抖需要
+`prevLevel`）、骨骼的**上次成功的 palette**（失败时不清缓存，避免把模型画成零矩阵）、
+物理的**映射表**。这三样正好是"调用方各写一份就会写错"的东西，所以放进控制器；
+求解本身（LBS/采样/接触）一行没动。
+
+**2. 动画没通道的关节取绑定姿势，而不是零。**
+第一版 `cENTITY::Update` 用 `vector<sANIM_TRANSFORM>(joints)` 起手，漏掉的关节就是
+零平移/零缩放。用例 `entityAnimLeavesOtherJointsAtBindPose` 立刻把它抓出来：
+调色板全是 0。改成以 `BindPoseLocal()` 为底再覆盖有通道的关节后才对。
+顺带发现一个容易写错的断言口径——"tip 关节没有通道"不等于"它的调色板是单位阵"：
+父关节转了，子关节的世界矩阵一定跟着转。用例最后改成断言
+「tip 的旋转部分与 mid 相同、但世界位置被父带走」，这才是骨架语义。
+
+**3. `fitShadowState` 的 far 必须用"和拟合同一个盒子"算。**
+旧代码里 `far` 是 `computeShadowFar(shadowSceneAABB(), cam)`，而拟合内部会先
+`Expand(margin)`/抬地面。两个盒子不一致时，叠层显示的数字与真实拟合对不上（曾经就这样漂过）。
+新实现把"外扩后的盒子"抽出来只算一次，既有用例 `entityShadowStateMatchesLegacyPath`
+逐字段比对新旧两条路径（矩阵 16 个元素也比）。
+
+### 仍然没做的（明确留档）
+
+- **真实模型环境下的逐像素对比**：仓库/容器都没有 PMX/GLB，`frame.parity` 只能覆盖
+  天空盒 + pass 生命周期。等有模型的机器再补 `MMD_CAPTURE=1` 的真机基线对比。
+- P2（GPU 蒙皮）、P3（动画状态机）、P4（物理插值）、cRENDER_FRAME 的几何回调形式
+  （现在几何由调用方在 `Begin`/`End` 之间自画，沿用示例原样，没引入回调/虚函数）。
+
+## 2026-11-24 — 控制器规划 P0：动作映射 + 游戏时钟（示例 42 处直读清零）
+
+`docs/ENTITY_CONTROLLERS_PLAN.md` 里 P0 的定义是「游戏底层地基」：两样东西——
+**输入**与**时间**。这两样不依赖任何渲染改动，做完就能立刻替掉两个示例里的重复代码。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| `GN::cINPUT_MAP` | `src/input/GN_InputMap.h/.cpp` | 动作绑定（键盘 + 鼠标混绑）、每帧边沿、`Axis1D/Axis2D`、双击、`CameraInput()`、全局 `enabled` 屏蔽 |
+| `GN::cGAME_CLOCK` | `src/core/GN_GameClock.h/.cpp` | 固定步长累加器、`FixedSteps/Alpha/DeltaTime`、`timeScale` 暂停与慢动作、`maxSubSteps` 限幅 |
+| 两张键位绑定表 | `tests/mmdViewer/mmdViewerActions.cpp`、`tests/imoScene/imoSceneActions.cpp` | 键位只在这两处出现，逻辑侧只读动作编号 |
+| 单测 | `tests/unit/testGameClock.cpp`（11 例）、`testInputMap.cpp`（17 例）、`testDemoBindings.cpp`（4 例） | `make unit` = **527 cases / 0 failed**（改动前 495） |
+| 门禁 | `tests/lint/input.sh`（并入 `make lint`） | 示例里再出现 `GN::Key1[…]` 这类直读就报红 |
+
+### 三个值得记的决定
+
+**1. 边沿不自己造第二套状态，而是复用引擎的语义。**
+`Pressed()` = 「按住态由松到按」**或**「引擎本帧的单次键 `Key1/Mouse1`」。前者让映射对任意后端成立，
+后者覆盖两种真实情况：一帧内按下又松开（`Key1` 有脉冲、`Key` 已归零）、以及滚轮——
+滚轮在 `GN_InputProc` 里是被**立即消费**的（`Mouse[GM_TOP]` 下一帧就清），
+只有 `Mouse1` 留着这一帧。迁移前 mmdViewer 读的正是 `Mouse1[GM_TOP]`，所以行为逐帧一致。
+
+**2. `Alpha()` 的兜底不是洁癖。**
+`accumulator / step` 在浮点误差下可能正好等于 1.0，拿去插值就是「用下一帧的状态插本帧」。
+实现在 `Update` 末尾再判一次 `[0,1)`，越界归零；用例 `gameClockAlphaMonotonicWithinCycle`
+在 500 帧里逐帧检查「只在跑了子步之后才允许回落」。
+
+**3. 掉帧不做螺旋追赶。**
+一次 10 s 的卡顿若按 60 Hz 补齐是 600 步，越追越慢。现在跑满 `maxSubSteps` 后把剩余整步
+`fmod` 掉，只留不足一步的余量（`gameClockMaxSubStepsClamp`）。
+
+### 迁移范围（行为不变）
+
+- mmdViewer：`AppRun` 的 19 个开关 + 相机 12 处 `Key/Mouse` 读取 → 动作编号；
+  移动/转视角/加速/滚轮/重置/`F` 直接复用 `LoadDefaultWASD()`（键位本来就一致）。
+- imoScene：`R` / 方向键 + `J L` / 滚轮 / 左+右拖动 / 中键平移全部走绑定表。
+- 两个示例的每帧 `dt` 改由 `cGAME_CLOCK` 给出（`timeScale` 默认 1，等价于原来的 `delta`）。
+
+验证：`make unit` 527/0、`make lint` 三条全过（含新的输入访问面检查）、
+`GN_HEADLESS_FRAMES=8 ./build/mmdViewer|imoScene` 均「无窗口运行结束: ok」。
+**没做到的**：示例按键的"逐项点测"仍是绑定表级（每个键 → 动作成立，4 例覆盖全表），
+真机手动点按与画面对比要等有 GPU + 模型的环境；P0 不改画面，这条不影响验收。
+
+### 下一步
+
+P1（骨架与回归基线）：`GN_Entity.{h,cpp}`、`tests/fixtures` 程序化骨架、`cRENDER_FRAME` 编排上移。
+P0 留下的接口正是 P1 要用的：`Alpha()` 接 `sPHYSICS_SNAPSHOT` 插值，`FixedSteps()` 接物理子步。
+
+## 2026-11-24 — A6 收尾：3D pass 作用域守卫 + 阴影多级提交上台
+
+### 上一轮我先说了句“暂不做 cRENDER_FRAME”，现在做了一半
+
+上轮的理由（“只是 4 行括号”）本身没错，但**看漏了一件事**：那 4 行括号背后有个
+状态机，而状态机是会失效的。
+
+`GN_VkBegin3DPass` / `End3DPass` 靠文件内的 `s_in3DPass` 维持：
+
+```cpp
+void GN_VkBegin3DPass(...) {
+    if(!GN_Vk.initialized || s_in3DPass) return;   // 已在 pass 内就静默返回
+    ...
+    s_in3DPass = true;
+}
+void GN_VkEnd3DPass() {
+    if(!GN_Vk.initialized || !s_in3DPass) return;
+    ...
+    s_in3DPass = false;
+    GN_VkCompositeToSwapchain();   // ← HDR → 交换链的合成
+}
+```
+
+**漏调 End3DPass 的后果不是“少画一点”**：
+1. `s_in3DPass` 永远为 true ⇒ 之后**所有** `Begin3DPass` 都被静默挡掉，画面永久冻结；
+2. `GN_VkCompositeToSwapchain` 不被调用 ⇒ HDR 从不合成，纯黑。
+
+而“在绘制循环里加个 early return”是非常自然的写法。两个都是静默黑屏级别、极难查。
+
+### 做了两件事
+
+**1. `sFRAME_3D_SCOPE`**（RAII 守卫）
+
+```cpp
+{
+    GNg::sFRAME_3D_SCOPE frame3D(&viewProjection, &eye, light->GetUBO(), sizeof(...));
+    if (!frame3D.Valid()) return;
+    // ... 任意绘制，中间可以随时 return ...
+}   // 析构：End3DPass（含 HDR 合成）+ Begin2DPass
+```
+
+配套新增 `GN_VkIsIn3DPass()`：`Begin3DPass` 是 void 且静默失败，守卫必须能回查是否真的进去了，
+否则会在析构时 End 一个从未开始的 pass。
+
+禁拷贝（拷贝会导致双重 End3DPass）。
+
+**2. `GN_VkDrawShadowCascades(caster, lightVPs, count)`**
+
+消除两个 demo 里逐字相同的循环：
+```cpp
+for (i < count) { ShadowPassBegin(vp[i], i); model.DrawShadow(); ShadowPassEnd(); }
+```
+签名只接受裸数组，不强制调用方保存 `sSHADOW_CASCADE_RESULT`——避免不必要的侵入。
+
+### 两个 demo 的改动
+
+| 文件 | 改动 |
+|------|------|
+| `mmdViewer.cpp` | 删掉 6 行 shadow 循环 → 1 行；3D pass 改用守卫 |
+| `imoSceneShadow.cpp` | `shadowDrawCaster` 从 7 行 → 3 行 |
+| `imoSceneMain.cpp` | 3D pass 改用守卫 |
+
+### 新增测试（`tests/unit/testFrameScope.cpp`，4 用例，491 → **495**）
+
+| 用例 | 守住什么 |
+|------|---------|
+| `frameScopeInvalidWithoutDevice` | 设备未就绪时 `Valid()` 必须为 false，不得谎报 |
+| `frameScopeLeavesCleanState` | 反复进出后不残留 `in3DPass` 状态 |
+| `frameScopeNullSafe` | 空指针不崩 |
+| `shadowCascadesEmptySafe` | `count=0` / 空数组安全返回 |
+
+### 门禁自测
+
+把守卫改成 `aActive = true`（谎报成功）：
+```
+FAIL frameScopeInvalidWithoutDevice
+FAIL frameScopeNullSafe
+495 cases, 2 failed
+```
+还原后 495/0。
+
+### 渲染行为未变（实测）
+
+| 工程 | 结果 |
+|------|------|
+| `headlessCheck` | PASS (0 failures) |
+| `cornellBox` 8 帧 | exit=0，光追 AS=ok |
+| `gpuCheck` | **109/109** |
+| `make mmdViewer` / `make imoScene` | 0 error |
+
+## 2026-11-24 — A7：文档数字自动化（彻底消除漂移）
+
+### 为什么做这一步
+
+这一路我自己发现过至少三处数字漂移：
+
+| 位置 | 写错的数字 | 实际 |
+|------|-----------|------|
+| `tests/gpu/README.md` | “99 条” | 109 |
+| `tests/README.md` | “463 单测” | 491 |
+| `vk3dForward.cpp` 注释 | “每个 3D pass 开始时同步” | 帧首 + 代际号 |
+
+人工维护必然漂移。所以我把关键数字改成**从实测生成**。
+
+### 做法
+
+1. **`tests/tools/gen_stats.sh`**（新增）：实测后写入/校验文档里的标记区。
+   ```
+   <!-- AUTO-STATS:BEGIN -->
+   …自动生成的表格…
+   <!-- AUTO-STATS:END -->
+   ```
+   * 单测用例数：静态统计 `TEST_CASE(` 宏（与实际运行数一致，不需跑）
+   * gpuCheck：实跑后解析 `pass=N fail=N skip=N`（断言在循环里，静态数不出来）
+   * src 规模、着色器数、单测文件数：直接扫描
+2. **`make stats`** 生成，**`make doc-check`** 校验（不符即退出码 1）。
+3. 接入三个文件：`README.md`、`tests/README.md`、`tests/gpu/README.md`。
+   同时修掉 `tests/README.md:44` 那处过时的「463 单测」。
+
+### 生成结果（实测）
+
+| 项 | 数值 |
+|----|------|
+| 单元测试用例 | **491**（58 个文件）|
+| gpuCheck 文件 | 17 |
+| gpuCheck 实跑 | `pass=109 fail=0 skip=0` |
+| 单测实跑 | `491 cases, 0 failed, 0 assertions failed` |
+| src 源文件 | 165 个 .cpp |
+| src 总行数 | 92,175 |
+| 编译产物着色器 | 47 个 .spv |
+
+### 门禁自测（两种漂移都能抓到）
+
+**手工篡改数字**：
+```
+[FAIL] README.md 的统计区已过时（跑 make stats 更新）
+make: *** [Makefile:334: doc-check] Error 1
+```
+
+**新增一个单测（不改文档）**：
+```
+[FAIL] tests/README.md 的统计区已过时
+[FAIL] tests/gpu/README.md 的统计区已过时
+```
+两次还原后均回到「一致」。
+
+### 踩到的坑（脚本自身）
+
+首次运行，实测列全部显示「运行失败」——因为脚本开了 `set -u`，而 `source gnvk-env.sh`
+引用了未定义变量，在 `set -u` 下直接终止（不是返回非零，所以 `|| true` 无效）。
+修法：source 前后临时 `set +u` / `set -u`。
+
+### 验收
+
+| 项 | 结果 |
+|----|------|
+| `make doc-check` | 3 个文件全部一致 |
+| 篡改数字 / 新增用例 | 均能报红并点名文件 |
+| 换行符一致性 | 待验 |
+
+## 2026-11-24 — A6：CSM 拟合策略上台（先测量，再决定改什么）
+
+### 先纠正 A6 的原计划
+
+文档里 A6 = “新增 `cRENDER_FRAME` 把 66 行编排抽出来”。实测后判断**不成立**：
+
+`GN_VkBegin3DPass → 应用自己画 → End3DPass → Begin2DPass` 只是 **4 行括号**，
+两个 demo 里的可变部分（画什么）差异很大：mmdViewer 要画云/地面/贴花/降水/gizmo/粒子框，
+imoScene 要画房间/blob shadow。套一层 `cRENDER_FRAME` 只增加间接层，不减少重复。
+
+**真正的重复在别处，而且是逐字级的**：两个 demo 各自实现了一份 CSM 拟合，
+其中 `farZ` 计算那 **22 行循环完全一样**（从变量名到运算符）：
+
+```cpp
+for (uint32_t corner = 0; corner < 8; ++corner) {
+    const GNg::sVEC3 point = {(corner & 1u) ? hi.x : lo.x, ...};
+    ...
+}
+float farZ = diagonal > farthestCorner + 0.5f ? diagonal : farthestCorner + 0.5f;
+```
+
+外加两处重复：承接区外扩/拍地面、级联数钳到引擎层数。
+
+### 实际做的两件事
+
+**1. 修一个分层违例**：`vkShadowCascade.{h,cpp}` 在 `_Vulkan/` 里，
+但它**不含任何 Vulkan 类型**（只 include `GN.h` / `GN_3Dmath.h` / `GN_Spatial.h`，纯 CPU 数学）。
+这迫使三个 demo 与单测去 include `_Vulkan/` 的头（L5 → L3 越级）。
+
+现改为 `src/graphics/GN_ShadowCascade.{h,cpp}`（L2）。
+
+**2. 抽出策略层**（新增 API）：
+
+```cpp
+float computeShadowFar(const sAABB&, const sVEC3 &cameraPos);  // 契约 §8 的 far 口径
+struct sSHADOW_FIT_DESC { ... };
+bool fitShadowCascades(const sSHADOW_FIT_DESC&, cLIGHT *light, sSHADOW_CASCADE_RESULT *out);
+```
+
+`fitShadowCascades` 把五步钳在一起：外扩/拍地 → farZ → 级联数钳制 → `buildShadowCascades`
+→ 写 `sLIGHT_UBO`。调用方只需拿结果去逐级提交 shadow pass。
+
+### 两个 demo 的缩减
+
+| 文件 | 改前 | 改后 |
+|------|------|------|
+| `mmdViewer.cpp` 的 `updateShadowCascades` | 69 行 | **22 行** |
+| `imoSceneShadow.cpp` 的 `shadowFit` | 75 行 | **35 行** |
+
+两者行为不变：mmdViewer 用 `aCatchMargin=0 / aClampToGround=false`（它的 `shadowSceneAABB()`
+已自己处理过），imoScene 用 `CATCHER_MARGIN=2.5 / aClampToGround=true`（地板在 y=0）。
+
+### 新增测试（`tests/unit/testShadowFit.cpp`，8 用例，483 → **491**）
+
+| 用例 | 守住什么 |
+|------|---------|
+| `shadowFarCoversCameraOutsideScene` | 相机在场景外时 far 必须容下最远角（否则阴影整片消失）|
+| `shadowFarUsesDiagonalWhenCameraInside` | 相机在盒内时对角占优 |
+| `shadowFarHasMinimum` | 极小模型兜底 ≥ 1 m |
+| `shadowFarInvalidBoxIsSafe` | 无效盒不产生 NaN |
+| `shadowFitClampsToEngineLayers` | 级联数钳到引擎层数 |
+| `shadowFitClampsBoxAboveGround` | 外扩 + 抬到地面以上 |
+| `shadowFitRejectsInvalidInput` | 非法输入返回 false、不写垃圾 |
+| `shadowFitAtLeastOneCascade` | 请求 0 级时至少给 1 级 |
+
+### 门禁自测（证明测试真能抓到老 bug）
+
+把 `computeShadowFar` 临时改回“只取对角”：
+```
+FAIL shadowFarCoversCameraOutsideScene
+491 cases, 1 failed, 2 assertions failed
+```
+还原后 491/0。
+
+### 验收
+
+| 项 | 结果 |
+|----|------|
+| `make unit` | **491 cases / 0 failed** |
+| `make ci` | pass=5 fail=0 |
+| `make lint` | 分层 0 越级 + 分组字段数 200 未变 |
+| `make mmdViewer` / `make imoScene` | 0 error |
+| 换行符一致性 | 全部与 HEAD 相同 |
+
+## 2026-11-24 — A5：GN_VkContext 按子系统分组（265 行 → 8 组，零调用点改动）
+
+### 目标与约束
+
+§3.6 说的「把 265 行的 god struct 按子系统切开」听起来要改 3155 处 `GN_Vk.xxx`。
+实测后找到零风险路径：**匿名 struct**。
+
+开工前先验证了 4 件事（全部为 0）：
+
+| 检查 | 结果 | 含义 |
+|------|------|------|
+| `offsetof(GN_Vk, ...)` | 0 处 | 没人依赖字段偏移 |
+| `memset/memcpy(&GN_Vk, ...)` | 0 处 | 没人当字节块用 |
+| `sizeof(GN_VkContext)` | 0 处 | 没人依赖总尺寸 |
+| 按值传 `GN_VkContext` | 0 处 | 无拷贝语义风险 |
+
+此外 212 处 `&GN_Vk.field` 都是取**单个字段**地址（合法）。→ 字段顺序可自由重排。
+
+### 做法
+
+用匿名 struct 把 200 个字段分成 8 组（字段名不变、集合不变）：
+
+| 组 | 字段数 | 内容 |
+|----|-------|------|
+| `sDeviceRes` | 7 | 实例/物理设备/逻辑设备/队列 |
+| `sSwapchainRes` | 16 | 交换链、离屏图、帧同步、逻辑尺寸 |
+| `sFrameRes` | 3 | 命令池、命令缓冲、描述符池 |
+| `s2DRes` | 22 | 2D render pass、四条批绘管线、动态顶点索引、默认白纹理 |
+| `sForwardRes` | 39 | MSAA/深度、3D 管线、PBR、阴影 CSM、3D 顶点缓冲 |
+| `sPostRes` | 12 | HDR 目标 + 合成管线 |
+| `sAtmosphereRes` | 33 | 天空盒、环境 6 面烘焙、预滤波、BRDF LUT、GI UBO |
+| `sDeferredRes` | 67 | G-Buffer、延迟光照、SSAO、SSGI、SH9 探针、调试视图 |
+
+**效果**：`GN_Vk.device` 照旧能写（零调用点改动），而「SSAO 需要哪些资源」从通读 265 行变成看 `sDeferredRes` 那一段。
+
+### 两个卡点（都是真实约束）
+
+**卡点 1：非平凡类型不能进匿名 struct**
+
+```
+error: member 'GN3d::cPIPELINE_CACHE aPipelineCache' with constructor
+       not allowed in anonymous aggregate
+```
+
+`cPIPELINE_CACHE` 有构造/析构/拷贝赋值，匿名 struct 要求聚合类型。
+解法：把它单独放在所有组之前，保持顶层。现在顶层只有这 1 个字段（有 lint 看着）。
+
+**卡点 2：字段顺序是交错的，不能“按注释分组直接切”**
+
+原结构里 `commandPool` 夹在 2D 字段中间。要保持真正的按子系统分组必须**重排**字段，
+而重排只有在前面的 4 项检查全为 0 时才安全（已验证）。
+
+### 过程中的一次事故
+
+首版脚本用单条正则解析字段，**静默丢掉了 10 个指针字段**（`VkImage *swapchainImages;` 等）。
+发现方式：字段总数 186 ≠ 原文 200；逐个 grep `commandBuffers` 确认只剩 0 处。
+
+修法：换成「先从行尾抽取名字列表，剩下的就是类型」的解析方式，并加两道硬校验：
+- 无法解析的行 → 打印并退出（不静默）
+- 字段总数 < 原文 95% → 退出
+
+### 新增守卫 `tests/lint/context_groups.sh`（已并入 `make lint`）
+
+防止日后有人图省事往顶层加字段，让分组退化成扁平表。检查四项：
+8 个命名分组、顶层仅 1 个非平凡成员、8 个匿名 struct 块、字段数 ≥ 200。
+
+**门禁自测**：临时往顶层插入 `VkBuffer rogueTopLevelBuffer;`，脚本立即报
+`[FAIL] 顶层有 2 个字段，预期 1` 并点名该行；还原后全部通过。
+
+### 验收
+
+| 项 | 结果 |
+|----|------|
+| `make` | 0 error |
+| `sizeof(GN_VkContext)` | **2008 字节（与改前完全一致）** |
+| `make unit` | 483 cases / 0 failed |
+| `make ci` | pass=5 fail=0，gpuCheck 109/109 |
+| `make lint` | 分层 0 越级 + 输出通道 + 分组四项全通过 |
+| 换行符一致性 | 全部与 HEAD 相同 |
+
+**收益**：改一个子系统不再需要读 265 行才能确认“有没有漏”。
+
+## 2026-11-24 — A4：GPU 资源释放契约统一（含一个真崩溃修复）
+
+### 先纠正文档原方案
+
+`ARCHITECTURE_UNIFICATION.md` §3.4 原计划引入 `iGPU_RES` 基类（带虚函数）作为统一释放契约。
+**这个方案是错的，没有采用**：
+
+`GNg::sIMAGE` 到处按值拷贝（`sIMAGE(const sIMAGE&)`、`operator=`、`P<sIMAGE>`），
+给它加 vptr 会：每个纹理多 8 字节、破坏 POD 语义、拷贝语义变微妙。
+**为一个命名问题引入虚函数基类，代价远大于收益。**
+
+### 真正的问题（两个）
+
+**问题 1：同名反义**
+
+| 调用 | 实际行为 |
+|------|---------|
+| `sMESH::Release()` | 释放 **CPU**（顶点/索引/LOD）|
+| `sIMAGE::Release()` | 释放 **GPU**（image/memory/view/sampler）|
+
+同一个方法名，在两个类型上做相反的事。
+
+**问题 2：设备销毁后调用 = 未定义行为（真 bug）**
+
+`sIMAGE::Release()` 直接对句柄调 `vkDestroyImageView(GN_Vk.device, ...)`，
+**没检查设备是否还活着**。而 `sIMAGE` 的析构函数第一件事就是 `Release()`——
+如果对象比设备活得长（静态/全局对象、`AppUnInit` 较晚释放的模型），
+就是拿销毁后的 device 句柄调 Vulkan。
+
+对比：`sMESH::ReleaseGPU()` 走的 `GN_VkRelease3DMesh()` **有** `if(!GN_Vk.initialized) return;` 保护。
+两套路径不一致。
+
+### 改动
+
+1. **新增 `GNg::GN_VkDeviceAlive()`**（`GN_Vk.h` + `vkDevice.cpp`）：
+   `GN_Vk.initialized && GN_Vk.device != VK_NULL_HANDLE`。所有释放 GPU 的入口都先问一句。
+2. **`sIMAGE::ReleaseGPU()` 成为规范名**，内部先判设备存活；不在则只清句柄。
+   `Release()` 保留为等价别名（56 处现有调用与析构函数不必改）。
+   顺带把之前漏掉的 `vkDescriptorSet` 也一并清空。
+3. **注释对齐**：`sMESH::Release()` / `sMESH::ReleaseGPU()` 的声明处写清“本类型的 Release 是 CPU，
+   sIMAGE 的 Release 是 GPU，新代码统一用 ReleaseGPU()”。
+
+未改一行实际释放逻辑（销毁顺序、环集作废时机都不变），只加了存活判定与命名统一。
+
+### 新增测试（`tests/unit/testResourceLifecycle.cpp`，6 用例，477 → **483**）
+
+| 用例 | 守住什么 |
+|------|---------|
+| `resImageReleaseWithoutDevice` | 设备不在时只清句柄、不调 Vulkan |
+| `resImageReleaseTwice` | 重复释放安全 |
+| `resImageReleaseAliasEquivalent` | `Release()` 与 `ReleaseGPU()` 等价 |
+| `resImageDestructorWithoutDevice` | 析构路径安全（最常见调用点）|
+| `resImageAssignReleasesOld` | `operator=` 会释放旧资源 |
+| `resMeshReleaseCpuAndGpuSeparate` | CPU/GPU 两条路径可分开、可重复 |
+
+### 门禁自测（证明测试真能抓到旧 bug）
+
+临时把守护条件改成 `if(false && !GN_VkDeviceAlive())` 重新构建：
+
+```
+ERROR: vkDestroyImageView: Invalid device [VUID-vkDestroyImageView-device-parameter]
+Aborted (core dumped)
+make: *** [Makefile:262: unit] Error 134
+```
+
+还原后 483/0。**这也验证了问题 2 是真实可触发的，不是理论风险。**
+
+### 验收
+
+| 项 | 结果 |
+|----|------|
+| `make unit` | **483 cases / 0 failed** |
+| 换行符一致性 | 全部与 HEAD 相同 |
+| `make ci` / `make lint` | 见下方运行记录 |
+
+## 2026-11-24 — A3：数学层归位（sVEC3 从 2D 头搬到 3D 头）
+
+### 问题
+
+`sVEC3`（3D 向量）定义在 `GN_2Dmath.h:978`，而 `GN_3Dmath.h` 开头写“依赖 sVEC2, sVEC3 基础定义”——
+**依赖方向是反的**：3D 数学模块依赖 2D 数学模块，而 2D 模块里装着 3D 类型。
+
+### 动手前先查了使用量（避免上一轮的错误）
+
+| 位置 | sVEC3 使用 |
+|------|-----------|
+| `GN_2Dmath.h` | 1 处（就是声明本身）|
+| `GN_2Dmath.cpp` | **0 处** |
+| `GN_Physics.h/.cpp` / `GN_Spatial.h/.cpp` / `GN_Space.h` | 大量（均直接 include `GN_3Dmath.h`）|
+| `core/GN_Format.h` | 2 处，**都在注释里** `/*GNg::sVEC3* */`（历史痕迹）|
+
+直接 include `GN_2Dmath.h` 的文件只有两个：`GN.h`（聚合器）与 `GN_3Dmath.h`。
+所以搬家安全——不会制造新的越级依赖。
+
+### 改动
+
+- 从 `GN_2Dmath.h` 删除 sVEC3（**4 行**）
+- 在 `GN_3Dmath.h` 的 `namespace GNg {` 后、`sVEC4` 前插入 sVEC3（带迁移说明）
+- 同步修正三处注释：`#include "GN_2Dmath.h" // 依赖 sVEC2…`、`3D 向量函数（sVEC3 见本文件开头）`
+
+总计 **+11 / −6 行**，两个文件。
+
+### 踩到的坑：CRLF 被静默转成 LF
+
+第一次用 `open(..., encoding='utf-8')` 读写 `GN_2Dmath.h`（CRLF 文件），
+Python 文本模式默认会做换行转换——**整个文件 1968 行全变成“已修改”**。
+
+发现后立即 `git checkout` 还原，改用二进制模式（`open(..., 'rb')` / `'wb'`）重做，
+这次 diff 只有 `4 deletions`。
+
+**为此新增一条时常检查**：改完文件后逐一对比每个改动文件的换行符与 HEAD 是否一致：
+
+```bash
+for f in $(git diff --name-only); do
+  now=$(grep -q $'\r' "$f" && echo CRLF || echo LF)
+  orig=$(git show HEAD:"$f" | grep -q $'\r' && echo CRLF || echo LF)
+  [ "$now" != "$orig" ] && echo "!! $f: HEAD=$orig now=$now"
+done
+```
+
+本次全仓校验结果：**无一处不一致**。
+
+### 验收
+
+| 项 | 结果 |
+|----|------|
+| `make` | 0 error |
+| `make unit` | 477 cases / 0 failed |
+| `make gpuCheck` | **109/109** |
+| `make lint` | 分层 0 越级（搬家未制造新依赖）、输出通道全通过 |
+| 换行符一致性 | 全部与 HEAD 相同 |
+| `GN_2Dmath.h` 里的 3D 类型 | **0**（原为 1）|
+
+## 2026-11-24 — A2：日志入口补齐（原计划缩水 90%）
+
+### 先纠正一个错误前提
+
+架构分析 §2.6 把日志/错误处理列成“五套并存”的断层，**基于错误统计**：
+- 把 `fprintf(` 里的 `printf(` 子串当成了裸 printf；实测 `src/` 里裸 printf **0 处**。
+- **未看实现就假设** `GN_Log` 写 stdout；它实际写 `RunLog.txt`
+  （`GN_Base.cpp` 里那个 vprintf 版被 `#ifndef _GN_FILE_H_` 屏蔽了）。
+
+实测后确认：CLI 输出从来没有被污染（`headlessCheck` / `gpuCheck` 的 stdout 只有
+`[PASS]`/`[FAIL]`/`DEVICE:`，`[GN]`/`[GN_Vk]` 诊断全在 stderr）。
+原本“统一 250 处”的 2 天工作量是**伪需求**，缩到 2 小时。
+
+### 实际做了三件事
+
+1. **新增 `GN_LogErr(fmt, ...)`**（`GN_File.h` / `GN_File.cpp`）：同时写 RunLog.txt 与 stderr。
+   解决的是“只写 RunLog 的话用户当场看不见”这个真缺口。长消息（>1KB）会动态分配缓冲，
+   不被截断。已用于 `VkCheck` 的 ERROR 输出与两条设备初始化 FATAL。
+2. **修一个真 bug（由新单测暴露）**：`GN_RunErrorFileName` 可以被调用方改
+   （头文件注释明说支持改日志名，服务器场景要带日期），但旧实现只检查 `run_filename`
+   是否为空，**改了文件名不会生效**，日志继续写旧文件。现在用目标名比对来触发重新解析。
+3. **`tests/lint/output.sh` + 并入 `make lint`**：守三条底线——
+   `src/` 不得出现裸 printf（现为 0）、sprintf 不得超存量基线（65 处）、`GN_LogErr` 必须存在。
+
+### 新增测试
+
+`tests/unit/testLog.cpp`（4 用例，单测 473 → **477**）：
+- `GN_Log` 只写文件不进 stdout
+- `GN_LogErr` 文件与 stderr 都有、stdout 没有
+- 3000 字节长消息两条通道都不被截断
+- `GN_RunErrorOutputOn=false` 时文件不产生
+
+### 验收
+
+| 项 | 结果 |
+|----|------|
+| `make unit` | **477 cases / 0 failed** |
+| `make lint` | 分层 0 越级、输出通道全通过 |
+| `make ci` | pass=5 fail=0，gpuCheck 109/109 |
+
+## 2026-11-24 — A1：测试钩子 + 分层 lint（架构统一的第 1 阶段）
+
+背景：见 `docs/ARCHITECTURE_UNIFICATION.md`。之前 17 个 gpuCheck 文件共约 300 处直读
+`GNg::GN_Vk.xxx`，任何对 `GN_VkContext` 的重排都会同时打断所有测试——这让后续
+“按子系统分组 265 行 god struct”（A5）变成高危操作。A1 先把测试解耦。
+
+### 测试钩子
+
+- 引擎侧新增 `sTEST_HOOKS` + `GN_VkGetTestHooks()` / `GN_VkTestPipeline(id)`
+  （`GN_Vk.h` + 新文件 `_Vulkan/vkTestHooks.cpp`，仅 100 行）。
+- 验收侧新增 `tests/gpu/gpuTestHooks.{h,cpp}`：`Dev() / PhysDev() / Queue() / CmdBuf() /
+  Extent() / SwapFormat() / SwapImage() / EngineReady() / Pipe(id) / Hooks()`。
+- **17 个 gpuCheck 文件机械迁移 217 处**（脚本化，规则按优先级排序，避免
+  `pipeline` 误伤 `pipeline3D` 这类前缀冲突）。
+- 结果：`tests/gpu` 里直读 `GN_Vk.` 字段 **0 处**（原约 300）。
+
+### 分层依赖 lint
+
+- 新增 `tests/lint/layers.sh` + `make lint`：按 include 路径判定 L0–L5 层级，
+  低层引用高层即判越级。
+- 两条**设计豁免**（写在脚本里）：`src/core/GN.h` 是单头聚合器；`external/` 是第三方。
+- 实测基线：白名单外越级 **0 处**，4 处已知（各写清原因）：
+  `GN_3Dmodel.{h,cpp} → GN_Vk.h`、`GN_3Dasset.cpp → cgltf.h`、
+  `GN_UiPopDlgIO.cpp → GN_EdPlugin.h`、`GN_RunRec.cpp → GN_FontFT.h`。
+- 默认只报告；A5 重构完成后改 `--strict` 进 `make ci`。
+
+### 门禁自测（证明钩子不是空壳）
+
+临时把 `sTEST_HOOKS::shadowImage` 注释掉重新构建，`make gpuCheck` 立即编译失败；
+还原后 109/109 全过。
+
+### 验收
+
+| 项 | 结果 |
+|----|------|
+| `make check` | 473 cases / 0 failed |
+| `make ci` | pass=5 fail=0，gpuCheck **109/109** |
+| `make lint` | 白名单外越级 0 |
+| `make crosscheck` | ok=**165**（+1：vkTestHooks.cpp） |
+
+## 2026-11-24 — 管线/光照审计，修复三处描述符集缺陷
+
+### 审计结论：绑定与光照接线无遗漏
+
+用 `spirv-dis` 提取每个 `.spv` 真实的 `DescriptorSet`/`Binding`，与 C++ 里
+`vkCreateDescriptorSetLayout` 的 `bindingCount` + `dslb[i].binding` 逐条对齐，
+26 个管线**着色器所需集合 ⊆ 布局声明集合**，无一缺失：
+
+| 管线 | 着色器需要 | 布局声明 |
+|------|-----------|---------|
+| 2D | 0,1 | 0,1 |
+| 3D forward | 0,1,2,3 | 0,1,2,3,4 |
+| PBR | 0..11 | 0..11 |
+| shadow | 0 | 0 |
+| composite | 1,2,3 | 1,2,3 |
+| skybox | 0,2,3 | 0,1,2,3 |
+| deferred | 0..25 | 0..25 |
+| gbuffer | 0,1,3 | 0,1,3 |
+| gbufferDebug | 0,1,2,3,4,9 | 0,1,2,3,4,9 |
+| material / skinned / skinnedSSBO | 0,1 | 0,1 |
+| ssao / ssaoBlur / ssgi / ssgiDenoise | 0..2 / 0..3 / 0..5 / 0..2 | 同 |
+| particle draw+compute / cloth comp | 0,1 | 0,1 |
+| decal / precipitation | 纯 push_constant | 空 |
+
+G-Buffer 的 set0 是 **0/1/3（缺 2）**：槽 2 在 `gn3d.frag` / `gn3d_pbr.frag` 里是 `LightUBO`，
+而 G-Buffer pass 只写几何/材质属性、不读光源，所以这个编号从未声明（Vulkan 允许非连续
+binding，驱动按声明的 bindingCount 分配，不因跳号多占空间）。该布局 HEAD 即如此，权威描述见
+`docs/MULTILAYER_RENDER_PIPELINE_PLAN.md:146`「槽 2 空」。
+
+光照系统四条路径的接线：
+
+| 路径 | 光源 | CSM 阴影 | IBL/GI | SSAO | SSGI | 探针 | 大气/雾 |
+|------|------|---------|--------|------|------|------|---------|
+| 前向 `gn3d.frag` | b2 | — | — | — | — | — | b3 |
+| PBR `gn3d_pbr.frag` | b2 | b4 + `shadowLightVP[4]` | 5/6/7/8/9 | — | — | — | 6/10/11 |
+| 延迟 `gn3d_deferred_light.frag` | b7 | b5 | 9/10/11 | 12 | 13 | 14+15..23 | 8/24/25 |
+| SSGI 直射 `gn3d_ssgi.frag` | b5 | —（v1 仅方向光） | 4 | — | — | — | — |
+
+`gn3d_skinned.frag`（固定 Lambert）、`gn3d_material.frag`（`baseColor × albedoTex` 预览）、
+`cloud_cube`/`decal`/`precipitation`（纯 push_constant）按设计不参与场景光照。
+
+### 缺陷 1/2：渲染通道内改写已绑定的描述符集（VUID-...-None-03047）
+
+PBR 路径早已改成「按纹理组合的环集 + 帧首同步」，但**另外两条还是旧写法**，在 draw 里
+直接改写本帧已绑定的规范集——命令缓冲会进入 invalid state，驱动丢弃其后所有 bind/draw：
+
+| 位置 | 被改写的集 |
+|------|-----------|
+| `GN_VkDraw3D`（前向 Blinn-Phong） | `descriptorSet3D` b1 |
+| `GN_VkDraw3D_GBuffer` | `gBufferDescriptorSet` b1/b3 |
+
+修法与 PBR 一致：各自新增环集（前向拷 5 个绑定；G-Buffer 只拷 binding 0 再直写 1/3——
+布局 0/1/3 非连续，不能一次 copy 0..3），帧首从规范集同步，绘制时只绑定。
+
+### 缺陷 3：环集缓存的三处寿命/效率问题
+
+- **随设备销毁悬垂**：`s_pbrTextureSets` 从未在 `GN_VkShutdown` 清空，描述符集随池释放后
+  缓存仍留旧句柄，下次 init 可能复用到相同地址 → 误命中并绑到已销毁的 image view。
+- **纹理解放后悬垂**：`sIMAGE::Release` 销毁 view 后环集里仍存着它。改为置「下帧帧首重置」
+  标记，帧首执行 `vkFreeDescriptorSets`（此时上一帧 fence 已等过）。
+- **每帧空转同步**：环集拷的是规范集的静态绑定，只在 init / 大气 LUT 接线 / GI 探针更新 /
+  resize 时变化。加规范集代际号（写规范集时自增），代际未变则整帧跳过。同时给环集加
+  32 条上限（池仅 1024 描述符，一套 PBR 环集吃 8 个采样器），到顶回退共享 set 而非无限增长。
+
+### 缺陷 4：没有回归门禁（所以上面几条能活这么久）
+
+新增 `src/graphics/_Vulkan/vkDescriptorGuard.cpp`：用宏把引擎内**全部** `vkUpdateDescriptorSets`
+路由到 `GuardedUpdateDescriptorSets`，统计「渲染通道活跃时改写规范集」的次数并记录首个站点。
+规范集 = 通道内会被绑定的那 8 个；环集不计（首次使用前写入、从未被绑定录制，合法）。
+
+gpuCheck 新增 `desc.noUpdateWhileBound`：要求违规数 `== 0` **且**总更新数 `> 0`
+（后者防止守卫没被走到、恒为 0 的空壳通过）。**门禁自测**：临时把旧写法注回
+`GN_VkDraw3D`，断言立即变红（`updates=387, 违规=10`，站点指向 `vk3dForward.cpp:347`）；
+还原后 `updates=369, 违规=0`。
+
+### 新增验收
+
+- **`tests/unit/testLight.cpp`**（10 用例）：`sLIGHT_UBO` 976 B 与逐字段 `offsetof`、
+  `cLIGHT` 增删改/溢出、CSM 级数夹紧与未用级清零、4 级 lightVP 互不覆盖。单测 463 → **473**。
+- **`tests/gpu/gpuCheckLight.cpp`**（7 条）：同一块法线 +Z 的白 quad，只改 `sLIGHT_UBO`
+  渲染多次做**相对**断言——方向光变亮、强度翻倍更亮、背光回到基线（证明 N·L 真在算）、
+  点光 d=1 亮而 d=32（衰减 1024×）回到基线、超 range 早退、纯环境光变亮。GPU 101 → **108**。
+
+### 验收
+
+| 项 | 结果 |
+|----|------|
+| `make check` | 473 cases / 0 failed |
+| `make ci` | pass=5 fail=0，gpuCheck **109/109** |
+| `make crosscheck` | `CROSS SUMMARY: ok=164 fail=0` |
+
+## 2026-11-24 — 跨平台：Vulkan 后端不再绑定 Linux
+
+背景：`GN_StartRunHeadless`（离屏/无窗口）只在 Vulkan 后端存在，而 Vulkan 后端原先只能
+在 Linux 上编；macOS / Windows 走的是 GLUT/OpenGL 老路径，跟无窗口能力无缘。
+
+- **区分「操作系统」与「图形后端」**：Makefile 新增 `BACKEND=vulkan|opengl`（缺省 `vulkan`），
+  `PLATFORM` 只管 OS。新增 `GN_USING_VULKAN_GLFW_WINDOWS` / `GN_USING_VULKAN_GLFW_MAC`
+  两个平台宏（`GN_SysDef.h`），分别映射到 `GT_USING_VULKAN` + `_WIN32_` / `_MAC_`。
+  窗口系统差异由 GLFW 吸收：`glfwGetRequiredInstanceExtensions` 在三个平台分别给出
+  `VK_KHR_xcb/wayland_surface`、`VK_KHR_win32_surface`、`VK_EXT_metal_surface`，引擎侧零分支。
+- **MoltenVK 两个必需项**（仅 `__APPLE__`）：实例层声明 `VK_KHR_portability_enumeration` +
+  `ENUMERATE_PORTABILITY_BIT`（不声明时 `vkEnumeratePhysicalDevices` 直接返回
+  `VK_ERROR_INCOMPATIBLE_DRIVER`，表现为「macOS 上没有任何 Vulkan 设备」）；设备层只要存在
+  `VK_KHR_portability_subset` 就启用（否则 `vkCreateDevice` 报 VUID-...-pProperties-04451）。
+  两处都是「存在才加」，真 Apple 原生驱动上不会误加。
+- **修 `mmdEncoding.cpp` 的 iconv 硬依赖**：原先无条件 `#include <iconv.h>`，Windows 没有该头。
+  改为按平台分路：Windows 用 `MultiByteToWideChar(932/943/20932)` + 现成的 UTF-16LE→UTF-8；
+  Linux/macOS 继续 iconv。两路输入输出语义一致（失败原样返回字节）。
+- **修 `GN_Media.cpp` 的 FFmpeg 硬依赖**：Makefile 一直在 pkg-config 找不到 FFmpeg 时不定义
+  `GN_HAS_FFMPEG`（即声明「可选」），但源码从未引用这个宏，`#include <libavformat/...>` 无条件编。
+  现在无 FFmpeg 时走完整空实现分支（`cVIDEO` 成员补齐，`InitToData` 返回 false）。
+- **新增 `make crosscheck`**（`tests/crosscompile/checkCross.sh`）：用 MinGW-w64 把 `src/` 全部
+  164 个源文件按 Windows 目标编成 `.o`（不链接：本机没有 Windows 版 glfw/vulkan/png 导入库）。
+  没有交叉工具链时退出码 2 = SKIP。
+
+验证：`make PLATFORM=windows BACKEND=vulkan` 下 163/163 个 `.o` 编译通过，只停在链接阶段
+（缺 Windows 导入库，预期）；`PLATFORM=windows BACKEND=opengl` 与 `PLATFORM=macos BACKEND=opengl`
+的宏仍指向旧 GLUT 路径（未破坏）。
+
+**未验证**：macOS 完全没跑过（无 Apple SDK / MoltenVK，无法交叉编译）；Windows 只验证到「能编」，
+未链接、未运行；Android 仍是 GLES 后端，无离屏能力。
+
+## 2026-11-24 — 离屏（无窗口）渲染
+
+`GN_VkInit(window = 0)` 不再要求 surface/swapchain，改为自建 `kHeadlessImageCount = 3` 张离屏图
+（`COLOR_ATTACHMENT | TRANSFER_SRC`，优先 `B8G8R8A8_SRGB`），挂到原有的
+`swapchainImages/Views/framebuffers` 上——render pass、2D/3D 管线、每帧命令缓冲、回读全部
+沿用窗口模式代码，**绘制路径里没有任何 `if(headless)`**。
+
+- **`swapFinalLayout`**：窗口模式 `PRESENT_SRC_KHR`，无窗口模式 `TRANSFER_SRC_OPTIMAL`；
+  替换了四处硬编码的 `PRESENT_SRC_KHR`（2D 主 pass、叠层 pass initial/final、3D 合成 pass）
+  与回读屏障，避免把离屏图写成交换链专属布局（校验层会报违规）。
+- **帧循环**：`GN_VkBeginFrame` 无窗口时按帧轮转图像（不调 `vkAcquireNextImageKHR`）；
+  `GN_VkEndFrame` 直接提交不 present（fence 同步）；`GN_VkResize` / `GN_VkShutdown`
+  按模式分别重建/释放离屏图与显存。
+- **API**：`GN_StartRunHeadless(w, h, frames, frame_proc)` + `GN_GrabFrame` /
+  `GN_GrabFrameFree`（`GN_Init.h`），平台层 `GT_InitAllAndRunHeadless`。
+- **通用开关 `GN_HEADLESS_FRAMES=N`**：`GT_AppArgsSet` 见到它就跳过 `glfwInit`，所有用现有
+  `GN_MAIN` / `GN_EXIT` 宏的程序**无需改入口**即可无窗口启动；示例尾部加一行
+  `if(GN_TryRunHeadlessFromEnv(w, h)) return;`。`mmdViewer` / `imoScene` / `cornellBox` /
+  `gpuCheck` 全部接上（`cornellBox` 保留 `CORNELL_HEADLESS=1` 兼容）。
+- **修脏写后释放**：`GF_FrameCycleEndProc` 会回调用户 `AppUnInit` 释放模型/AS/网格，而最后一帧
+  已提交、fence 未等。新增 `GN_VkWaitIdle()`，窗口主循环与无窗口路径都在它之前等一次
+  （现象：`GN_HEADLESS_FRAMES=8 cornellBox` 偶发 SIGSEGV）。
+- **修 `cull.debugLine`**（长期红灯）：测试把线段放在世界 `z=+0.5`，相机看向 `-z` 时
+  `z_ndc=-0.5` 落在 near 平面外被整条裁掉，中心像素只剩前向 pass 的 clear 色。改成 `z=-0.5`
+  后 **101/101 全过**。立方体用例一直能过，是因为它在 z 向横跨 0。
+- **验收设施**：`make headlessCheck`（4 象限色块 + alpha + 非全黑断言）、
+  `make smoke`（五个二进制各 8 帧，`gpuCheck` 走基线判据）、`make ci` = `check` + `smoke`。
+
+验证：`GN_HEADLESS=1 ./build/gpuCheck` 与窗口模式结果完全一致；
+`CORNELL_HEADLESS=1 ./build/cornellBox` 的引擎画面与 `CORNELL_CAPTURE_ENGINE=1` 的交换链截图
+**逐像素相同**（1280×800，3,072,000 个通道值全等）。全程 `unset DISPLAY` + lavapipe。
+
+
 ## 2026-11-21 — imoScene 用贴地软阴影替代 CSM（真机崩溃后）
 
 - 真机复测确认：默认构建（无 CSM）稳定；`IMO_SCENE_SHADOWS=1` 首帧仍崩（`amdgpu [gfxhub] page fault`）。

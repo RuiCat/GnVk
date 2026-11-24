@@ -26,12 +26,19 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 #include "GN_Media.h"
 #ifdef _GN_MEDIA_H_
 
-#ifdef _WIN32_WCE
+#if !defined(GN_HAS_FFMPEG) || defined(_WIN32_WCE)
+// 没有 FFmpeg（或 WinCE）：给 cVIDEO 一组空实现，保持 API 可用但不播放视频。
+// GN_HAS_FFMPEG 由构建系统检测 pkg-config 后定义（见 Makefile）；未定义即代表不编媒体支持，
+// 这样没有 FFmpeg 开发包的机器（包括 Windows 默认配置）也能编完整引擎。
 GNm::cVIDEO::cVIDEO() : z__attrb(0) {}
 GNm::cVIDEO::~cVIDEO() {}
 void GNm::cVIDEO::Release() {}
-bool GNm::cVIDEO::InitToData(const char *filename, int loop) {
-    return false;
+bool GNm::cVIDEO::InitToData(const char *filename, int loop, bool sync_time, bool audio) {
+    (void)filename;
+    (void)loop;
+    (void)sync_time;
+    (void)audio;
+    return false; // 没有媒体支持：始终初始化失败，调用方按“无视频”处理
 }
 void GNm::cVIDEO::Stop() {}
 void GNm::cVIDEO::Play() {}
@@ -58,7 +65,38 @@ unsigned int GNm::cVIDEO::UpdataToImage(unsigned int updatatime) {
     return 0;
 }
 unsigned int GNm::cVIDEO::UpdataPlay(unsigned int updatatime, int x, int y, int w, int h, unsigned int color, unsigned short blendmode) {
+    (void)updatatime;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)color;
+    (void)blendmode;
     return 0;
+}
+void GNm::cVIDEO::SetVolume(float vol) {
+    (void)vol;
+}
+bool GNm::cVIDEO::IsPause() {
+    return false;
+}
+int GNm::cVIDEO::GetLoopNum() {
+    return 0;
+}
+float GNm::cVIDEO::GetVolume() {
+    return 0.0f;
+}
+unsigned int GNm::cVIDEO::GetFreq() {
+    return 0;
+}
+unsigned short GNm::cVIDEO::GetBit() {
+    return 0;
+}
+unsigned short GNm::cVIDEO::GetChannel() {
+    return 0;
+}
+char *GNm::cVIDEO::GetFileName() {
+    return (char *)"";
 }
 
 #else /*****************************************************************************************************************************************/
@@ -1000,6 +1038,9 @@ unsigned int GT_cVIDEO::UpdataPlay(unsigned int updatatime, int x, int y, int w,
     return ret_time;
 }
 #endif //_WIN32_WCE
+#if defined(GN_HAS_FFMPEG) || defined(_WIN32_WCE)
+// 包装层：cVIDEO 转发到 GT_cVIDEO。只在真有 FFmpeg 实现（或 WinCE 老路径）时编，
+// 否则 GT_cVIDEO 不存在（上面走的是空实现分支）。
 /****************************************************************************** cVIDEO ****************************************************************************/
 GNm_API char *const GNm_GetVersion() {
     static const char GNm_Version[] = GNm_VERSION;
@@ -1083,4 +1124,5 @@ unsigned short GNm::cVIDEO::GetChannel() {
 char *GNm::cVIDEO::GetFileName() {
     return ((GT_cVIDEO *)z__attrb)->GetFileName();
 }
+#endif // GN_HAS_FFMPEG / _WIN32_WCE（包装层）
 #endif // _GN_MEDIA_H_

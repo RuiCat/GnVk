@@ -10,6 +10,39 @@
 
 namespace GN3d {
 
+// ═══════════════════════════════════════════════════════════
+//  sANIM_PARAMS
+// ═══════════════════════════════════════════════════════════
+sANIM_PARAMS::sANIM_PARAMS() { Reset(); }
+
+void sANIM_PARAMS::Reset() {
+    for (uint16_t i = 0; i < ANIM_PARAM_MAX; ++i) {
+        aValue[i] = 0.0f;
+        aTrigger[i] = false;
+    }
+}
+
+void sANIM_PARAMS::Set(eANIM_PARAM id, float value) {
+    if (id >= ANIM_PARAM_MAX) return;
+    aValue[id] = std::isfinite(value) ? value : 0.0f;
+}
+
+float sANIM_PARAMS::Get(eANIM_PARAM id) const {
+    if (id >= ANIM_PARAM_MAX) return 0.0f;
+    return aValue[id];
+}
+
+void sANIM_PARAMS::Trigger(eANIM_PARAM id) {
+    if (id >= ANIM_PARAM_MAX) return;
+    aTrigger[id] = true;
+}
+
+bool sANIM_PARAMS::Triggered(eANIM_PARAM id) const {
+    if (id >= ANIM_PARAM_MAX) return false;
+    return aTrigger[id];
+}
+
+
 namespace {
 
 GNg::sVEC3 makeVec3(float x, float y, float z) {

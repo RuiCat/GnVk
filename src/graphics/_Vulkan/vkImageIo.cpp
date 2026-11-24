@@ -274,7 +274,7 @@ uint8_t *GN_VkReadBack(int x, int y, int w, int h, int *size_out) {
     }
     {
         VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-        b.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        b.oldLayout = GN_Vk.swapFinalLayout; // 窗口=PRESENT_SRC；无窗口=TRANSFER_SRC
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -299,7 +299,7 @@ uint8_t *GN_VkReadBack(int x, int y, int w, int h, int *size_out) {
     {
         VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        b.newLayout = GN_Vk.swapFinalLayout; // 回读后恢复同一个稳定布局
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.image = srcImg;

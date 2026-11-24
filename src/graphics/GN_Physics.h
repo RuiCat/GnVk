@@ -194,6 +194,21 @@ struct sDEBUG_DRAW {
 };
 
 // ═══════════════════════════════════════════════════════════
+//  纯 CPU 形状查询（P5：角色控制器用）
+// ═══════════════════════════════════════════════════════════
+// 为什么单独暴露：`cPHYSICS_WORLD` 的三角网接触只在 Step 内部产生，而角色控制器不参与
+// 刚体求解（它只消费静态几何），需要"随时问一句"的查询。这两个函数就是内部窄相的
+// 公开入口，与 `AddStaticMesh` 的接触用的是同一份实现——不存在两套三角形数学。
+//
+// 语义（与内部一致）：out.aNormal 由三角形指向球心/线段（"A=三角网 → B=形状"），
+// 命中时 out.aPoints[0].aPenetration >= 0。
+bool querySphereTriangle(const GNg::sVEC3 &center, float radius, const GNg::sVEC3 &a,
+                         const GNg::sVEC3 &b, const GNg::sVEC3 &c, sCONTACT_MANIFOLD &out);
+bool queryCapsuleTriangle(const GNg::sVEC3 &e0, const GNg::sVEC3 &e1, float radius,
+                          const GNg::sVEC3 &a, const GNg::sVEC3 &b, const GNg::sVEC3 &c,
+                          sCONTACT_MANIFOLD &out);
+
+// ═══════════════════════════════════════════════════════════
 //  cPHYSICS_WORLD — 物理世界
 // ═══════════════════════════════════════════════════════════
 class cPHYSICS_WORLD {
@@ -220,6 +235,24 @@ class cPHYSICS_WORLD {
 
     uint32_t GetContactCount() const { return aLastContactCount; } // 诊断
     uint32_t GetAwakeCount() const;
+
+    // ── 上一步的接触明细（P4：给控制器翻译成"实体对"事件）──────────────
+    // 每次子步重算；多次子步时只保留最后一个子步的流形（与 aLastContactCount 同口径）。
+    // 三角网接触的 aBodyLo = INVALID_HANDLE（静态 A 端不入 aBodies，没有句柄）。
+    struct sCONTACT_INFO {
+        uint32_t aBodyLo; // 小句柄（三角网接触为 INVALID_HANDLE）
+        uint32_t aBodyHi; // 大句柄
+        GNg::sVEC3 aNormal; // 单位法线，A → B
+        GNg::sVEC3 aPoint; // 首个接触点世界坐标
+        float aPenetration; // 穿透深度（>=0）
+        uint32_t aPointCount; // 1..4
+    };
+    // index 越界/无接触返回 false（out 不修改）。
+    bool GetContactInfo(uint32_t index, sCONTACT_INFO &out) const;
+
+    // 上一次 Step 实际跑了几个固定子步（0 = 累计不足一步；上限 aMaxSubSteps）。
+    // 用途：调用的插值要知道"这一次推进跨了多久"，否则多子步帧的插值会偏快。
+    uint32_t GetLastSubStepCount() const { return aLastSubSteps; }
 
     // 唤醒指定刚体（无效句柄无操作）。调用方直接改速度后应调用它。
     void WakeBody(uint32_t handle);
@@ -309,6 +342,7 @@ class cPHYSICS_WORLD {
     uint32_t aMaxSubSteps;
     uint32_t aBodyCount;
     uint32_t aLastContactCount;
+    uint32_t aLastSubSteps; // 上次 Step 实际跑的子步数（P4 插值用）
 };
 
 } // namespace GN3d

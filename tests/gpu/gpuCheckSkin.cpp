@@ -3,6 +3,7 @@
 // 像素判定方法：用 identity viewProj/model 绘制一张 x 边界已知的四边形，蒙皮只做 x 平移；
 // 回读中心行、找"首个被绘制像素"换算成 NDC x，与 CPU skinVertices 的参考左边界比较（±0.03）。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 #include "GN_3DSkin.h"
 
@@ -80,8 +81,8 @@ GNg::sMAT44 makeTranslation(float x, float y, float z) {
 
 // 回读当前 swapchain 的中心行，返回首个"被蒙皮颜色覆盖"像素的 NDC x；没找到返回 false。
 bool findDrawnLeftEdge(float *outNdcX) {
-    const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
-    const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
+    const uint32_t width = Extent().width;
+    const uint32_t height = Extent().height;
     std::vector<uint8_t> pixels;
     if(!ReadSwapchain(0, 0, (int)width, (int)height, pixels)) return false;
 
@@ -109,7 +110,7 @@ bool renderAndMeasure(const sSKIN_QUAD &quad, const GNg::sMAT44 *palette, uint32
                                                    paletteCount, &model, 0.0f, 1.0f, 0.0f);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     if(!submitted) return false;
     return findDrawnLeftEdge(outNdcX);
 }

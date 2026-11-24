@@ -28,11 +28,13 @@ VK_ICD_FILENAMES="$PWD/.local/probes/lvp_icd.json" make gpuCheck
 
 软件预验（llvmpipe）只证明验收程序可运行、断言可判定；**不能替代真实 GPU 验收**。
 
-## 检查项（2026-10-31 实测 99 条，全 PASS）
+## 检查项
+
+> 条数以 `make doc-check` / 本文件末尾的自动统计为准（原先手写「109 条」，已多次漂移）。
 
 | 组 | 检查 | 判据 |
 |---|---|---|
-| 缓存 | `cache.entries` | 管线缓存 ≥11 条（P1b 11 + P1c/P2/P8 新增），且无命中 |
+| 缓存 | `cache.entries` | 管线缓存 ≥11 条（实测 35），且无命中 |
 | 创建 | `pipe.2d.normal/bright/multiply/null` | 4 个 2D 混合管线非空 |
 | 创建 | `pipe.3d.forward/pbr/shadow` | 前向/PBR/阴影管线非空 |
 | 创建 | `pipe.composite/skybox/gbuffer/deferredLight` | 合成/天空盒/G-Buffer/延迟光照管线非空 |
@@ -91,6 +93,10 @@ VK_ICD_FILENAMES="$PWD/.local/probes/lvp_icd.json" make gpuCheck
 | P11-S6b | `decal.empty` | `aCount=0` / `aItems=nullptr` 各跑一帧均返回 false |
 | P11-S6b | `decal.draw` | 64 条贴花（水渍/溅射环混合）在 3D pass 内提交成功 |
 | P11-S6b | `decal.pixels` | 俯视相机下原点 2 m 红色水渍使中心像素转红（r > 0.4） |
+| 光照 | `light.baseline/sun/intensity/backlit` | 同一块法线 +Z 白 quad 只改 `sLIGHT_UBO`：方向光变亮、强度翻倍更亮、背光（N·L=0）回落到 IBL 基线 |
+| 光照 | `light.pointAttenuation/pointRange` | 点光 d=1 明显亮而 d=32（衰减 1024×）回到基线；超出 `attenuation.w` 早退 |
+| 光照 | `light.ambient` | 只给 `ambientLight`（无光源）时比基线亮（证明 ambient 通道已接） |
+| 纪律 | `desc.noUpdateWhileBound` | 渲染通道内改写已绑定规范集的次数 == 0，且总更新数 > 0（守卫确实被走到） |
 | 关闭 | `gpu.shutdown` | `GN_VkShutdown` 后 device 已释放且管线缓存为空 |
 
 ## swapchain 格式（回读口径）
@@ -151,3 +157,20 @@ VK_ICD_FILENAMES="$PWD/.local/probes/lvp_icd.json" make gpuCheck
 - 历史：P1b 首跑 20/31 → 二跑 21/31 → 自建 swapchain 回读后 31/31；随后新增 23 条到 54/54，
   P9 粒子 7 条到 61/61，P9 剩余 12 条到 73/73，P10 4 条到 77/77，P11-S3 3 条到 80/80，
   P11-S2b/S5 8 条到 88/88，降水透视/覆盖几何 2 条到 90/90，贴花 4 条到 94/94。
+
+## 实测统计（自动生成）
+
+<!-- AUTO-STATS:BEGIN -->
+<!-- 本段由 tests/tools/gen_stats.sh 生成，不要手改；改数字请跑 make stats -->
+
+| 项 | 数值 |
+|----|------|
+| 单元测试用例 | **599**（67 个文件）|
+| gpuCheck 文件 | 18 |
+| gpuCheck 实跑 | `pass=116 fail=0 skip=0` |
+| 单测实跑 | `599 cases, 0 failed, 0 assertions failed` |
+| src 源文件 | 174 个 .cpp |
+| src 总行数 | 95966 |
+| 编译产物着色器 | 47 个 .spv |
+
+<!-- AUTO-STATS:END -->

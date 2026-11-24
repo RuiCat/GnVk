@@ -23,5 +23,8 @@ bool requestNormalCapture(const char *path);
 bool finishPendingCapture();
 bool hasPendingCapture();
 
+// 无窗口（GN_StartRunHeadless）模式：把 GN_GrabFrame 得到的 RGBA8 直接写成 PNG。
+bool writeRgbaPngFile(const char *path, const unsigned char *rgba, int width, int height);
+
 } // namespace Cornell
 #endif // CORNELL_CAPTURE_H

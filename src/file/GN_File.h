@@ -225,6 +225,12 @@ GN_API void GN_ErrorInfoClear(); //清除记录到的错误信息
 //向运行日志输出信息 即记录到 RunLog.txt 里 (输出格式, 参数队列 ) !用法跟<printf()>差不多
 GN_API void GN_Log(const char *fmt, ...);
 
+//向运行日志与 stderr 同时输出信息（格式, 参数队列）。
+//与 GN_Log 的区别：GN_Log 只写 RunLog.txt，用户当场看不见；本函数两边都写。
+//用在“必须让人立刻知道、但事后也要能查”的场合（管线创建失败、设备初始化失败、
+//着色器缺失等）。纯诊断可用 fprintf(stderr)，纯记录用 GN_Log。
+GN_API void GN_LogErr(const char *fmt, ...);
+
 extern GN_API bool GN_RunErrorOutputOn; // GN_Log 时是否开启错误信息输出 默认为:true
 extern GN_API char *GN_RunErrorFileName; //运行日志记录文件名 默认为:"RunLog.txt" 你可以把该指针指向另一个名 来更变日志记录文件名 如果作为服务器开发时 一般都把该名更变一下加上一个日期时间 以保留每次运行结果待管理查询 而且又可以防止引擎检测到相同的文件而弹出错误修复窗口卡住服务程序运行
 

@@ -745,5 +745,26 @@ GN_CALL void AppRun(unsigned int nTime) {
 GN_MAIN;
 GN_InitLoadCallBackFunc(AppInit, AppUnInit);
 GN_InitLoopCallBackFunc(AppDisplay2D, AppDisplay3D, AppRun);
-GN_StartRun("Cornell Box (GnVk)", 1280, 800, 0, false, true, true, 0, 0, 0, 0);
+// CORNELL_HEADLESS=1（或 GN_HEADLESS_FRAMES=N）：无窗口（离屏）运行——不建窗口/surface/交换链，
+// 也不需要 X11/Wayland。第 30 帧用 GN_GrabFrame 取像素写 PNG，供无显示环境做画面回归。
+const int envHeadlessFrames = GN_HeadlessFramesRequested();
+const char *headlessEnv = std::getenv("CORNELL_HEADLESS");
+const bool cornellHeadless = envHeadlessFrames > 0 || (headlessEnv && headlessEnv[0] == '1');
+if (cornellHeadless) {
+    const int frames = envHeadlessFrames > 0 ? envHeadlessFrames : 34;
+    GN_StartRunHeadless(1280, 800, frames, [](int index) {
+        if (index != 29) return; // 与 CORNELL_CAPTURE_ENGINE 的第 30 帧对齐
+        int w = 0, h = 0, size = 0;
+        unsigned char *rgba = GN_GrabFrame(&w, &h, &size);
+        if (!rgba) {
+            std::fprintf(stderr, "[cornellBox] 无窗口抓帧失败\n");
+            return;
+        }
+        Cornell::ensureCaptureDir();
+        Cornell::writeRgbaPngFile(".local/cornellbox/headless-engine.png", rgba, w, h);
+        GN_GrabFrameFree(rgba);
+    });
+} else {
+    GN_StartRun("Cornell Box (GnVk)", 1280, 800, 0, false, true, true, 0, 0, 0, 0);
+}
 GN_EXIT;

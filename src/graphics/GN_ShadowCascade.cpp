@@ -1,8 +1,9 @@
-// src/graphics/_Vulkan/vkShadowCascade.cpp — L3c CSM（CPU）实现：
+// src/graphics/GN_ShadowCascade.cpp — L3c CSM（CPU）实现：
 // 对数/均匀混合分割 → 相机视锥角点 → 与场景 AABB 求交 → 光源空间正交拟合 → texel snapping。
 // 纯 CPU，不碰 Vulkan 资源；输出契约见 docs/L4_L3_CONTRACT.md §8。
 #include <GN.h> // 仓库惯例：先建 GN_API / 模块宏，再包含本项目图形头
-#include "vkShadowCascade.h"
+#include "GN_ShadowCascade.h"
+#include "GN_3Dlight.h" // cLIGHT（fitShadowCascades 写 sLIGHT_UBO）
 
 #include <cmath>
 #include <cstring>
@@ -303,6 +304,139 @@ bool buildShadowCascades(const sSHADOW_CASCADE_DESC &desc, sSHADOW_CASCADE_RESUL
     result.aShadowMapSize = shadowMapSize;
     *out = result;
     return true;
+}
+
+float computeShadowFar(const sAABB &sceneBox, const GNg::sVEC3 &cameraPos) {
+    if(!sceneBox.IsValid()) return 1.0f;
+    const GNg::sVEC3 extent = sceneBox.Extent();
+    const float diagonal =
+        2.0f * std::sqrt(extent.x * extent.x + extent.y * extent.y + extent.z * extent.z);
+    float farthestCorner = 0.0f;
+    for(uint32_t corner = 0; corner < 8; ++corner) {
+        const GNg::sVEC3 point = {(corner & 1u) ? sceneBox.aMax.x : sceneBox.aMin.x,
+                                  (corner & 2u) ? sceneBox.aMax.y : sceneBox.aMin.y,
+                                  (corner & 4u) ? sceneBox.aMax.z : sceneBox.aMin.z};
+        const float dx = point.x - cameraPos.x;
+        const float dy = point.y - cameraPos.y;
+        const float dz = point.z - cameraPos.z;
+        const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if(distance > farthestCorner) farthestCorner = distance;
+    }
+    float farZ = diagonal > farthestCorner + 0.5f ? diagonal : farthestCorner + 0.5f;
+    if(!(farZ > 1.0f)) farZ = 1.0f; // 极小模型兜底：远处云层/地面不参与阴影拟合
+    return farZ;
+}
+
+sSHADOW_FIT_DESC::sSHADOW_FIT_DESC()
+    : aCameraView(true), aFovYRad(1.0471975511965976f), aAspect(1.0f),
+      aCatchMargin(0.0f), aClampToGround(false), aCascadeCount(SHADOW_CASCADE_MAX),
+      aShadowMapSize(2048u), aSplitLambda(0.5f), aTexelSnapping(true),
+      aEngineCascadeLayers(SHADOW_CASCADE_MAX) {
+    aCameraPos = GNg::sVEC3{0.0f, 0.0f, 0.0f};
+    aLightDirection = GNg::sVEC3{0.0f, -1.0f, 0.0f};
+}
+
+bool fitShadowCascades(const sSHADOW_FIT_DESC &desc, cLIGHT *light,
+                       sSHADOW_CASCADE_RESULT *out) {
+    if(out == nullptr) return false;
+    if(!desc.aCasterBox.IsValid()) return false;
+    if(!(desc.aAspect > 0.0f) || !std::isfinite(desc.aAspect)) return false;
+    if(!(desc.aFovYRad > 0.0f) || !std::isfinite(desc.aFovYRad)) return false;
+
+    // 1) 拟合盒：外扩 + 可选抬到地面以上
+    sAABB sceneBox = desc.aCasterBox;
+    if(desc.aCatchMargin > 0.0f) sceneBox.Expand(desc.aCatchMargin);
+    if(desc.aClampToGround && sceneBox.aMin.y < 0.0f) sceneBox.aMin.y = 0.0f;
+    if(!sceneBox.IsValid()) return false;
+
+    // 2) far 口径（契约 §8）
+    const float farZ = computeShadowFar(sceneBox, desc.aCameraPos);
+
+    // 3) 级联数钳到引擎实际分配的层数
+    uint32_t cascadeCount = desc.aCascadeCount;
+    const uint32_t layerCount = desc.aEngineCascadeLayers;
+    if(cascadeCount > layerCount) cascadeCount = layerCount;
+    if(cascadeCount < 1u) cascadeCount = 1u;
+
+    sSHADOW_CASCADE_DESC cascadeDesc;
+    cascadeDesc.aCameraView = desc.aCameraView;
+    cascadeDesc.aFovYRad = desc.aFovYRad;
+    cascadeDesc.aAspect = desc.aAspect;
+    cascadeDesc.aNear = 0.1f; // 契约 §8 固定近平面
+    cascadeDesc.aFar = farZ;
+    cascadeDesc.aLightDirection = desc.aLightDirection;
+    cascadeDesc.aSceneAABB = sceneBox;
+    cascadeDesc.aCascadeCount = cascadeCount;
+    cascadeDesc.aShadowMapSize = desc.aShadowMapSize;
+    cascadeDesc.aSplitLambda = desc.aSplitLambda;
+    cascadeDesc.aTexelSnapping = desc.aTexelSnapping;
+
+    sSHADOW_CASCADE_RESULT result;
+    if(!buildShadowCascades(cascadeDesc, &result)) return false;
+
+    // 4) 写进 sLIGHT_UBO（着色器选级用）
+    if(light != nullptr) {
+        for(uint32_t i = 0; i < result.aCount; ++i) {
+            light->SetShadowLightVP(result.aLightViewProj[i], i);
+        }
+        light->SetShadowMapSize(static_cast<float>(result.aShadowMapSize));
+        light->SetShadowCascades(result.aCount, result.aSplits, result.aTexelWorld);
+    }
+
+    *out = result;
+    return true;
+}
+
+sSHADOW_STATE::sSHADOW_STATE() { Clear(); }
+
+void sSHADOW_STATE::Clear() {
+    for(uint32_t i = 0; i < SHADOW_CASCADE_MAX; ++i) {
+        GNg::Mat44Identity(&aLightViewProj[i]);
+        aSplits[i] = 0.0f;
+        aTexelWorld[i] = 0.0f;
+    }
+    aCount = 0;
+    aMapSize = 0;
+    aFar = 0.0f;
+    aValid = false;
+}
+
+sAABB expandShadowCasterBox(const sAABB &modelBox, float margin, float groundY) {
+    sAABB box = modelBox;
+    if(!box.IsValid()) return box;
+    if(margin > 0.0f) {
+        box.aMin.x -= margin;
+        box.aMax.x += margin;
+        box.aMin.z -= margin;
+        box.aMax.z += margin;
+    }
+    // 只抬不压：groundY 低于下沿时（模型悬空）保持原下沿，避免把悬空模型拉进地面盒。
+    if(box.aMin.y < groundY) box.aMin.y = groundY;
+    return box;
+}
+
+bool fitShadowState(const sSHADOW_FIT_DESC &desc, cLIGHT *light, sSHADOW_STATE *out) {
+    if(out == nullptr) return false;
+    out->Clear();
+
+    sSHADOW_CASCADE_RESULT result;
+    if(!fitShadowCascades(desc, light, &result)) return false;
+
+    // far 用与拟合完全相同的盒子算（契约 §8 口径），保证叠层显示的数字与真实拟合一致。
+    sAABB box = desc.aCasterBox;
+    if(desc.aCatchMargin > 0.0f) box.Expand(desc.aCatchMargin);
+    if(desc.aClampToGround && box.aMin.y < 0.0f) box.aMin.y = 0.0f;
+
+    for(uint32_t i = 0; i < SHADOW_CASCADE_MAX; ++i) {
+        out->aLightViewProj[i] = result.aLightViewProj[i];
+        out->aSplits[i] = result.aSplits[i];
+        out->aTexelWorld[i] = result.aTexelWorld[i];
+    }
+    out->aCount = result.aCount;
+    out->aMapSize = result.aShadowMapSize;
+    out->aFar = computeShadowFar(box, desc.aCameraPos);
+    out->aValid = (result.aCount > 0);
+    return out->aValid;
 }
 
 } // namespace GN3d

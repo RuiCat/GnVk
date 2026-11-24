@@ -7,3 +7,7 @@ RunLog.txt
 .agent-memory/
 docs/papers/pdf
 tests/うさうさ
+# headlessCheck 默认输出（tests/headless/）
+headless.png
+# 交叉编译检查的中间产物
+build/cross-*

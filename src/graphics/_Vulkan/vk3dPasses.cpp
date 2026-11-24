@@ -411,6 +411,109 @@ void GN_VkSSGIPass() {
 // ═══════════════════════════════════════════════════════════
 //  G-Buffer 绘制 (复用 PBR push constant, 写入 G-Buffer MRT)
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+//  G-Buffer 纹理环集
+//  与 vk3dForward.cpp 的 PBR 环集同一理由：gBufferDescriptorSet 在本帧命令缓冲里已绑定，
+//  再改写就会触发 VUID-vkUpdateDescriptorSets-None-03047（命令缓冲 invalid，后续 draw 被丢弃）。
+//  改为每个 (albedo, normal) 组合一个私有 set，帧首从规范集同步。
+//  注：G-Buffer 布局是 0/1/3（binding 2 不存在），不能一次 copy 0..3，需分开拷。
+// ═══════════════════════════════════════════════════════
+namespace {
+
+struct sGBUFFER_TEXTURE_SET {
+    VkImageView aAlbedo;
+    VkSampler aAlbedoSampler;
+    VkImageView aNormal;
+    VkSampler aNormalSampler;
+    VkDescriptorSet aSet;
+};
+
+std::vector<sGBUFFER_TEXTURE_SET> s_gbufferTextureSets;
+
+void syncGBufferTextureSet(const sGBUFFER_TEXTURE_SET &entry) {
+    // 只拷 binding 0（SceneUBO）。binding 1/3 在本函数末尾直接写成本环集的纹理，
+    // 没必要先从规范集拷过来再覆盖。binding 2 在 G-Buffer 布局里**不存在**
+    // （槽位 2 是光照 UBO，G-Buffer pass 不读光源），所以不能一次 copy 0..3。
+    VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
+    copy.srcSet = GN_Vk.gBufferDescriptorSet;
+    copy.srcBinding = 0;
+    copy.dstSet = entry.aSet;
+    copy.dstBinding = 0;
+    copy.descriptorCount = 1;
+    vkUpdateDescriptorSets(GN_Vk.device, 0, nullptr, 1, &copy);
+
+    VkDescriptorImageInfo albedoInfo = {};
+    albedoInfo.sampler = entry.aAlbedoSampler ? entry.aAlbedoSampler : GN_Vk.defaultSampler;
+    albedoInfo.imageView = entry.aAlbedo ? entry.aAlbedo : GN_Vk.defaultImageView;
+    albedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkDescriptorImageInfo normalInfo = {};
+    normalInfo.sampler = entry.aNormalSampler ? entry.aNormalSampler : GN_Vk.defaultSampler;
+    normalInfo.imageView = entry.aNormal ? entry.aNormal : GN_Vk.defaultImageView;
+    normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    writes[0].dstSet = entry.aSet;
+    writes[0].dstBinding = 1;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[0].descriptorCount = 1;
+    writes[0].pImageInfo = &albedoInfo;
+    writes[1].dstSet = entry.aSet;
+    writes[1].dstBinding = 3;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[1].descriptorCount = 1;
+    writes[1].pImageInfo = &normalInfo;
+    vkUpdateDescriptorSets(GN_Vk.device, 2, writes, 0, nullptr);
+}
+
+VkDescriptorSet findOrCreateGBufferSet(VkImageView albedo, VkSampler albedoSampler,
+                                       VkImageView normal, VkSampler normalSampler) {
+    for(size_t i = 0; i < s_gbufferTextureSets.size(); ++i) {
+        const sGBUFFER_TEXTURE_SET &entry = s_gbufferTextureSets[i];
+        if(entry.aAlbedo == albedo && entry.aAlbedoSampler == albedoSampler &&
+           entry.aNormal == normal && entry.aNormalSampler == normalSampler) {
+            return entry.aSet;
+        }
+    }
+    if(GN_Vk.descriptorPool == VK_NULL_HANDLE || GN_Vk.gBufferDescriptorLayout == VK_NULL_HANDLE) {
+        return GN_Vk.gBufferDescriptorSet;
+    }
+    if(s_gbufferTextureSets.size() >= kTextureSetCacheCap) {
+        return GN_Vk.gBufferDescriptorSet; // 录制中不释放、不改写规范集
+    }
+    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    dai.descriptorPool = GN_Vk.descriptorPool;
+    dai.descriptorSetCount = 1;
+    dai.pSetLayouts = &GN_Vk.gBufferDescriptorLayout;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    if(vkAllocateDescriptorSets(GN_Vk.device, &dai, &set) != VK_SUCCESS) {
+        fprintf(stderr, "[GN_Vk] G-Buffer 纹理描述符集分配失败（回退共享 set）\n");
+        return GN_Vk.gBufferDescriptorSet;
+    }
+    sGBUFFER_TEXTURE_SET entry;
+    entry.aAlbedo = albedo;
+    entry.aAlbedoSampler = albedoSampler;
+    entry.aNormal = normal;
+    entry.aNormalSampler = normalSampler;
+    entry.aSet = set;
+    syncGBufferTextureSet(entry); // 首用前补齐（环集未绑定过，合法）
+    s_gbufferTextureSets.push_back(entry);
+    return set;
+}
+
+} // namespace
+
+// 帧首（命令缓冲未开始录制）把规范集的 0/3 号绑定同步到所有 G-Buffer 环集。
+void refreshGBufferTextureSets() {
+    if(GN_Vk.gBufferDescriptorSet == VK_NULL_HANDLE) return;
+    for(size_t i = 0; i < s_gbufferTextureSets.size(); ++i) {
+        syncGBufferTextureSet(s_gbufferTextureSets[i]);
+    }
+}
+
+void resetGBufferTextureSetCache() {
+    ReleaseRingSets(s_gbufferTextureSets, GN_Vk.descriptorPool, GN_Vk.device);
+}
+
 void GN_VkDraw3D_GBuffer(const void *vertices, uint32_t vertexCount,
                          const uint32_t *indices, uint32_t indexCount,
                          const sMAT44 *modelMatrix,
@@ -421,33 +524,20 @@ void GN_VkDraw3D_GBuffer(const void *vertices, uint32_t vertexCount,
     if(!GN_Vk.initialized || !s_in3DPass || !vertices || vertexCount == 0) return;
     if(!GN_Vk.gBufferPipeline) return;
 
-    // 更新纹理描述符
+    // 不能改写已绑定的 gBufferDescriptorSet（本帧已录制），改为绑定纹理环集。
     {
-        VkImageView aView = (albedoTex && albedoTex->vkImageView) ? albedoTex->vkImageView : GN_Vk.defaultImageView;
-        VkSampler aSamp = (albedoTex && albedoTex->vkSampler) ? albedoTex->vkSampler : GN_Vk.defaultSampler;
-        VkImageView nView = (normalTex && normalTex->vkImageView) ? normalTex->vkImageView : GN_Vk.defaultImageView;
-        VkSampler nSamp = (normalTex && normalTex->vkSampler) ? normalTex->vkSampler : GN_Vk.defaultSampler;
-        VkDescriptorImageInfo aii = {};
-        aii.sampler = aSamp;
-        aii.imageView = aView;
-        aii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkDescriptorImageInfo nii = {};
-        nii.sampler = nSamp;
-        nii.imageView = nView;
-        nii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkWriteDescriptorSet w[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
-        w[0].dstSet = GN_Vk.gBufferDescriptorSet;
-        w[0].dstBinding = 1;
-        w[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        w[0].descriptorCount = 1;
-        w[0].pImageInfo = &aii;
-        w[1].dstSet = GN_Vk.gBufferDescriptorSet;
-        w[1].dstBinding = 3;
-        w[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        w[1].descriptorCount = 1;
-        w[1].pImageInfo = &nii;
-        vkUpdateDescriptorSets(GN_Vk.device, 2, w, 0, 0);
-        vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.gBufferPipelineLayout, 0, 1, &GN_Vk.gBufferDescriptorSet, 0, 0);
+        const VkImageView aView =
+            (albedoTex && albedoTex->vkImageView) ? albedoTex->vkImageView : GN_Vk.defaultImageView;
+        const VkSampler aSamp =
+            (albedoTex && albedoTex->vkSampler) ? albedoTex->vkSampler : GN_Vk.defaultSampler;
+        const VkImageView nView =
+            (normalTex && normalTex->vkImageView) ? normalTex->vkImageView : GN_Vk.defaultImageView;
+        const VkSampler nSamp =
+            (normalTex && normalTex->vkSampler) ? normalTex->vkSampler : GN_Vk.defaultSampler;
+        VkDescriptorSet set = findOrCreateGBufferSet(aView, aSamp, nView, nSamp);
+        vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame],
+                                VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.gBufferPipelineLayout, 0,
+                                1, &set, 0, 0);
     }
     // Push constants (PBR 参数 → G-Buffer)
     VkModelPushConstPBR pc;

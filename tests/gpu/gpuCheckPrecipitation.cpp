@@ -7,6 +7,7 @@
 //   4) precipitation.pixels：identity viewProj 下把 size=0.5、alpha=1、纯红的粒子放在相机正前方
 //      （裁剪空间中心），回读中心像素应 ≈ 纯红：r > 0.4 且比无粒子帧的 r 高 0.2 以上。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 
 #include "gpuCheckPrecipitation.h"
@@ -57,14 +58,14 @@ bool submitFrame(const GNg::sPRECIP_DRAW_PARAMS &params, bool &submitted) {
     submitted = GNg::GN_VkDrawPrecipitation(params);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     return true;
 }
 
 bool readCenterPixel(sFLOAT_PIXEL &out) {
     std::vector<uint8_t> pixels;
-    const int width = (int)GNg::GN_Vk.swapchainExtent.width;
-    const int height = (int)GNg::GN_Vk.swapchainExtent.height;
+    const int width = (int)Extent().width;
+    const int height = (int)Extent().height;
     if(!ReadSwapchain(0, 0, width, height, pixels)) return false;
     out = SampleSwapchain(pixels, width, width / 2, height / 2);
     return true;
@@ -75,7 +76,7 @@ bool drawOutsidePass(const GNg::sPRECIP_DRAW_PARAMS &params) {
     if(!GNg::GN_VkBeginFrame()) return false;
     const bool rejected = !GNg::GN_VkDrawPrecipitation(params);
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     return rejected;
 }
 
@@ -141,8 +142,8 @@ void makePerspectiveViewProj(GNg::sMAT44 &viewProj) {
     GNg::sMAT44 view;
     GNg::sMAT44 projection;
     GNg::Mat44LookAtRH(&view, &eye, &center, &up);
-    const float width = (float)GNg::GN_Vk.swapchainExtent.width;
-    const float height = (float)GNg::GN_Vk.swapchainExtent.height;
+    const float width = (float)Extent().width;
+    const float height = (float)Extent().height;
     const float aspect = height > 0.0f ? width / height : 1.0f;
     GNg::Mat44PerspectiveVK(&projection, 1.04719755f, aspect, 0.1f, 100.0f);
     GNg::Mat44Mul(&viewProj, &projection, &view);
@@ -221,7 +222,7 @@ bool submitFrameWithGeometry(const GNg::sPRECIP_DRAW_PARAMS &params, bool withQu
     submitted = GNg::GN_VkDrawPrecipitation(params);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     return true;
 }
 
@@ -234,8 +235,8 @@ void reportPerspective() {
     GNg::sMAT44 projection;
     GNg::sMAT44 viewProj;
     GNg::Mat44LookAtRH(&view, &eye, &center, &up);
-    const float width = (float)GNg::GN_Vk.swapchainExtent.width;
-    const float height = (float)GNg::GN_Vk.swapchainExtent.height;
+    const float width = (float)Extent().width;
+    const float height = (float)Extent().height;
     const float aspect = height > 0.0f ? width / height : 1.0f;
     GNg::Mat44PerspectiveVK(&projection, 1.04719755f, aspect, 0.1f, 100.0f);
     GNg::Mat44Mul(&viewProj, &projection, &view);
@@ -299,8 +300,8 @@ void reportSnowCurtain() {
     GNg::sMAT44 projection;
     GNg::sMAT44 viewProj;
     GNg::Mat44LookAtRH(&view, &eye, &center, &up);
-    const float width = (float)GNg::GN_Vk.swapchainExtent.width;
-    const float height = (float)GNg::GN_Vk.swapchainExtent.height;
+    const float width = (float)Extent().width;
+    const float height = (float)Extent().height;
     const float aspect = height > 0.0f ? width / height : 1.0f;
     GNg::Mat44PerspectiveVK(&projection, 0.785398f, aspect, 0.179f, 600.0f);
     GNg::Mat44Mul(&viewProj, &projection, &view);
@@ -361,7 +362,7 @@ void reportScreenAgreement();
 } // namespace
 
 void RunPrecipitationChecks() {
-    if(!GNg::GN_Vk.initialized) {
+    if(!EngineReady()) {
         ReportSkip("precipitation.setup", "GN_Vk not initialized");
         return;
     }
@@ -395,8 +396,8 @@ void reportFlipOrientation() {
     bool submitted = false;
     const bool frameOk = submitFrame(params, submitted);
     std::vector<uint8_t> pixels;
-    const int w = (int)GNg::GN_Vk.swapchainExtent.width;
-    const int h = (int)GNg::GN_Vk.swapchainExtent.height;
+    const int w = (int)Extent().width;
+    const int h = (int)Extent().height;
     const bool readOk = frameOk && ReadSwapchain(0, 0, w, h, pixels);
     long litRows = 0;
     double rowSum = 0.0;
@@ -445,8 +446,8 @@ void reportScreenAgreement() {
     GNg::sMAT44 projection;
     GNg::sMAT44 viewProj;
     GNg::Mat44LookAtRH(&view, &eye, &center, &up);
-    const float width = (float)GNg::GN_Vk.swapchainExtent.width;
-    const float height = (float)GNg::GN_Vk.swapchainExtent.height;
+    const float width = (float)Extent().width;
+    const float height = (float)Extent().height;
     const float aspect = height > 0.0f ? width / height : 1.0f;
     GNg::Mat44PerspectiveVK(&projection, 0.785398f, aspect, 0.179f, 600.0f);
     GNg::Mat44Mul(&viewProj, &projection, &view);

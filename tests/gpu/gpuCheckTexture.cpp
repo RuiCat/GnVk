@@ -7,6 +7,7 @@
 //   * 材质 UBO 白色 × 该纹理，中心像素应等于 sRGB→linear 后的颜色（±0.03）。
 //   * Destroy 可重复调用，销毁后可再次创建。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 #include "GN_3Dtexture.h"
 
@@ -22,6 +23,9 @@
 #include <vector>
 
 namespace {
+
+// 引擎状态一律走 gpuTestHooks 的稳定面（A1），不再直读 GN_Vk。
+using namespace GpuCheck;
 
 // 2×2 RGBA PNG（与 testTexture.cpp 同一 fixture）。
 const char *kPngBase64 =
@@ -57,15 +61,15 @@ bool createWhiteUbo(sTEXTURE_MATERIAL_FIXTURE &fixture) {
     bufferInfo.size = 16;
     bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if(vkCreateBuffer(GNg::GN_Vk.device, &bufferInfo, 0, &fixture.aUboBuffer) != VK_SUCCESS) {
+    if(vkCreateBuffer(Dev(), &bufferInfo, 0, &fixture.aUboBuffer) != VK_SUCCESS) {
         return false;
     }
     VkMemoryRequirements requirements;
-    vkGetBufferMemoryRequirements(GNg::GN_Vk.device, fixture.aUboBuffer, &requirements);
+    vkGetBufferMemoryRequirements(Dev(), fixture.aUboBuffer, &requirements);
     VkMemoryAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     allocInfo.allocationSize = requirements.size;
     VkPhysicalDeviceMemoryProperties properties;
-    vkGetPhysicalDeviceMemoryProperties(GNg::GN_Vk.physicalDevice, &properties);
+    vkGetPhysicalDeviceMemoryProperties(PhysDev(), &properties);
     bool found = false;
     for(uint32_t i = 0; i < properties.memoryTypeCount; ++i) {
         if((requirements.memoryTypeBits & (1u << i)) &&
@@ -77,20 +81,20 @@ bool createWhiteUbo(sTEXTURE_MATERIAL_FIXTURE &fixture) {
         }
     }
     if(!found) return false;
-    if(vkAllocateMemory(GNg::GN_Vk.device, &allocInfo, 0, &fixture.aUboMemory) != VK_SUCCESS) {
+    if(vkAllocateMemory(Dev(), &allocInfo, 0, &fixture.aUboMemory) != VK_SUCCESS) {
         return false;
     }
-    if(vkBindBufferMemory(GNg::GN_Vk.device, fixture.aUboBuffer, fixture.aUboMemory, 0) !=
+    if(vkBindBufferMemory(Dev(), fixture.aUboBuffer, fixture.aUboMemory, 0) !=
        VK_SUCCESS) {
         return false;
     }
     void *mapped = 0;
-    if(vkMapMemory(GNg::GN_Vk.device, fixture.aUboMemory, 0, 16, 0, &mapped) != VK_SUCCESS) {
+    if(vkMapMemory(Dev(), fixture.aUboMemory, 0, 16, 0, &mapped) != VK_SUCCESS) {
         return false;
     }
     const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     std::memcpy(mapped, white, sizeof(white));
-    vkUnmapMemory(GNg::GN_Vk.device, fixture.aUboMemory);
+    vkUnmapMemory(Dev(), fixture.aUboMemory);
     fixture.aUboRes.aBuffer = fixture.aUboBuffer;
     fixture.aUboRes.aOffset = 0;
     fixture.aUboRes.aRange = 16;
@@ -99,9 +103,9 @@ bool createWhiteUbo(sTEXTURE_MATERIAL_FIXTURE &fixture) {
 
 void destroyFixture(sTEXTURE_MATERIAL_FIXTURE &fixture) {
     GNg::GN_VkMaterialDestroy(&fixture.aMaterial);
-    if(GNg::GN_Vk.device != VK_NULL_HANDLE) {
-        if(fixture.aUboBuffer) vkDestroyBuffer(GNg::GN_Vk.device, fixture.aUboBuffer, 0);
-        if(fixture.aUboMemory) vkFreeMemory(GNg::GN_Vk.device, fixture.aUboMemory, 0);
+    if(Dev() != VK_NULL_HANDLE) {
+        if(fixture.aUboBuffer) vkDestroyBuffer(Dev(), fixture.aUboBuffer, 0);
+        if(fixture.aUboMemory) vkFreeMemory(Dev(), fixture.aUboMemory, 0);
     }
     fixture.aUboBuffer = VK_NULL_HANDLE;
     fixture.aUboMemory = VK_NULL_HANDLE;
@@ -147,14 +151,14 @@ bool drawMaterialQuad(const GN3d::sMATERIAL_RES &material) {
     GNg::GN_VkDraw3DMaterial(quad, 4, kQuadIndexCCW, 6, &identity, &material);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     return true;
 }
 
 bool readCenterPixel(GpuCheck::sFLOAT_PIXEL &out) {
     std::vector<uint8_t> pixels;
-    const uint32_t width = GNg::GN_Vk.swapchainExtent.width;
-    const uint32_t height = GNg::GN_Vk.swapchainExtent.height;
+    const uint32_t width = Extent().width;
+    const uint32_t height = Extent().height;
     if(!GpuCheck::ReadSwapchain(0, 0, (int)width, (int)height, pixels)) return false;
     out = GpuCheck::SampleSwapchain(pixels, (int)width, (int)(width / 2), (int)(height / 2));
     return true;

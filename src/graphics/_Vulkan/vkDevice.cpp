@@ -49,8 +49,12 @@ void VkCheck(VkResult err, const char *msg) {
         case VK_ERROR_OUT_OF_DATE_KHR: errStr = "OUT_OF_DATE"; break;
         default: break;
     }
-    fprintf(stderr, "[GN_Vk] ERROR %s: %s (code=%d)\n",
-            msg ? msg : "(no message)", errStr, (int)err);
+    GN_LogErr("[GN_Vk] ERROR %s: %s (code=%d)\n",
+              msg ? msg : "(no message)", errStr, (int)err);
+}
+
+bool GN_VkDeviceAlive() {
+    return GN_Vk.initialized && GN_Vk.device != VK_NULL_HANDLE;
 }
 
 GN_VK_INTERNAL uint32_t FindMemType(uint32_t f, VkMemoryPropertyFlags p,

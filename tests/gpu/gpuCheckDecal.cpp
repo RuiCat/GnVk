@@ -6,6 +6,7 @@
 //   3) decal.draw：64 条贴花在 3D pass 内提交返回 true（覆盖 2× 顶点缓冲扩容）；
 //   4) decal.pixels：真实透视相机俯视地面，原点处的红色水渍贴花让中心像素转红。
 #include <GN.h>
+#include "gpuTestHooks.h"
 #include "GN_Vk.h"
 #include "GN_3Dlight.h"
 
@@ -24,8 +25,8 @@ namespace GpuCheck {
 namespace {
 
 bool makeGroundCamera(GNg::sMAT44 &viewProj) {
-    const float width = (float)GNg::GN_Vk.swapchainExtent.width;
-    const float height = (float)GNg::GN_Vk.swapchainExtent.height;
+    const float width = (float)Extent().width;
+    const float height = (float)Extent().height;
     const float aspect = height > 0.0f ? width / height : 1.0f;
     const GNg::sVEC3 eye = {0.0f, 6.0f, 6.0f};
     const GNg::sVEC3 target = {0.0f, 0.0f, 0.0f};
@@ -67,14 +68,14 @@ bool submitFrame(const GN3d::sDECAL_RENDER_ITEM *items, uint32_t count, bool &su
     submitted = GNg::GN_VkDrawDecals(params);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
-    vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+    vkQueueWaitIdle(Queue());
     return true;
 }
 
 bool readCenterPixel(sFLOAT_PIXEL &out) {
     std::vector<uint8_t> pixels;
-    const int width = (int)GNg::GN_Vk.swapchainExtent.width;
-    const int height = (int)GNg::GN_Vk.swapchainExtent.height;
+    const int width = (int)Extent().width;
+    const int height = (int)Extent().height;
     if(!ReadSwapchain(0, 0, width, height, pixels)) return false;
     out = SampleSwapchain(pixels, width, width / 2, height / 2);
     return true;
@@ -94,7 +95,7 @@ void reportOutsidePass() {
     if(GNg::GN_VkBeginFrame()) {
         rejected = !GNg::GN_VkDrawDecals(params);
         GNg::GN_VkEndFrame();
-        vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+        vkQueueWaitIdle(Queue());
     }
     char detail[128];
     std::snprintf(detail, sizeof(detail), "outside3DPass rejected=%d (expected 1)", (int)rejected);
@@ -168,8 +169,8 @@ void reportGroundPlacement(bool usePbr, const char *name) {
     const GNg::sVEC3 target = {0.0f, 5.0f, 0.0f};
     const GNg::sVEC3 up = {0.0f, 1.0f, 0.0f};
     GNg::Mat44LookAtRH(&view, &eye, &target, &up);
-    const float width = (float)GNg::GN_Vk.swapchainExtent.width;
-    const float height = (float)GNg::GN_Vk.swapchainExtent.height;
+    const float width = (float)Extent().width;
+    const float height = (float)Extent().height;
     GNg::Mat44PerspectiveVK(&projection, 1.04719755f, width / (height > 0.0f ? height : 1.0f), 0.1f,
                             200.0f);
     GNg::Mat44Mul(&viewProj, &projection, &view);
@@ -214,13 +215,13 @@ void reportGroundPlacement(bool usePbr, const char *name) {
         }
         GNg::GN_VkEnd3DPass();
         GNg::GN_VkEndFrame();
-        vkQueueWaitIdle(GNg::GN_Vk.graphicsQueue);
+        vkQueueWaitIdle(Queue());
         frameOk = true;
     }
 
     std::vector<uint8_t> pixels;
-    const int w = (int)GNg::GN_Vk.swapchainExtent.width;
-    const int h = (int)GNg::GN_Vk.swapchainExtent.height;
+    const int w = (int)Extent().width;
+    const int h = (int)Extent().height;
     const bool readOk = frameOk && ReadSwapchain(0, 0, w, h, pixels);
     // 沿画面中列扫描，找最亮的一行：正确朝向时它应落在下半屏（> 55% 高度），
     // Y 翻转时落到上半屏。
@@ -249,7 +250,7 @@ void reportGroundPlacement(bool usePbr, const char *name) {
 } // namespace
 
 void RunDecalChecks() {
-    if(!GNg::GN_Vk.initialized) {
+    if(!EngineReady()) {
         ReportSkip("decal.setup", "GN_Vk not initialized");
         return;
     }

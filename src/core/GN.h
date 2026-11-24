@@ -154,19 +154,25 @@ extern GN_API unsigned int GT_SystemInited; //标记引擎系统各部分是否�
 #include "GN_3Dcloth.h" //布料 XPBD（CPU 模拟；GPU 上传留 P8/P9）
 #include "GN_3Dparticle.h" //3D 粒子池/发射器（CPU 模拟；实例上传留 P8）
 #include "GN_3Danim.h" //3D 动画 clip 采样/混合/状态机（CPU）
+#include "GN_AnimStateMachine.h" //动画状态机：参数→状态转换 + 事件（P3，CPU）
 #include "GN_3Dskeleton.h" //3D 骨骼 世界矩阵/调色板（CPU；蒙皮留 P8）
 #include "GN_3Dasset.h" //glTF 2.0 导入（节点/网格/皮肤/动画，CPU）
 #include "GN_3DSkin.h" //蒙皮顶点/CPU 线性混合蒙皮/关节调色板
 #include "GN_3Dscene.h" //场景装配：节点世界矩阵/动画采样/蒙皮调色板（CPU）
 #include "GN_3Dcamera.h" //3D 摄像机：自由/轨道/跟随三模式、自动取景、视图/投影（CPU）
+#include "GN_Entity.h" //实体与四套控制器（网格/动画/骨骼/物理）的接线层（P1）
+#include "GN_Character.h" //胶囊角色控制器（P5：斜坡/台阶/跳跃，纯 CPU 不参与刚体求解）
+#include "GN_Scene.h" //场景：统一剔除 / LOD / 排序（P6，逐实体粗排序）
 #include "giParams.h" //GI CPU 基座：GI UBO/SH9/SSAO 核/BRDF LUT/G-Buffer 打包（P12-G1）
 #endif
 #include "GN_Linear.h" //线性插值与曲线插值等功能
+#include "GN_GameClock.h" //游戏时钟：固定步长累加器 + 插值因子 + 时间缩放（P0）
 #include "GN_2DArea.h" //2D空间区域构造与2D碰撞检测等功能
 #include "GN_2Dtype.h" //2D图形处理用到的一些其它数据结构 功能标志定义等
 #include "_Vulkan/GN_Vk.h" //2D图形的绘制和帧缓冲数据读取等转换操作
 #include "GN_2D.h" //2D复合图形绘制 线绘制 屏幕截图 绘图屏幕比例控制 画中画子视图功能
 #include "GN_Input.h" //集合各种键盘 鼠标 触摸屏等输入的数据 记录和回放输入操作 便捷计时器等 是引擎比较实用的一个模块
+#include "GN_InputMap.h" //动作映射：键位与游戏语义分离 + 每帧边沿检测（P0）
 #include "GN_Init.h" //控制引擎整体运行流程 自动更新 运行错误修复和一些方便的引擎系统初始化方法 包括处理加载ini文件 简化用户使用引擎程序框架
 #include "_Main/GN_Main.h" //系统平台程序入口调度转换 绘图窗口的创建 管理主循环使程序能不停地运行等 该模块主要为运行引擎与操作系统平台之间的一个桥梁
 #ifdef GN_USING_UTILITY_LIB

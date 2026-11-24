@@ -207,6 +207,18 @@ GN_INIT_API void GN_StartRun(
 
 /* ------------------------------------------------------------------- 退出运行 ---------------------------------------------------------------------------------------------------------------------*/
 
+//无窗口（离屏）渲染：不创建窗口/surface/交换链，直接渲染到引擎自建的离屏图，跑完 frame_count 帧后返回。
+//不需要 X11/Wayland，可用于 CI、服务器、容器内软渲染（如 lavapipe）出图。
+//frame_proc 非空时每帧渲染完成后调用一次（参数为帧序号，从 0 开始），可在此调 GN_GrabFrame 取像素。
+//返回 true 表示初始化并跑完全部帧；设备/格式不可用返回 false。
+GN_INIT_API bool GN_StartRunHeadless(short view_w = 800, short view_h = 600, int frame_count = 1,
+                                    void (*frame_proc)(int frame_index) = 0);
+
+//读回最近一帧（RGBA8，从上到下）。只能在 GN_StartRunHeadless 的 frame_proc 内调用（此时设备仍存活），
+//返回的缓冲用 GN_GrabFrameFree 释放；失败返回空指针。
+GN_INIT_API unsigned char *GN_GrabFrame(int *width = 0, int *height = 0, int *size = 0);
+GN_INIT_API void GN_GrabFrameFree(unsigned char *data);
+
 //退出应用程序运行 !!这个和 GN_GameBreakLoop 的区别在于 GN_GameBreakLoop 一调用整个程序都会强制性退出来 而 GN_BreakRun 会受 GN_BreakRunProcChange 影响可以只退出到上一层 一般做应用开发的都适合用这个 GN_GameBreakLoop适合做系统平台框架那端的开发
 GN_INIT_API void GN_BreakRun();
 
