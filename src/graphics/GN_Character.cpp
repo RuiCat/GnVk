@@ -88,13 +88,14 @@ cCHARACTER::sINTENT::sINTENT()
 // ═══════════════════════════════════════════════════════════
 cCHARACTER::cCHARACTER()
     : aPosition{0.0f, 0.0f, 0.0f}, aFootPosition{0.0f, 0.0f, 0.0f}, aVelocity{0.0f, 0.0f, 0.0f},
-      aGravity{0.0f, -9.81f, 0.0f}, aGrounded(false), aStuck(false), aGroundNormalY(0.0f),
-      aSlopeDeg(0.0f) {
+      aGravity{0.0f, -9.81f, 0.0f}, aInited(false), aGrounded(false), aStuck(false),
+      aGroundNormalY(0.0f), aSlopeDeg(0.0f) {
     aFootPosition.y = -aDesc.aHeight * 0.5f;
 }
 
 void cCHARACTER::Init(const sCHARACTER_DESC &desc) {
     aDesc = desc;
+    aInited = true;
     // 钳非法参数：半径/总高必须为正，总高至少 2r（否则胶囊退化成球）。
     if (!(aDesc.aRadius > 0.0f)) aDesc.aRadius = 0.3f;
     if (!(aDesc.aHeight >= aDesc.aRadius * 2.0f)) aDesc.aHeight = aDesc.aRadius * 2.0f;
@@ -237,6 +238,8 @@ void cCHARACTER::Teleport(const GNg::sVEC3 &centerPos) {
     aVelocity = vec(0.0f, 0.0f, 0.0f); // 残留的落地速度会让瞬移后立刻弹飞/穿地
     resetTransient();
 }
+
+bool cCHARACTER::IsInitialized() const { return aInited; }
 
 bool cCHARACTER::IsGrounded() const { return aGrounded; }
 

@@ -26,6 +26,7 @@
 #include "GN_3Dskeleton.h"
 #include "GN_3DSkin.h"
 #include "GN_3Dlod.h"
+#include "GN_3Dcamera.h" // C1：sCAMERA_TARGET（BuildCameraTarget 的返回类型）
 #include "GN_Physics.h"
 #include "GN_Spatial.h"
 #include "GN_Character.h" // P5：cENTITY 按值持有 cCHARACTER
@@ -330,6 +331,20 @@ class cENTITY {
     // 只做"动画 → 骨骼"，不推进物理、不同步刚体变换。
     // 用途：物理由场景/上层统一推进之后，逐实体刷姿势。
     void UpdateAnimation(float dt);
+
+    // ── 相机跟随（C1）──
+    // 把本实体打包成相机目标，交给 `cCAMERA::SetTarget()`。
+    //
+    // 为什么要这个 helper：`SetTarget` 要的是 `sCAMERA_TARGET{位置, AABB}`，
+    // 而"实体的位置"有四种可能来源（网格模型、角色胶囊、物理刚体、动画骨骼），
+    // 每个调用点都自己挑一个的话，相机跟随就会在"角色走了但相机不动"这类地方出 bug。
+    // 这里的优先级是**眼睛高度更合理的那一个**：
+    //   1. `aCharacter` 已初始化（胶囊高度 > 0）⇒ 用胶囊中心 + heightOffset；
+    //   2. 否则有网格模型 ⇒ 用模型的世界 AABB 中心；
+    //   3. 都没有 ⇒ 返回 false（不要返回一个"看起来像原点"的假目标）。
+    // heightOffset 是**在选定中心之上**再加的偏移（第三人称相机通常要看向头部而非腰部）。
+    // bounds 只在有网格时有效（空盒 = 相机只用位置，不做自动取景）。
+    bool BuildCameraTarget(sCAMERA_TARGET *out, float heightOffset = 0.0f) const;
 
     // 渲染前：刷新世界 AABB + 选级 + 剔除。返回本帧是否可见。
     bool PrepareRender(const sLOD_VIEW &view, const sFRUSTUM *frustum);

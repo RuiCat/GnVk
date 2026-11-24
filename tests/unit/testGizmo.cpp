@@ -561,3 +561,417 @@ TEST_CASE(gizmoDragScaleRatio) {
                                          vec(-2.0f, 0.0f, -5.0f), 1.0f);
     CHECK(clamped > 0.0f);
 }
+
+// ═══════════════════════════════════════════════════════════
+//  A2：吸附
+// ═══════════════════════════════════════════════════════════
+TEST_CASE(gizmoSnapDisabled) {
+    // step <= 0 = 关闭，原样返回（**不是**返回 0）
+    CHECK_NEAR(snapToStep(0.37f, 0.0f), 0.37f, 1e-6);
+    CHECK_NEAR(snapToStep(0.37f, -1.0f), 0.37f, 1e-6);
+    sGIZMO_SNAP off; // 默认全 0
+    const GNg::sVEC3 base = vec(0.3f, 0.7f, -1.2f);
+    const GNg::sVEC3 moved = snapTranslate(base, vec(1, 0, 0), 0.05f, off);
+    CHECK_NEAR(moved.x, 0.35f, 1e-5);
+}
+
+TEST_CASE(gizmoSnapUsesRoundNotFloor) {
+    // round：0.9 格吸到 1 格；floor 会吸到 0（这正是不用 floor 的原因）
+    CHECK_NEAR(snapToStep(0.9f, 1.0f), 1.0f, 1e-5);
+    CHECK_NEAR(snapToStep(1.1f, 1.0f), 1.0f, 1e-5);
+    CHECK_NEAR(snapToStep(-0.9f, 1.0f), -1.0f, 1e-5);
+    CHECK_NEAR(snapToStep(0.4f, 1.0f), 0.0f, 1e-5);
+    CHECK_NEAR(snapToStep(0.6f, 1.0f), 1.0f, 1e-5);
+    // 半格整数步：0.5 按 step 0.25 → 0.5
+    CHECK_NEAR(snapToStep(0.5f, 0.25f), 0.5f, 1e-5);
+}
+
+TEST_CASE(gizmoSnapTranslateSnapsAllComponents) {
+    sGIZMO_SNAP snap;
+    snap.aTranslateStep = 0.5f;
+    // 沿 X 拖 0.7 ⇒ X 该到 base.x + 0.7 再吸附，Y/Z 也应该被吸附到格点
+    // （站在 0.37 这种值上不像"对齐网格"）
+    const GNg::sVEC3 base = vec(0.13f, 0.37f, -0.62f);
+    const GNg::sVEC3 result = snapTranslate(base, vec(1, 0, 0), 0.7f, snap);
+    CHECK_NEAR(result.x, 1.0f, 1e-5); // 0.83 → 1.0
+    CHECK_NEAR(result.y, 0.5f, 1e-5); // 0.37 → 0.5
+    CHECK_NEAR(result.z, -0.5f, 1e-5); // -0.62 → -0.5
+}
+
+TEST_CASE(gizmoSnapRotateSnapsTotalAngle) {
+    sGIZMO_SNAP snap;
+    snap.aRotateStepRad = 0.2617994f; // 15°
+    // 吸附总角度而不是 delta：base 已是 30°，拖到 41° 应吸到 45°
+    const float base = 0.5235988f; // 30°
+    const float result = snapRotate(base, 0.192f, snap); // +11° = 41°
+    CHECK_NEAR(result, 0.7853982f, 1e-4); // 45°
+    // 关闭时原样相加
+    sGIZMO_SNAP off;
+    CHECK_NEAR(snapRotate(base, 0.192f, off), base + 0.192f, 1e-5);
+}
+
+TEST_CASE(gizmoSnapScaleStepping) {
+    sGIZMO_SNAP snap;
+    snap.aScaleStep = 0.25f;
+    CHECK_NEAR(snapScale(1.05f, snap), 1.0f, 1e-5);
+    CHECK_NEAR(snapScale(1.15f, snap), 1.25f, 1e-5);
+    CHECK_NEAR(snapScale(2.4f, snap), 2.5f, 1e-5);
+    // 关闭时原样
+    sGIZMO_SNAP off;
+    CHECK_NEAR(snapScale(1.07f, off), 1.07f, 1e-6);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  A1：屏幕坐标 → 射线
+// ═══════════════════════════════════════════════════════════
+namespace {
+
+// 构造一个"相机在 (0,0,5)、看向 -Z、45° 视场、look-at 单位阵原点"的 viewProj
+GNg::sMAT44 makeTestViewProj(float aspect, float nearZ = 0.1f, float farZ = 100.0f) {
+    const GNg::sVEC3 eye = {0.0f, 0.0f, 5.0f};
+    const GNg::sVEC3 center = {0.0f, 0.0f, 0.0f};
+    const GNg::sVEC3 up = {0.0f, 1.0f, 0.0f};
+    GNg::sMAT44 view;
+    GNg::Mat44LookAtRH(&view, &eye, &center, &up);
+    GNg::sMAT44 proj;
+    GNg::Mat44PerspectiveVK(&proj, 0.7853982f, aspect, nearZ, farZ); // 45°
+    GNg::sMAT44 viewProj;
+    GNg::Mat44Mul(&viewProj, &proj, &view);
+    return viewProj;
+}
+
+// 斜角相机：从 (3.5, 2.8, 4.5) 看向原点。
+// **旋转环必须用它**：正对 Z 轴时，Y 环（XZ 平面）退化成屏幕上一根水平线、
+// Z 环（XY 平面）退化成竖直圆，两环的投影互相压叠，拾取会随机命中。
+// 实际编辑器里相机几乎不会正对控件，斜角才是有意义的用例。
+GNg::sMAT44 makeObliqueViewProj(float aspect) {
+    const GNg::sVEC3 eye = {3.5f, 2.8f, 4.5f};
+    const GNg::sVEC3 center = {0.0f, 0.0f, 0.0f};
+    const GNg::sVEC3 up = {0.0f, 1.0f, 0.0f};
+    GNg::sMAT44 view;
+    GNg::Mat44LookAtRH(&view, &eye, &center, &up);
+    GNg::sMAT44 proj;
+    GNg::Mat44PerspectiveVK(&proj, 0.7853982f, aspect, 0.1f, 100.0f);
+    GNg::sMAT44 viewProj;
+    GNg::Mat44Mul(&viewProj, &proj, &view);
+    return viewProj;
+}
+
+} // namespace
+
+TEST_CASE(gizmoRayFromScreenCenterPointsForward) {
+    const GNg::sMAT44 viewProj = makeTestViewProj(16.0f / 9.0f);
+    GNg::sVEC3 origin;
+    GNg::sVEC3 dir;
+    // 屏幕正中 → 射线应指向相机前方（-Z）
+    CHECK(gizmoRayFromScreen(viewProj, 640.0f, 360.0f, 1280.0f, 720.0f, &origin, &dir));
+    CHECK_NEAR(dir.x, 0.0f, 1e-3);
+    CHECK_NEAR(dir.y, 0.0f, 1e-3);
+    CHECK_NEAR(dir.z, -1.0f, 1e-3);
+    // 起点在近平面附近（相机在 z=5，near=0.1 ⇒ z≈4.9）
+    CHECK(origin.z > 4.8f);
+    CHECK(origin.z < 5.0f);
+}
+
+TEST_CASE(gizmoRayFromScreenYAxisIsFlipped) {
+    const GNg::sMAT44 viewProj = makeTestViewProj(1.0f);
+    // **像素 y 向下、NDC y 向上**：屏幕上方（y=0）应得到 +Y 方向的射线。
+    // 这条是整条链路最容易写错的地方（少一次翻转 ⇒ 控件上下颠倒，点不中）。
+    GNg::sVEC3 originTop;
+    GNg::sVEC3 dirTop;
+    CHECK(gizmoRayFromScreen(viewProj, 360.0f, 0.0f, 720.0f, 720.0f, &originTop, &dirTop));
+    CHECK(dirTop.y > 0.1f);
+
+    GNg::sVEC3 originBottom;
+    GNg::sVEC3 dirBottom;
+    CHECK(gizmoRayFromScreen(viewProj, 360.0f, 720.0f, 720.0f, 720.0f, &originBottom, &dirBottom));
+    CHECK(dirBottom.y < -0.1f);
+
+    // 左右同理：x=0 → 射线朝 -X
+    GNg::sVEC3 originLeft;
+    GNg::sVEC3 dirLeft;
+    CHECK(gizmoRayFromScreen(viewProj, 0.0f, 360.0f, 720.0f, 720.0f, &originLeft, &dirLeft));
+    CHECK(dirLeft.x < -0.1f);
+}
+
+TEST_CASE(gizmoRayFromScreenRejectsBadInput) {
+    const GNg::sMAT44 viewProj = makeTestViewProj(1.0f);
+    GNg::sVEC3 origin;
+    GNg::sVEC3 dir;
+    // 屏幕尺寸非法
+    CHECK(!gizmoRayFromScreen(viewProj, 10.0f, 10.0f, 0.0f, 720.0f, &origin, &dir));
+    CHECK(!gizmoRayFromScreen(viewProj, 10.0f, 10.0f, 720.0f, -1.0f, &origin, &dir));
+    // 空指针
+    CHECK(!gizmoRayFromScreen(viewProj, 10.0f, 10.0f, 720.0f, 720.0f, nullptr, &dir));
+    // 退化矩阵（全零）：不可逆 ⇒ 必须返回 false 而不是产生 NaN
+    GNg::sMAT44 zero;
+    std::memset(zero.m, 0, sizeof(zero.m));
+    CHECK(!gizmoRayFromScreen(zero, 10.0f, 10.0f, 720.0f, 720.0f, &origin, &dir));
+}
+
+TEST_CASE(gizmoHoverUpdatesHighlight) {
+    const GNg::sMAT44 viewProj = makeTestViewProj(16.0f / 9.0f, 0.1f, 100.0f);
+    sGIZMO_DESC desc;
+    desc.aMode = eGIZMO_TRANSLATE;
+    desc.aOrigin = vec(0.0f, 0.0f, 0.0f);
+    desc.aSize = 2.0f;
+    desc.aHighlight = eGIZMO_AXIS_NONE;
+
+    // 先算 X 轴中部在世界里的位置，再把它投影回屏幕，最后用该像素去 Hover。
+    // 这样用例本身就验证了"射线构造 + 拾取"的闭环，而不是靠手写魔法像素值。
+    const GNg::sVEC3 worldPoint = vec(1.2f, 0.0f, 0.0f);
+    // 手动投影（world → NDC → 像素）
+    const float clipX = viewProj.m[0] * worldPoint.x + viewProj.m[4] * worldPoint.y +
+                        viewProj.m[8] * worldPoint.z + viewProj.m[12];
+    const float clipY = viewProj.m[1] * worldPoint.x + viewProj.m[5] * worldPoint.y +
+                        viewProj.m[9] * worldPoint.z + viewProj.m[13];
+    const float clipW = viewProj.m[3] * worldPoint.x + viewProj.m[7] * worldPoint.y +
+                        viewProj.m[11] * worldPoint.z + viewProj.m[15];
+    CHECK(clipW > 0.0f);
+    const float ndcX = clipX / clipW;
+    const float ndcY = clipY / clipW;
+    const float pixelX = (ndcX * 0.5f + 0.5f) * 1280.0f;
+    const float pixelY = (ndcY * 0.5f + 0.5f) * 720.0f; // 不翻转（见 projectToScreen 的注释）
+
+    const eGIZMO_AXIS hit = cGIZMO_INTERACTION::Hover(&desc, pixelX, pixelY, viewProj, 1280.0f, 720.0f);
+    CHECK_EQ((int)hit, (int)eGIZMO_AXIS_X);
+    CHECK_EQ((int)desc.aHighlight, (int)eGIZMO_AXIS_X);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  A1：拖拽会话（完整往返）
+// ═══════════════════════════════════════════════════════════
+namespace {
+
+// 把一个世界点投影到屏幕像素（与 gizmoRayFromScreen 互逆）
+void projectToScreen(const GNg::sMAT44 &viewProj, const GNg::sVEC3 &world, float screenW,
+                     float screenH, float *outX, float *outY) {
+    const float clipX = viewProj.m[0] * world.x + viewProj.m[4] * world.y +
+                        viewProj.m[8] * world.z + viewProj.m[12];
+    const float clipY = viewProj.m[1] * world.x + viewProj.m[5] * world.y +
+                        viewProj.m[9] * world.z + viewProj.m[13];
+    const float clipW = viewProj.m[3] * world.x + viewProj.m[7] * world.y +
+                        viewProj.m[11] * world.z + viewProj.m[15];
+    const float ndcX = clipX / clipW;
+    const float ndcY = clipY / clipW;
+    *outX = (ndcX * 0.5f + 0.5f) * screenW;
+    // **不翻转**：Vulkan 的 NDC y 与屏幕像素同向（都朝下），投影矩阵里已有这次翻转。
+    // 这里曾经写成 (1 - (ndcY*0.5+0.5))*H，与 gizmoRayFromScreen 的口径相反 ⇒
+    // 世界上方 (0,1,0) 会被投到屏幕下半，测试自己把自己骗了。
+    *outY = (ndcY * 0.5f + 0.5f) * screenH;
+}
+
+} // namespace
+
+// 完整往返：在 X 轴中部按下 → 拖到 X 轴另一处 → 物体会跟着移动；
+// 再拖回原点 → 物体回到起始位置（这就是"每帧从 base 重算"的意义）。
+TEST_CASE(gizmoDragTranslateRoundTrip) {
+    const float w = 1280.0f;
+    const float h = 720.0f;
+    const GNg::sMAT44 viewProj = makeTestViewProj(w / h);
+
+    sGIZMO_DESC desc;
+    desc.aMode = eGIZMO_TRANSLATE;
+    desc.aOrigin = vec(0.0f, 0.0f, 0.0f);
+    desc.aSize = 2.0f;
+
+    GNg::sVEC3 position = vec(0.0f, 0.0f, 0.0f);
+    GNg::sQUAT rotation;
+    GNg::sVEC3 scale = vec(1.0f, 1.0f, 1.0f);
+    GNg::sMAT44 transform;
+    GNg::Mat44Identity(&transform);
+
+    // 抓 X 轴中点 (1.0, 0, 0)
+    float pressX = 0.0f;
+    float pressY = 0.0f;
+    projectToScreen(viewProj, vec(1.0f, 0.0f, 0.0f), w, h, &pressX, &pressY);
+
+    cGIZMO_INTERACTION interaction;
+    sGIZMO_SNAP snap; // 不吸附
+    CHECK(interaction.Begin(desc, snap, &transform, &position, &rotation, &scale, pressX, pressY,
+                            viewProj, w, h));
+    CHECK(interaction.Active());
+    CHECK_EQ((int)interaction.Axis(), (int)eGIZMO_AXIS_X);
+
+    // 拖到世界 (2.0, 0, 0) 对应的像素：物体应沿 +X 移动约 1.0
+    float dragX = 0.0f;
+    float dragY = 0.0f;
+    projectToScreen(viewProj, vec(2.0f, 0.0f, 0.0f), w, h, &dragX, &dragY);
+    CHECK(interaction.Drag(dragX, dragY, viewProj, w, h));
+    CHECK_NEAR(position.x, 1.0f, 0.05f);
+    CHECK_NEAR(position.y, 0.0f, 0.02f); // 沿 X 拖不该动 Y
+    CHECK_NEAR(position.z, 0.0f, 0.02f);
+
+    // 拖回起点 → 位置回到 0（**不是**累加成 2.0）。这一条钉住"从 base 重算"的口径：
+    // 如果实现里每帧累加 delta，这里会得到 2.0 而不是 0。
+    CHECK(interaction.Drag(pressX, pressY, viewProj, w, h));
+    CHECK_NEAR(position.x, 0.0f, 0.02f);
+
+    interaction.End();
+    CHECK(!interaction.Active());
+}
+
+// 吸附：拖到 0.9 格处应吸到 1 格
+TEST_CASE(gizmoDragTranslateWithSnap) {
+    const float w = 1280.0f;
+    const float h = 720.0f;
+    const GNg::sMAT44 viewProj = makeTestViewProj(w / h);
+
+    sGIZMO_DESC desc;
+    desc.aMode = eGIZMO_TRANSLATE;
+    desc.aOrigin = vec(0.0f, 0.0f, 0.0f);
+    desc.aSize = 2.0f;
+
+    GNg::sVEC3 position = vec(0.0f, 0.0f, 0.0f);
+    GNg::sQUAT rotation;
+    GNg::sVEC3 scale = vec(1.0f, 1.0f, 1.0f);
+    GNg::sMAT44 transform;
+    GNg::Mat44Identity(&transform);
+
+    float pressX = 0.0f;
+    float pressY = 0.0f;
+    projectToScreen(viewProj, vec(1.0f, 0.0f, 0.0f), w, h, &pressX, &pressY);
+
+    cGIZMO_INTERACTION interaction;
+    sGIZMO_SNAP snap;
+    snap.aTranslateStep = 1.0f; // 整格吸附
+    CHECK(interaction.Begin(desc, snap, &transform, &position, &rotation, &scale, pressX, pressY,
+                            viewProj, w, h));
+
+    // 拖到"位移 0.9"处 ⇒ 吸附到 1.0
+    float dragX = 0.0f;
+    float dragY = 0.0f;
+    projectToScreen(viewProj, vec(1.9f, 0.0f, 0.0f), w, h, &dragX, &dragY);
+    CHECK(interaction.Drag(dragX, dragY, viewProj, w, h));
+    CHECK_NEAR(position.x, 1.0f, 1e-4); // 精确到格点，不是 0.9
+    interaction.End();
+}
+
+// 旋转：抓 Y 环拖 90°，物体绕 Y 转约 90°
+TEST_CASE(gizmoDragRotateWritesRotation) {
+    const float w = 1280.0f;
+    const float h = 720.0f;
+    // 斜角相机：正对视角下三个环的投影重叠，拾取会随机命中别的环
+    const GNg::sMAT44 viewProj = makeObliqueViewProj(w / h);
+
+    sGIZMO_DESC desc;
+    desc.aMode = eGIZMO_ROTATE;
+    desc.aOrigin = vec(0.0f, 0.0f, 0.0f);
+    desc.aSize = 2.0f;
+
+    GNg::sVEC3 position = vec(0.0f, 0.0f, 0.0f);
+    GNg::sQUAT rotation; // 单位
+    GNg::sVEC3 scale = vec(1.0f, 1.0f, 1.0f);
+    GNg::sMAT44 transform;
+    GNg::Mat44Identity(&transform);
+
+    // Y 环半径 = size * 0.86 = 1.72，环在 XZ 平面上。
+    //
+    // **别用 (1.72, 0, 0)**：那是 Y 环与 Z 环的正常交点（Z 环在 XY 平面，半径也是 1.72），
+    // 两环在此处重合，pickGizmo 返回哪一根都"对"。要断言"抓到 Y"，必须选一个只有 Y 环
+    // 经过的点 —— x≠0 排除 X 环（在 YZ 平面），z≠0 排除 Z 环（在 XY 平面）。
+    const float kR = 1.72f;
+    const float diag = kR * 0.70710678f; // 45° 处，x 与 z 都不为 0
+    const GNg::sVEC3 pressWorld = vec(diag, 0.0f, diag);
+    float pressX = 0.0f;
+    float pressY = 0.0f;
+    projectToScreen(viewProj, pressWorld, w, h, &pressX, &pressY);
+
+    cGIZMO_INTERACTION interaction;
+    sGIZMO_SNAP snap;
+    CHECK(interaction.Begin(desc, snap, &transform, &position, &rotation, &scale, pressX, pressY,
+                            viewProj, w, h));
+    CHECK(interaction.Active());
+    CHECK_EQ((int)interaction.Axis(), (int)eGIZMO_AXIS_Y);
+
+    // 沿 Y 环绕 90°：从 (diag,0,diag) 转到 (-diag,0,diag)（绕 +Y 逆时针 90°）
+    float dragX = 0.0f;
+    float dragY = 0.0f;
+    projectToScreen(viewProj, vec(-diag, 0.0f, diag), w, h, &dragX, &dragY);
+    interaction.Drag(dragX, dragY, viewProj, w, h);
+    // 旋转后的四元数应当不再是单位四元数（w != 1）
+    CHECK(std::fabs(rotation.w) < 0.999f);
+    // 旋转轴必须是 Y：把 (1,0,0) 转过去应该落到 ±Z 上（而不是留在 X 上）
+    GNg::sVEC3 rotated;
+    const GNg::sVEC3 unitX = vec(1.0f, 0.0f, 0.0f);
+    GNg::QuatRotateVec3(&rotated, &unitX, &rotation);
+    CHECK(std::fabs(rotated.z) > 0.5f);
+    CHECK(std::fabs(rotated.y) < 0.1f); // 绕 Y 转不该把 X 抬到 Y 上
+    interaction.End();
+}
+
+// 缩放：抓 Y 轴拖到 2 倍距离 ⇒ Y 分量翻倍
+TEST_CASE(gizmoDragScaleWritesComponent) {
+    const float w = 1280.0f;
+    const float h = 720.0f;
+    const GNg::sMAT44 viewProj = makeTestViewProj(w / h);
+
+    sGIZMO_DESC desc;
+    desc.aMode = eGIZMO_SCALE;
+    desc.aOrigin = vec(0.0f, 0.0f, 0.0f);
+    desc.aSize = 2.0f;
+
+    GNg::sVEC3 position = vec(0.0f, 0.0f, 0.0f);
+    GNg::sQUAT rotation;
+    GNg::sVEC3 scale = vec(1.0f, 1.0f, 1.0f);
+    GNg::sMAT44 transform;
+    GNg::Mat44Identity(&transform);
+
+    // 抓 Y 轴中点 (0, 1.0, 0)。三根轴的线段都只在原点相交，所以 (0,1,0) 只属于 Y 轴；
+    // 之前失败是因为投影辅助函数把 y 翻转了，算出的像素落在屏幕下方（射线朝下）。
+    float pressX = 0.0f;
+    float pressY = 0.0f;
+    projectToScreen(viewProj, vec(0.0f, 1.0f, 0.0f), w, h, &pressX, &pressY);
+
+    cGIZMO_INTERACTION interaction;
+    sGIZMO_SNAP snap;
+    CHECK(interaction.Begin(desc, snap, &transform, &position, &rotation, &scale, pressX, pressY,
+                            viewProj, w, h));
+    CHECK(interaction.Active());
+    CHECK_EQ((int)interaction.Axis(), (int)eGIZMO_AXIS_Y);
+
+    // 拖到 (0, 2.0, 0) ⇒ 投影翻倍 ⇒ 缩放比 ≈ 2
+    float dragX = 0.0f;
+    float dragY = 0.0f;
+    projectToScreen(viewProj, vec(0.0f, 2.0f, 0.0f), w, h, &dragX, &dragY);
+    interaction.Drag(dragX, dragY, viewProj, w, h);
+    CHECK_NEAR(scale.y, 2.0f, 0.1f);
+    CHECK_NEAR(scale.x, 1.0f, 1e-5); // 只动 Y
+    CHECK_NEAR(scale.z, 1.0f, 1e-5);
+    // 位置不该被缩放拖拽改动
+    CHECK_NEAR(position.x, 0.0f, 1e-5);
+    CHECK_NEAR(position.y, 0.0f, 1e-5);
+    interaction.End();
+}
+
+// 没抓住轴时 Begin 失败，且不改变任何状态
+TEST_CASE(gizmoBeginMissesAxis) {
+    const float w = 1280.0f;
+    const float h = 720.0f;
+    const GNg::sMAT44 viewProj = makeTestViewProj(w / h);
+
+    sGIZMO_DESC desc;
+    desc.aMode = eGIZMO_TRANSLATE;
+    desc.aOrigin = vec(0.0f, 0.0f, 0.0f);
+    desc.aSize = 2.0f;
+
+    GNg::sVEC3 position = vec(0.0f, 0.0f, 0.0f);
+    GNg::sQUAT rotation;
+    GNg::sVEC3 scale = vec(1.0f, 1.0f, 1.0f);
+    GNg::sMAT44 transform;
+    GNg::Mat44Identity(&transform);
+
+    cGIZMO_INTERACTION interaction;
+    sGIZMO_SNAP snap;
+    // 屏幕角落 —— 离三根轴都很远
+    CHECK(!interaction.Begin(desc, snap, &transform, &position, &rotation, &scale, 5.0f, 5.0f,
+                             viewProj, w, h));
+    CHECK(!interaction.Active());
+    CHECK(!interaction.Drag(600.0f, 400.0f, viewProj, w, h)); // 未激活时 Drag 无效
+    CHECK_NEAR(position.x, 0.0f, 1e-6);
+
+    // 空 TRS 指针：拒绝
+    cGIZMO_INTERACTION nullInteraction;
+    CHECK(!nullInteraction.Begin(desc, snap, nullptr, nullptr, nullptr, nullptr, 640.0f, 360.0f,
+                                 viewProj, w, h));
+}

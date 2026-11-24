@@ -206,5 +206,113 @@ GNg::sVEC3 gizmoAxisVector(const sGIZMO_DESC &desc, eGIZMO_AXIS axis);
 // 由四元数构造一个"只有旋转"的基（列 0/1/2 = 局部 X/Y/Z）。
 void gizmoBasisFromRotation(const GNg::sQUAT &rotation, GNg::sMAT44 *outBasis);
 
+// ═══════════════════════════════════════════════════════════
+//  吸附（A2）
+// ═══════════════════════════════════════════════════════════
+// 口径（每条都有用例）：
+//   * **0 或负值 = 关闭**。这是唯一合理的"关闭"表达 —— 不能要求调用方传一个
+//     "很大但不够大"的数来近似关闭。
+//   * 吸附用 `round(v / step) * step`，**不是** `floor`：floor 会让物体永远偏向负方向，
+//     拖到 0.9 格处会吸到 0 而不是 1。
+//   * 角度吸附在**弧度**上做，步长也按弧度给（调用方可传 deg*π/180）。
+//   * 缩放的"吸附"是**乘性步进**：1.0 → 1.25 → 1.5，而不是加性，否则放大后每档间距
+//     相对变小，手感不均匀。
+struct sGIZMO_SNAP {
+    float aTranslateStep; // 位置吸附步长（米）；<= 0 关闭
+    float aRotateStepRad; // 角度吸附步长（弧度）；<= 0 关闭
+    float aScaleStep; // 缩放吸附步长（倍率增量）；<= 0 关闭
+
+    sGIZMO_SNAP();
+};
+// 单值吸附。step <= 0 时原样返回（**不是**返回 0）。
+float snapToStep(float value, float step);
+
+// 把拖拽结果吸附成最终值。
+//   translate：对**每个分量**吸附；base 是拖拽开始时的位置，delta 是沿轴位移。
+//   rotate：把 base 角 + delta 吸附到最近的步长（不是吸附 delta —— 否则累积误差）。
+GNg::sVEC3 snapTranslate(const GNg::sVEC3 &base, const GNg::sVEC3 &axis, float delta,
+                         const sGIZMO_SNAP &snap);
+float snapRotate(float baseAngleRad, float deltaRad, const sGIZMO_SNAP &snap);
+float snapScale(float scale, const sGIZMO_SNAP &snap);
+
+// ═══════════════════════════════════════════════════════════
+//  输入接线（A1）：屏幕坐标 → 射线 → 拾取 → 拖拽 → 写回变换
+// ═══════════════════════════════════════════════════════════
+// 为什么需要"屏幕坐标 → 射线"这一步：`pickGizmo` 要的是世界空间射线，而输入子系统给的
+// 是像素坐标。这条转换（含 Vulkan 的 y 向下、NDC 的 z ∈ [0,1]）是**最容易写错的一步**，
+// 而它写错的表现是"控件点不中/点中隔壁轴"，不是崩溃 —— 所以单独成函数、单独测。
+//
+// screenX/screenY：像素坐标，**原点在左上角**（与 GN::MouseMX/MY 一致）。
+// viewProj：与渲染同一个矩阵（列主序）。
+// 返回 false 表示矩阵不可逆（此时 outOrigin/outDir 不修改）。
+bool gizmoRayFromScreen(const GNg::sMAT44 &viewProj, float screenX, float screenY, float screenW,
+                        float screenH, GNg::sVEC3 *outOrigin, GNg::sVEC3 *outDir);
+
+// 一次完整的拖拽会话。典型用法：
+//   onMouseDown:   interaction.Begin(desc, snap, &model->aTransform, &model->aPosition,
+//                                    &model->aRotation, &model->aScale,
+//                                    mouseX, mouseY, viewProj, w, h)
+//   onMouseMove:   interaction.Drag(mouseX, mouseY, viewProj, w, h)   → 自动写回 TRS
+//   onMouseUp:     interaction.End()
+//   onMouseMove（无按键时）：interaction.Hover(&desc, x, y, viewProj, w, h) → 只更新高亮
+//
+// TRS 写回后调用方仍需自己 `cMODEL::computeWorldAABB()`（引擎不替你重算 AABB ——
+// 那是每帧一次的操作，不该由控件隐式触发）。`aTransform` 由 UpdateTransform 重建，
+// 这里只在 Begin/Drag 里调一次，避免调用方忘记。
+//
+// 设计取舍：**不持有 cMODEL 的所有权**，也不缓存"每一帧的矩阵"。拖拽开始那一刻记下
+// 物体的原始 TRS，之后每次都用"原始值 + 吸附后的总位移"重算 —— 这样
+//   * 吸附不会累积误差（每帧都从 base 重算）；
+//   * 拖拽中途改吸附步长也不会跳变；
+//   * 松开鼠标不需要"回滚"逻辑。
+struct sGIZMO_DRAG_STATE {
+    bool aActive; // 是否正在拖拽
+    eGIZMO_MODE aMode;
+    eGIZMO_AXIS aAxis;
+    GNg::sVEC3 aStartOrigin; // 拖拽开始时控件所在位置
+    GNg::sVEC3 aStartModelPos; // 拖拽开始时模型的位置
+    GNg::sQUAT aStartModelRot; // 拖拽开始时模型的旋转
+    GNg::sVEC3 aStartModelScale; // 拖拽开始时模型的缩放
+    float aStartProjection; // translate: 起始投影值；rotate: 起始角；scale: 起始投影
+    GNg::sVEC3 aStartPlanePoint; // rotate: 起始点在该轴平面上的世界坐标
+    float aStartAngleRad; // rotate: 起始角
+    bool aLocalSpace;
+
+    sGIZMO_DRAG_STATE();
+};
+
+class cGIZMO_INTERACTION {
+  public:
+    // 开始拖拽。返回是否真的抓住了一根轴（false 时 aActive 保持 false）。
+    // model 必须非空；snap 里的 <= 0 字段表示该维度不吸附。
+    bool Begin(const sGIZMO_DESC &desc, const sGIZMO_SNAP &snap, GNg::sMAT44 *modelTransform,
+               GNg::sVEC3 *modelPosition, GNg::sQUAT *modelRotation, GNg::sVEC3 *modelScale,
+               float screenX, float screenY, const GNg::sMAT44 &viewProj, float screenW,
+               float screenH);
+
+    // 拖动。命中轴时把结果写回调用方给的 TRS 指针（Begin 时传的那几个）。
+    // 返回本帧是否有变化（无变化时不写，避免无谓的 AABB 重算）。
+    // 屏幕尺寸必须每次都传：窗口可能中途 resize（resize 后 viewProj 也变了）。
+    bool Drag(float screenX, float screenY, const GNg::sMAT44 &viewProj, float screenW,
+              float screenH);
+
+    void End();
+    bool Active() const;
+    eGIZMO_AXIS Axis() const;
+
+    // 悬停：只更新 desc.aHighlight，不改变任何变换。
+    // 返回命中的轴（用于光标形状/提示）。
+    static eGIZMO_AXIS Hover(sGIZMO_DESC *desc, float screenX, float screenY,
+                             const GNg::sMAT44 &viewProj, float screenW, float screenH);
+
+  private:
+    sGIZMO_DRAG_STATE aState;
+    sGIZMO_SNAP aSnap;
+    GNg::sMAT44 *aModelTransform;
+    GNg::sVEC3 *aModelPosition;
+    GNg::sQUAT *aModelRotation;
+    GNg::sVEC3 *aModelScale;
+};
+
 } // namespace GN3d
 #endif // _GN_GIZMO_H_

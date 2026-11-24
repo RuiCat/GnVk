@@ -663,6 +663,36 @@ void cENTITY::Update(float dt) {
     UpdateAnimation(dt);
 }
 
+bool cENTITY::BuildCameraTarget(sCAMERA_TARGET *out, float heightOffset) const {
+    if(out == 0) return false;
+    out->aValid = false;
+
+    // 1) 角色优先：胶囊中心比模型 AABB 中心更贴近"相机该看向哪"。
+    //    判定必须用 IsInitialized()，**不能**用 Desc().aHeight > 0 ——
+    //    desc 的默认值就是 1.7，拿数值猜会让所有实体都跑到"原点上的假角色"分支。
+    if(aCharacter.IsInitialized()) {
+        const GNg::sVEC3 center = aCharacter.Position();
+        out->aPosition = GNg::sVEC3{center.x, center.y + heightOffset, center.z};
+        if(aMesh.Model() != 0) out->aBounds = aMesh.Model()->aWorldAABB;
+        out->aValid = true;
+        return true;
+    }
+
+    // 2) 网格模型：用世界 AABB 中心（比 transform 的平移列更准 —— 模型的几何中心
+    //    不一定在原点，PMX/GLB 常见"脚底在原点"的建模习惯）。
+    const cMODEL *model = aMesh.Model();
+    if(model != 0 && model->aWorldAABB.IsValid()) {
+        const GNg::sVEC3 center = model->aWorldAABB.Center();
+        out->aPosition = GNg::sVEC3{center.x, center.y + heightOffset, center.z};
+        out->aBounds = model->aWorldAABB;
+        out->aValid = true;
+        return true;
+    }
+
+    // 3) 什么都没有：**不要**给一个原点的假目标（相机会莫名其妙一直盯着世界原点）。
+    return false;
+}
+
 void cENTITY::UpdateAnimation(float dt) {
     // 2) 动画：状态机优先（有则按参数转换并驱动播放器），否则走手工播放的时间轴。
     if(aAnim.StateMachineActive()) {

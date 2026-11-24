@@ -558,3 +558,106 @@ TEST_CASE(entityRenderFrameWithoutDevice) {
     CHECK(!frame.ShadowPass(casters, 2u, nullptr, 4u));
     CHECK(!frame.ShadowPass(casters, 0u, nullptr, 4u)); // 0 个 caster
 }
+
+// ── C1：相机跟随目标（BuildCameraTarget）─────────────
+// 这个 helper 存在的意义就是"别让每个调用点自己挑位置来源"。三条优先级各一个用例。
+TEST_CASE(entityBuildCameraTargetFromModel) {
+    cENTITY entity;
+    cMODEL *model = CreateCubeModel(2.0f);
+    CHECK(model != nullptr);
+    model->SetPosition(3.0f, 5.0f, -2.0f);
+    model->computeWorldAABB();
+    entity.aMesh.SetModel(model);
+
+    sCAMERA_TARGET target;
+    // 无高度偏移 ⇒ AABB 中心
+    CHECK(entity.BuildCameraTarget(&target, 0.0f));
+    CHECK(target.aValid);
+    CHECK_NEAR(target.aPosition.x, 3.0f, 1e-4);
+    CHECK_NEAR(target.aPosition.y, 5.0f, 1e-4);
+    CHECK_NEAR(target.aPosition.z, -2.0f, 1e-4);
+    CHECK(target.aBounds.IsValid());
+    CHECK_NEAR(target.aBounds.aMin.y, 4.0f, 1e-4);
+
+    // 带高度偏移 ⇒ 在中心之上（第三人称看向头部）
+    CHECK(entity.BuildCameraTarget(&target, 0.8f));
+    CHECK_NEAR(target.aPosition.y, 5.8f, 1e-4);
+
+    entity.aMesh.SetModel(nullptr);
+    delete model;
+}
+
+// 角色优先于网格：胶囊中心比模型 AABB 中心更适合当相机目标。
+TEST_CASE(entityBuildCameraTargetPrefersCharacter) {
+    cENTITY entity;
+    cMODEL *model = CreateCubeModel(2.0f);
+    model->SetPosition(0.0f, 5.0f, 0.0f);
+    model->computeWorldAABB();
+    entity.aMesh.SetModel(model);
+
+    sCAMERA_TARGET target;
+    CHECK(entity.BuildCameraTarget(&target, 0.0f));
+    const float modelY = target.aPosition.y;
+
+    // 初始化角色在别处：目标应该切到胶囊中心
+    sCHARACTER_DESC desc;
+    desc.aHeight = 1.7f;
+    desc.aRadius = 0.3f;
+    entity.aCharacter.Init(desc);
+    entity.aCharacter.SetPosition(GNg::sVEC3{10.0f, 1.0f, 0.0f});
+
+    CHECK(entity.BuildCameraTarget(&target, 0.0f));
+    CHECK_NEAR(target.aPosition.x, 10.0f, 1e-4); // 用胶囊的位置
+    CHECK_NEAR(target.aPosition.y, 1.0f, 1e-4);
+    CHECK(std::fabs(target.aPosition.y - modelY) > 1.0f); // 确实不是模型那个
+
+    entity.aMesh.SetModel(nullptr);
+    delete model;
+}
+
+// 什么都没有：返回 false，**不要**给一个"看起来像原点"的假目标。
+TEST_CASE(entityBuildCameraTargetWithoutVisual) {
+    cENTITY entity;
+    sCAMERA_TARGET target;
+    target.aPosition = GNg::sVEC3{7.0f, 7.0f, 7.0f}; // 预填一个可识别的值
+    CHECK(!entity.BuildCameraTarget(&target, 0.0f));
+    CHECK(!target.aValid);
+    // 位置不该被写成原点（虽然 aValid=false 时调用方应当忽略它）
+    CHECK_NEAR(target.aPosition.x, 7.0f, 1e-6);
+
+    // 空指针安全
+    CHECK(!entity.BuildCameraTarget(nullptr, 0.0f));
+}
+
+// 端到端：把目标喂给真实相机，相机确实朝它移动。
+TEST_CASE(entityCameraFollowsEntity) {
+    cENTITY entity;
+    cMODEL *model = CreateCubeModel(1.0f);
+    model->SetPosition(0.0f, 0.0f, 0.0f);
+    model->computeWorldAABB();
+    entity.aMesh.SetModel(model);
+
+    cCAMERA camera;
+    camera.Init();
+    camera.SetOrbit(GNg::sVEC3{0.0f, 0.0f, 0.0f}, 8.0f, 0.0f, 0.25f);
+
+    sCAMERA_TARGET target;
+    CHECK(entity.BuildCameraTarget(&target, 0.0f));
+    camera.SetTarget(target, 0.25f);
+    CHECK(camera.HasTarget());
+    for (int i = 0; i < 30; ++i) camera.Update(1.0f / 60.0f);
+    // 焦点是私有的（只暴露 SetOrbitFocus），所以断言"相机世界位置"——
+    // 轨道模式下距离固定，焦点往 +X 走会带着相机一起平移。
+    const float beforeX = camera.GetCoordV().x;
+
+    // 实体跑到 +X 6 m 处，相机焦点应当追过去
+    model->SetPosition(6.0f, 0.0f, 0.0f);
+    model->computeWorldAABB();
+    CHECK(entity.BuildCameraTarget(&target, 0.0f));
+    camera.SetTarget(target, 0.25f);
+    for (int i = 0; i < 90; ++i) camera.Update(1.0f / 60.0f);
+    CHECK(camera.GetCoordV().x > beforeX + 3.0f);
+
+    entity.aMesh.SetModel(nullptr);
+    delete model;
+}

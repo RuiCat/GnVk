@@ -92,6 +92,27 @@ void GN_VkEnableGI(bool enable) {
     }
 }
 
+// 注意：GN_VkEnableGI 保持"漫反射与镜面同为 0/1"的原语义（既有验收依赖它），
+// 没有改成转调 SetGIIntensity(scale, 1.0f) —— 那会把镜面倍率从 1 变成 0.25，
+// 改变已有画面。两者是并列关系：EnableGI 是开关，SetGIIntensity 是调光。
+
+// B1：环境光强度连续可调。与 GN_VkEnableGI 写同一对字段，但允许任意倍率。
+void GN_VkSetGIIntensity(float scale, float specularRatio) {
+    if(GN_Vk.giUBOMemory == VK_NULL_HANDLE) return;
+    if(!(scale >= 0.0f)) scale = 0.0f; // 同时处理 NaN
+    if(scale > 4.0f) scale = 4.0f;
+    if(!(specularRatio >= 0.0f)) specularRatio = 0.0f;
+    if(specularRatio > 4.0f) specularRatio = 4.0f;
+    void *mapped = nullptr;
+    vkMapMemory(GN_Vk.device, GN_Vk.giUBOMemory, 0, sizeof(GN3d::sGI_UBO), 0, &mapped);
+    if(mapped) {
+        GN3d::sGI_UBO *ubo = (GN3d::sGI_UBO *)mapped;
+        ubo->indirect[0] = scale; // 漫反射倍率
+        ubo->indirect[1] = scale * specularRatio; // 镜面倍率
+        vkUnmapMemory(GN_Vk.device, GN_Vk.giUBOMemory);
+    }
+}
+
 // L0a：单独开关 SSAO（GI UBO.indirect.w），保留倍率/SH9/envParams 不变。
 void GN_VkSetSsaoEnabled(bool enable) {
     if(GN_Vk.giUBOMemory == VK_NULL_HANDLE) return;

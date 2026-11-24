@@ -711,6 +711,19 @@ void GN_VkSetGI(const GN3d::sGI_UBO &ubo);
 // 保留 SH9/envParams/invViewProj；GI UBO 不存在时静默返回。
 void GN_VkEnableGI(bool enable);
 
+// — B1：**环境光（IBL）强度连续可调**。复用 indirect[0]/[1]（这两个字段的语义本来就是
+// "漫反射倍率 / 镜面倍率"，此前只有 0 和 1 两档，等于把倍率当布尔用）。
+//
+// 为什么必须有它：天空 IBL 的贡献量级很容易盖过方向光。实测在火焰场景里把环境光与
+// 所有光源都归零后画面仍然被照亮 —— 那是 IBL 在出光，于是方向光的阴影只占最终色的
+// 一小部分，投影几乎看不见。没有连续倍率就只能"要么全开要么全关"。
+//
+// scale：漫反射倍率，钳制到 [0, 4]；镜面倍率取 scale * specularRatio（默认 0.25，
+// 与 INDOOR 预设一致 —— 环境镜面反射通常比漫反射弱得多）。
+// scale == 0 等价于 GN_VkEnableGI(false)；scale == 1 等价于 GN_VkEnableGI(true)。
+// GI UBO 不存在时静默返回。
+void GN_VkSetGIIntensity(float scale, float specularRatio = 0.25f);
+
 // — G1b：环境光照预设（引擎侧决定来源，demo 只传语义）—
 // INDOOR：均匀暖灰 SH9 + 漫反射 1/镜面 0.25/AO 1/SSAO 0（避免天空 IBL 把室内洗蓝）；
 // SKY：恢复烘焙环境的 GI UBO（未烘过则保留当前值）。ambientScale 仅 INDOOR 使用，钳制 [0,4]。

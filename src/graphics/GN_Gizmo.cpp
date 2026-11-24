@@ -695,4 +695,320 @@ float gizmoDragScale(const sGIZMO_DESC &desc, eGIZMO_AXIS dragAxis,
     return ratio;
 }
 
+
+// ═══════════════════════════════════════════════════════════
+//  吸附（A2）
+// ═══════════════════════════════════════════════════════════
+sGIZMO_SNAP::sGIZMO_SNAP() : aTranslateStep(0.0f), aRotateStepRad(0.0f), aScaleStep(0.0f) {}
+
+float snapToStep(float value, float step) {
+    // step <= 0 = 关闭。**不要**用 "step 很大" 来近似关闭：那样第一格就吸到 0 了。
+    if (!(step > 0.0f)) return value;
+    if (!std::isfinite(value)) return value;
+    // round 而不是 floor：floor 会让物体永远偏向负方向（0.9 格吸到 0 而不是 1）
+    return std::round(value / step) * step;
+}
+
+GNg::sVEC3 snapTranslate(const GNg::sVEC3 &base, const GNg::sVEC3 &axis, float delta,
+                         const sGIZMO_SNAP &snap) {
+    GNg::sVEC3 result = add(base, mul(axis, delta));
+    if (!(snap.aTranslateStep > 0.0f)) return result;
+    // 只吸附"沿轴方向"能被吸附的那一个分量？不 —— 吸附是对**世界坐标**做的：
+    // 物体的每个分量都应该落到整数格上，否则沿 X 拖动会把 Y/Z 留在 0.37 这种值上。
+    result.x = snapToStep(result.x, snap.aTranslateStep);
+    result.y = snapToStep(result.y, snap.aTranslateStep);
+    result.z = snapToStep(result.z, snap.aTranslateStep);
+    return result;
+}
+
+float snapRotate(float baseAngleRad, float deltaRad, const sGIZMO_SNAP &snap) {
+    const float total = baseAngleRad + deltaRad;
+    if (!(snap.aRotateStepRad > 0.0f)) return total;
+    // 吸附"总角度"而不是 delta：吸附 delta 会让每帧的舍入误差累积成漂移
+    return snapToStep(total, snap.aRotateStepRad);
+}
+
+float snapScale(float scale, const sGIZMO_SNAP &snap) {
+    if (!(snap.aScaleStep > 0.0f)) return scale;
+    // 乘性步进：round 到最近的 step 倍数（1.0 → 1.25 → 1.5 …）。
+    // 用加性步进的话，放大后每档的相对间距会变小，手感不均匀。
+    return snapToStep(scale, snap.aScaleStep);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  输入接线（A1）
+// ═══════════════════════════════════════════════════════════
+bool gizmoRayFromScreen(const GNg::sMAT44 &viewProj, float screenX, float screenY, float screenW,
+                        float screenH, GNg::sVEC3 *outOrigin, GNg::sVEC3 *outDir) {
+    if (outOrigin == 0 || outDir == 0) return false;
+    if (!(screenW > 0.0f) || !(screenH > 0.0f)) return false;
+
+    GNg::sMAT44 inverse;
+    GNg::Mat44Inverse(&inverse, &viewProj);
+    // 有限性只是一个粗糙的过滤：**全零矩阵的逆是全 1 矩阵**（不是 NaN），
+    // 光查 isfinite 抓不住它，会得到一条朝 +Z 的假射线。所以再乘回原矩阵验证。
+    for (int i = 0; i < 16; ++i) {
+        if (!std::isfinite(inverse.m[i])) return false;
+    }
+    GNg::sMAT44 identityCheck;
+    GNg::Mat44Mul(&identityCheck, &inverse, &viewProj);
+    for (int i = 0; i < 16; ++i) {
+        const float expected = (i % 5 == 0) ? 1.0f : 0.0f;
+        if (std::fabs(identityCheck.m[i] - expected) > 1.0e-3f) return false;
+    }
+
+    // 像素 → NDC。
+    //   x：0..W  →  -1..1（Vulkan 与 GL 同）
+    //   y：0..H  →  -1..1（**不翻转**！见下）
+    //   z：近平面取 0（Vulkan 的 NDC z ∈ [0,1]，0 就是 near）
+    //
+    // 关于 y：直觉上"像素原点在左上、NDC +y 朝上 ⇒ 要翻转"，但 Vulkan 的 NDC **y 轴朝下**，
+    // 而 `Mat44PerspectiveVK` 里已经有这次翻转（它的 m[5] 是负数）。再翻一次等于翻回来：
+    // 实测"屏幕上方的像素"会得到朝下的射线（控件上下颠倒、点不中）。
+    // 口径以实测为准：y 与 x 一样是 0..H → -1..1 的线性映射。
+    const float ndcX = 2.0f * (screenX / screenW) - 1.0f;
+    const float ndcY = 2.0f * (screenY / screenH) - 1.0f;
+
+    // 用两个点（near / far）反投影，连线即射线。比"反投影一个方向向量"稳：
+    // 方向向量反投影时 w 分量不为 1，需要额外除法，容易漏。
+    const GNg::sVEC4 nearH = {ndcX, ndcY, 0.0f, 1.0f};
+    const GNg::sVEC4 farH = {ndcX, ndcY, 1.0f, 1.0f};
+    const float nx = inverse.m[0] * nearH.x + inverse.m[4] * nearH.y + inverse.m[8] * nearH.z +
+                     inverse.m[12] * nearH.w;
+    const float ny = inverse.m[1] * nearH.x + inverse.m[5] * nearH.y + inverse.m[9] * nearH.z +
+                     inverse.m[13] * nearH.w;
+    const float nz = inverse.m[2] * nearH.x + inverse.m[6] * nearH.y + inverse.m[10] * nearH.z +
+                     inverse.m[14] * nearH.w;
+    const float nw = inverse.m[3] * nearH.x + inverse.m[7] * nearH.y + inverse.m[11] * nearH.z +
+                     inverse.m[15] * nearH.w;
+    const float fx = inverse.m[0] * farH.x + inverse.m[4] * farH.y + inverse.m[8] * farH.z +
+                     inverse.m[12] * farH.w;
+    const float fy = inverse.m[1] * farH.x + inverse.m[5] * farH.y + inverse.m[9] * farH.z +
+                     inverse.m[13] * farH.w;
+    const float fz = inverse.m[2] * farH.x + inverse.m[6] * farH.y + inverse.m[10] * farH.z +
+                     inverse.m[14] * farH.w;
+    const float fw = inverse.m[3] * farH.x + inverse.m[7] * farH.y + inverse.m[11] * farH.z +
+                     inverse.m[15] * farH.w;
+    if (!(std::fabs(nw) > 1.0e-9f) || !(std::fabs(fw) > 1.0e-9f)) return false;
+
+    const GNg::sVEC3 nearPoint = vec(nx / nw, ny / nw, nz / nw);
+    const GNg::sVEC3 farPoint = vec(fx / fw, fy / fw, fz / fw);
+    GNg::sVEC3 direction = sub(farPoint, nearPoint);
+    if (!normalize(direction)) return false;
+
+    *outOrigin = nearPoint;
+    *outDir = direction;
+    return true;
+}
+
+sGIZMO_DRAG_STATE::sGIZMO_DRAG_STATE()
+    : aActive(false), aMode(eGIZMO_TRANSLATE), aAxis(eGIZMO_AXIS_NONE),
+      aStartOrigin{0.0f, 0.0f, 0.0f}, aStartModelPos{0.0f, 0.0f, 0.0f}, aStartModelRot(),
+      aStartModelScale{1.0f, 1.0f, 1.0f}, aStartProjection(0.0f),
+      aStartPlanePoint{0.0f, 0.0f, 0.0f}, aStartAngleRad(0.0f), aLocalSpace(false) {}
+
+// 四元数乘法（w,x,y,z 顺序的 Hamilton 积）。引擎只暴露了 FromAxisAngle，
+// 没有 Mul —— 旋转拖拽需要"新旋转 = 增量 × 原始旋转"，所以在这里实现一份。
+namespace {
+GNg::sQUAT quatMul(const GNg::sQUAT &a, const GNg::sQUAT &b) {
+    GNg::sQUAT out;
+    out.w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z;
+    out.x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y;
+    out.y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x;
+    out.z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w;
+    return out;
+}
+} // namespace
+
+bool cGIZMO_INTERACTION::Begin(const sGIZMO_DESC &desc, const sGIZMO_SNAP &snap,
+                               GNg::sMAT44 *modelTransform, GNg::sVEC3 *modelPosition,
+                               GNg::sQUAT *modelRotation, GNg::sVEC3 *modelScale, float screenX,
+                               float screenY, const GNg::sMAT44 &viewProj, float screenW,
+                               float screenH) {
+    aState = sGIZMO_DRAG_STATE();
+    aSnap = snap;
+    aModelTransform = modelTransform;
+    aModelPosition = modelPosition;
+    aModelRotation = modelRotation;
+    aModelScale = modelScale;
+    if (modelPosition == 0 && modelRotation == 0 && modelScale == 0) return false;
+
+    GNg::sVEC3 rayOrigin;
+    GNg::sVEC3 rayDir;
+    if (!gizmoRayFromScreen(viewProj, screenX, screenY, screenW, screenH, &rayOrigin, &rayDir)) {
+        return false;
+    }
+    // 拾取容差按控件尺寸给（与视觉上的粗细一致）
+    const float pickRadius = desc.aSize * 0.10f;
+    const eGIZMO_AXIS axis = pickGizmo(desc, rayOrigin, rayDir, pickRadius);
+    if (axis == eGIZMO_AXIS_NONE) return false;
+
+    aState.aActive = true;
+    aState.aMode = desc.aMode;
+    aState.aAxis = axis;
+    aState.aStartOrigin = desc.aOrigin;
+    aState.aLocalSpace = desc.aLocalSpace;
+    if (modelPosition != 0) aState.aStartModelPos = *modelPosition;
+    if (modelRotation != 0) aState.aStartModelRot = *modelRotation;
+    if (modelScale != 0) aState.aStartModelScale = *modelScale;
+
+    if (desc.aMode == eGIZMO_ROTATE && axis >= 0 && axis <= 2) {
+        // 记下"按下那一刻"在该轴平面上的点与角度，之后每帧算夹角差
+        const GNg::sVEC3 normal = gizmoAxisVector(desc, axis);
+        const float denom = dot(rayDir, normal);
+        if (std::fabs(denom) > 1.0e-6f) {
+            const float t = dot(sub(desc.aOrigin, rayOrigin), normal) / denom;
+            if (t > 0.0f) {
+                const GNg::sVEC3 hit = add(rayOrigin, mul(rayDir, t));
+                aState.aStartPlanePoint = hit;
+                const GNg::sVEC3 rel = sub(hit, desc.aOrigin);
+                const GNg::sVEC3 u = anyPerpendicular(normal);
+                const GNg::sVEC3 v = cross(normal, u);
+                aState.aStartAngleRad = std::atan2(dot(rel, v), dot(rel, u));
+            }
+        }
+    } else if (axis >= 0 && axis <= 2) {
+        aState.aStartProjection = gizmoDragTranslate(desc, axis, rayOrigin, rayDir);
+    }
+    return true;
+}
+
+bool cGIZMO_INTERACTION::Drag(float screenX, float screenY, const GNg::sMAT44 &viewProj,
+                              float screenW, float screenH) {
+    if (!aState.aActive) return false;
+    if (aState.aAxis < 0 || aState.aAxis > 2) return false; // 中心方块（XYZ）暂不参与拖拽
+
+    GNg::sVEC3 rayOrigin;
+    GNg::sVEC3 rayDir;
+    if (!gizmoRayFromScreen(viewProj, screenX, screenY, screenW, screenH, &rayOrigin, &rayDir)) {
+        return false;
+    }
+
+    // 重建一份"当前"控件描述：原点跟着物体走，基跟着当前旋转走。
+    // 不能直接用 Begin 时那份 —— 平移过程中原点在动（否则拖拽会绕回起点）。
+    sGIZMO_DESC desc;
+    desc.aMode = aState.aMode;
+    desc.aOrigin = aState.aStartOrigin;
+    desc.aLocalSpace = aState.aLocalSpace;
+    GNg::Mat44Identity(&desc.aBasis);
+    desc.aSize = 1.0f; // 尺寸只影响拾取容差；拖拽阶段不再拾取，用不到
+    if (aState.aLocalSpace && aModelRotation != 0) {
+        gizmoBasisFromRotation(*aModelRotation, &desc.aBasis);
+    }
+    // 重要：拖拽算的是"从起始点开始的**总**位移"，所以参考原点必须是 Begin 时记下的
+    // 那个 aStartOrigin，而不是物体当前所在位置。否则每帧的位移会被重复累加。
+    desc.aOrigin = aState.aStartOrigin;
+
+    const eGIZMO_AXIS axis = aState.aAxis;
+    if (aState.aMode == eGIZMO_TRANSLATE) {
+        if (aModelPosition == 0) return false;
+        const GNg::sVEC3 axisDir = gizmoAxisVector(desc, axis);
+        float projection = 0.0f;
+        if (!projectRayOnLine(desc.aOrigin, axisDir, rayOrigin, rayDir, projection)) return false;
+        const float delta = projection - aState.aStartProjection;
+        const GNg::sVEC3 next =
+            snapTranslate(aState.aStartModelPos, axisDir, delta, aSnap);
+        // 无变化就不写（避免每帧重算 AABB）
+        if (std::fabs(next.x - aModelPosition->x) < 1e-6f &&
+            std::fabs(next.y - aModelPosition->y) < 1e-6f &&
+            std::fabs(next.z - aModelPosition->z) < 1e-6f) {
+            return false;
+        }
+        *aModelPosition = next;
+        // **不要**更新 aState.aStartOrigin。它是拖拽起点的锚：每帧都用
+        // "投影(当前射线) - 投影(起点射线)"算**总**位移，锚一旦移动，位移会被反复叠加
+        // （第一版写了 aStartOrigin = next，表现为拖 1 cm 物体飞出去）。
+        // 控件的绘制位置由调用方按物体当前位置构造 desc.aOrigin，与这里无关。
+        if (aModelTransform != 0) {
+            aModelTransform->m[12] = next.x;
+            aModelTransform->m[13] = next.y;
+            aModelTransform->m[14] = next.z;
+        }
+        return true;
+    }
+
+    if (aState.aMode == eGIZMO_ROTATE) {
+        if (aModelRotation == 0) return false;
+        const GNg::sVEC3 normal = gizmoAxisVector(desc, axis);
+        const float denom = dot(rayDir, normal);
+        if (std::fabs(denom) < 1e-6f) return false;
+        const float t = dot(sub(desc.aOrigin, rayOrigin), normal) / denom;
+        if (t <= 0.0f) return false;
+        const GNg::sVEC3 hit = add(rayOrigin, mul(rayDir, t));
+        const GNg::sVEC3 rel = sub(hit, desc.aOrigin);
+        const GNg::sVEC3 u = anyPerpendicular(normal);
+        const GNg::sVEC3 v = cross(normal, u);
+        const float angle = std::atan2(dot(rel, v), dot(rel, u));
+        float deltaAngle = angle - aState.aStartAngleRad;
+        // 归一到 (-pi, pi]：手转一圈应该回到 0 而不是累加到 2pi
+        while (deltaAngle > 3.14159265358979323846f) deltaAngle -= 6.28318530717958647692f;
+        while (deltaAngle <= -3.14159265358979323846f) deltaAngle += 6.28318530717958647692f;
+        float total = deltaAngle;
+        if (aSnap.aRotateStepRad > 0.0f) total = snapToStep(deltaAngle, aSnap.aRotateStepRad);
+
+        // 增量旋转 × 原始旋转。gizmoAxisVector 已经处理了 local/global：
+        // 局部模式下它返回的是"局部轴在世界空间的方向"，正好可以直接当世界轴用。
+        const GNg::sVEC3 rotAxis = gizmoAxisVector(desc, axis);
+        GNg::sQUAT increment;
+        GNg::QuatFromAxisAngle(&increment, &rotAxis, total);
+        GNg::sQUAT next = quatMul(increment, aState.aStartModelRot);
+        GNg::QuatNormalize(&next, &next);
+        *aModelRotation = next;
+        return true;
+    }
+
+    // 缩放：沿轴的投影比，作用到"该轴对应的那一个缩放分量"上
+    if (aState.aMode == eGIZMO_SCALE) {
+        if (aModelScale == 0) return false;
+        const GNg::sVEC3 axisDir = gizmoAxisVector(desc, axis);
+        float projection = 0.0f;
+        if (!projectRayOnLine(desc.aOrigin, axisDir, rayOrigin, rayDir, projection)) return false;
+        const float start = aState.aStartProjection;
+        if (!(std::fabs(start) > 1e-4f)) return false;
+        float ratio = projection / start;
+        if (!(ratio > 0.01f)) ratio = 0.01f;
+        GNg::sVEC3 next = aState.aStartModelScale;
+        // 只改"被拖的那一根轴"的缩放分量。起始分量必须按轴取 —— 用 .x 会在拖 Y/Z 时
+        // 把 X 的缩放当成基准，三个方向的初始缩放不同时立刻算错。
+        float base = aState.aStartModelScale.x;
+        if (axis == eGIZMO_AXIS_Y) base = aState.aStartModelScale.y;
+        else if (axis == eGIZMO_AXIS_Z) base = aState.aStartModelScale.z;
+        float value = base * ratio;
+        if (aSnap.aScaleStep > 0.0f) value = snapToStep(value, aSnap.aScaleStep);
+        if (!(value > 0.01f)) value = 0.01f;
+        if (axis == eGIZMO_AXIS_X) next.x = value;
+        else if (axis == eGIZMO_AXIS_Y) next.y = value;
+        else next.z = value;
+        *aModelScale = next;
+        return true;
+    }
+
+    return false;
+}
+
+void cGIZMO_INTERACTION::End() {
+    aState = sGIZMO_DRAG_STATE();
+    aModelTransform = 0;
+    aModelPosition = 0;
+    aModelRotation = 0;
+    aModelScale = 0;
+}
+
+bool cGIZMO_INTERACTION::Active() const { return aState.aActive; }
+
+eGIZMO_AXIS cGIZMO_INTERACTION::Axis() const { return aState.aAxis; }
+
+eGIZMO_AXIS cGIZMO_INTERACTION::Hover(sGIZMO_DESC *desc, float screenX, float screenY,
+                                     const GNg::sMAT44 &viewProj, float screenW, float screenH) {
+    if (desc == 0) return eGIZMO_AXIS_NONE;
+    GNg::sVEC3 rayOrigin;
+    GNg::sVEC3 rayDir;
+    if (!gizmoRayFromScreen(viewProj, screenX, screenY, screenW, screenH, &rayOrigin, &rayDir)) {
+        return eGIZMO_AXIS_NONE;
+    }
+    const eGIZMO_AXIS axis = pickGizmo(*desc, rayOrigin, rayDir, desc->aSize * 0.10f);
+    desc->aHighlight = axis;
+    return axis;
+}
+
 } // namespace GN3d

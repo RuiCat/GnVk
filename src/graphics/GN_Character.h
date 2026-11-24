@@ -100,6 +100,12 @@ class cCHARACTER {
     // 不这样做的话，瞬移后上一帧的落地速度会让角色立刻弹飞或穿地。
     void Teleport(const GNg::sVEC3 &centerPos);
 
+    // 是否调用过 Init()。
+    // **不要**用 `Desc().aHeight > 0` 来判断"有没有角色"：desc 的默认值就是 1.7，
+    // 拿数值猜初始化状态会把"从未 Init 的默认对象"误判成"有个站在原点的角色"
+    // （相机跟随的第一个版本就是这么错的，所有实体的目标位置都变成原点）。
+    bool IsInitialized() const;
+
     bool IsGrounded() const;
     float GroundNormalY() const; // 无地面 = 0
     float SlopeDeg() const; // 无地面 = 0
@@ -148,6 +154,7 @@ class cCHARACTER {
     GNg::sVEC3 aFootPosition;
     GNg::sVEC3 aVelocity;
     GNg::sVEC3 aGravity;
+    bool aInited; // Init() 是否调用过
     bool aGrounded;
     bool aStuck;
     float aGroundNormalY;

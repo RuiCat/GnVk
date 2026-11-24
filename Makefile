@@ -427,6 +427,26 @@ $(GIZMO_VIDEO_BIN): $(GIZMO_VIDEO_SRC) $(TARGET)
 	@mkdir -p build
 	$(CXX) $(GIZMO_VIDEO_FLAGS) $(GIZMO_VIDEO_SRC) $(TEST_LIBS) -o $(GIZMO_VIDEO_BIN)
 
+# ── 控件交互演示（真实鼠标路径 + 吸附 + 相机跟随）──
+GIZMO_INPUT_SRC   := $(wildcard tests/gizmoInput/*.cpp)
+GIZMO_INPUT_BIN   := build/gizmoInput
+GIZMO_INPUT_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+
+.PHONY: gizmoInput
+gizmoInput: $(GIZMO_INPUT_BIN)
+	@echo "$(YELLOW)🖱  渲染控件交互演示（$(GIZMO_VIDEO_OUT)/gizmo-input.mp4）...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(GIZMO_INPUT_BIN) --out $(GIZMO_VIDEO_OUT)/gizmo-input-frames \
+		--frames 300 --size $(GIZMO_VIDEO_SIZE)
+	@$(FFMPEG) -y -loglevel error -framerate 30 -i $(GIZMO_VIDEO_OUT)/gizmo-input-frames/frame_%05d.png \
+		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart \
+		$(GIZMO_VIDEO_OUT)/gizmo-input.mp4
+	@ls -lh $(GIZMO_VIDEO_OUT)/gizmo-input.mp4
+
+$(GIZMO_INPUT_BIN): $(GIZMO_INPUT_SRC) $(TARGET)
+	@echo "$(YELLOW)🖱  编译控件交互演示...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(GIZMO_INPUT_FLAGS) $(GIZMO_INPUT_SRC) $(TEST_LIBS) -o $(GIZMO_INPUT_BIN)
+
 # ── 示例无窗口冒烟（所有示例在 GN_HEADLESS_FRAMES 下跑固定帧数）──
 # 依赖只取「编译」产物：不能依赖 headlessCheck/gpuCheck 这些 .PHONY 运行目标，
 # 否则它们会先以窗口模式跑一次（无显示时 SKIP → make 直接失败）。
