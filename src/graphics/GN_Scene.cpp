@@ -18,8 +18,11 @@ namespace GN3d {
 
 sDRAW_ITEM::sDRAW_ITEM() : aEntity(nullptr), aDistance(0.0f), aTransparent(false) {}
 
+sSELECTION_CHANGE::sSELECTION_CHANGE() : aChanged(false), aDeselected(false) {}
+
 cSCENE::cSCENE()
-    : aPolicy(), aPhysics(nullptr), aCull(true), aSort(true), aCulled(0), aRejected(0) {}
+    : aPrimary(nullptr), aPolicy(), aPhysics(nullptr), aCull(true), aSort(true), aCulled(0),
+      aRejected(0) {}
 
 bool cSCENE::Add(cENTITY *entity) {
     if(entity == nullptr) return false;
@@ -34,6 +37,14 @@ bool cSCENE::Remove(cENTITY *entity) {
     for(size_t i = 0; i < aEntities.size(); ++i) {
         if(aEntities[i] != entity) continue;
         aEntities.erase(aEntities.begin() + (long)i);
+        // 同步选择集：留在里面的实体指针一旦被外部 delete，下一次拖拽就是 UAF。
+        // 这是"选择集放在 cSCENE 里"最主要的理由。
+        for(size_t k = 0; k < aSelection.size(); ++k) {
+            if(aSelection[k] != entity) continue;
+            aSelection.erase(aSelection.begin() + (long)k);
+            if(aPrimary == entity) aPrimary = aSelection.empty() ? nullptr : aSelection.back();
+            break;
+        }
         return true;
     }
     return false;
@@ -41,6 +52,8 @@ bool cSCENE::Remove(cENTITY *entity) {
 
 void cSCENE::Clear() {
     aEntities.clear();
+    aSelection.clear();
+    aPrimary = nullptr;
     aDrawOrder.clear();
     aCulled = 0;
     aRejected = 0;
@@ -161,6 +174,90 @@ uint32_t cSCENE::DrawShadow() const {
     }
     return drawn;
 }
+
+// ═══════════════════════════════════════════════════════════
+//  选择集（A3）
+// ═══════════════════════════════════════════════════════════
+bool cSCENE::Select(cENTITY *entity) {
+    if(entity == nullptr) return false;
+    // 必须已在场景里：否则"选中"一个不受场景管理的对象，后续操作没有意义
+    bool inScene = false;
+    for(size_t i = 0; i < aEntities.size(); ++i) {
+        if(aEntities[i] == entity) {
+            inScene = true;
+            break;
+        }
+    }
+    if(!inScene) return false;
+    aSelection.clear();
+    aSelection.push_back(entity);
+    aPrimary = entity;
+    return true;
+}
+
+bool cSCENE::Toggle(cENTITY *entity) {
+    if(entity == nullptr) return false;
+    for(size_t i = 0; i < aSelection.size(); ++i) {
+        if(aSelection[i] != entity) continue;
+        aSelection.erase(aSelection.begin() + (long)i);
+        if(aPrimary == entity) aPrimary = aSelection.empty() ? nullptr : aSelection.back();
+        return true;
+    }
+    return AddToSelection(entity);
+}
+
+bool cSCENE::AddToSelection(cENTITY *entity) {
+    if(entity == nullptr) return false;
+    bool inScene = false;
+    for(size_t i = 0; i < aEntities.size(); ++i) {
+        if(aEntities[i] == entity) {
+            inScene = true;
+            break;
+        }
+    }
+    if(!inScene) return false;
+    for(size_t i = 0; i < aSelection.size(); ++i) {
+        if(aSelection[i] == entity) return false; // 已在集合里
+    }
+    aSelection.push_back(entity);
+    // **不改变 aPrimary**（只在原本没有主选中时才设）。
+    // 语义：`AddToSelection` / Ctrl+点击 是"往集合里加一个"，不是"切换当前操作对象"。
+    // 若这里改 aPrimary，就会出现"多选之后 Gizmo 跳到了最后一个点中的对象上、
+    // 而调用方手里还拿着原来那个"的错位 —— 撤销命令记录的 aTarget 与实际被改的对象
+    // 不是同一个（本轮演示视频第一版就撞上了：命令记 A，实际改的却是 C）。
+    // 单选走 `Select()`，它本来就会重设 aPrimary。
+    if(aPrimary == nullptr) aPrimary = entity;
+    return true;
+}
+
+bool cSCENE::SelectByIndex(uint32_t index) {
+    if(index >= aEntities.size()) return false;
+    return Select(aEntities[index]);
+}
+
+bool cSCENE::IsSelected(const cENTITY *entity) const {
+    if(entity == nullptr) return false;
+    for(size_t i = 0; i < aSelection.size(); ++i) {
+        if(aSelection[i] == entity) return true;
+    }
+    return false;
+}
+
+uint32_t cSCENE::SelectionCount() const { return (uint32_t)aSelection.size(); }
+
+cENTITY *cSCENE::SelectedAt(uint32_t index) const {
+    if(index >= aSelection.size()) return nullptr;
+    return aSelection[index];
+}
+
+cENTITY *cSCENE::Primary() const { return aPrimary; }
+
+void cSCENE::ClearSelection() {
+    aSelection.clear();
+    aPrimary = nullptr;
+}
+
+const std::vector<cENTITY *> &cSCENE::Selection() const { return aSelection; }
 
 void cSCENE::SetLodPolicy(const sLOD_POLICY &policy) { aPolicy = policy; }
 

@@ -17,8 +17,8 @@
 |---|---|---|---|---|
 | A1 | ~~Gizmo 未接真实输入~~ | ✅ 2026-11-25 完成：`gizmoRayFromScreen` + `cGIZMO_INTERACTION`（Begin/Drag/End/Hover） | — | 已完成 |
 | A2 | ~~无吸附~~ | ✅ 2026-11-25 完成：`sGIZMO_SNAP` + `snapTranslate/snapRotate/snapScale` | — | 已完成 |
-| A3 | 无多选 / 对象列表 | `cSCENE` 只有扁平指针数组 | 只能单对象编辑 | [大改] |
-| A4 | 无撤销/重做 | 无 | 编辑不可回退 | [大改] |
+| A3 | ~~无多选 / 对象列表~~ | ✅ 2026-11-25 完成：`cSCENE` 增加选择集（Select/Toggle/AddToSelection/Primary），并在 Remove/Clear 时同步清理 | — | 已完成 |
+| A4 | ~~无撤销/重做~~ | ✅ 2026-11-25 完成：`cUNDO_STACK`（快照式变换命令 + undo/redo + 容量裁剪） | — | 已完成 |
 
 ## B. 渲染
 
@@ -62,10 +62,32 @@
 数字：`make unit` 625 → **643**（+18）；`gpuCheck` 120/0；`smoke` 7/7；`ci` 全绿。
 演示视频：`tests/gizmoInput`（`make gizmoInput`），10 s，走**完整鼠标链路**。
 
-### 下一阶段候选（按投入产出）
+## 第二阶段完成情况（2026-11-25）
 
-1. **B2 点光/聚光阴影**（cube shadow map）—— 火光/聚光灯照不出投影，是当前最明显的视觉缺口。
-   估计需要：新建 6 面 cube render pass + 采样器 + 着色器分支，约 1 天。
-2. **A3 多选 / A4 撤销**（[大改]）—— 需要 `cSCENE` 增加选择集与命令栈。
-3. **C2 角色推动态刚体**（[大改]）—— 需要把 `cCHARACTER` 的扫掠结果反馈给物理世界。
+| 项 | 交付 | 验收 |
+|---|---|---|
+| A3 选择集 | `cSCENE`：`Select/Toggle/AddToSelection/SelectByIndex/IsSelected/Primary/ClearSelection` | `testEditCommand.cpp` 5 例 |
+| A4 撤销栈 | `cUNDO_STACK` / `sTRANSFORM_STATE` / `sEDIT_COMMAND`（`GN_EditCommand.*`） | 12 例 |
+
+数字：`make unit` 643 → **660**（+17）；`gpuCheck` 120/0；`smoke` 7/7；`ci` 全绿。
+演示视频：`tests/undoDemo`（`make undoDemo`），12 s。
+
+### 为什么这一轮没做 B2（点光/聚光阴影）
+
+评估过，结论是**这一轮不该动**：
+
+- 现有 `shadowImage` 是 4 层 array（CSM 用满），加 cube shadow 要新建 6 面 image +
+  6 个 framebuffer + 独立 render pass；
+- 采样要新增 `samplerCube`，意味着 **PBR 的 descriptor layout 从 12 个 binding 变 13 个** ——
+  这会改动所有 PBR 管线的描述符契约（`gpuCheck` 里有 binding 数量与槽位断言）；
+- 着色器里 `shadowType ∈ [1.5, 2.5)` 的分支目前是空的，要写完整的 cube 面选择 + 双面剔除。
+
+这是一整天的独立工作，且中间状态（binding 加了但采样没写完）会让现有 116~120 条
+GPU 站点全部有风险。所以先把"纯 CPU、可完整单测"的两项做掉，B2 留给单独一轮。
+
+### 下一阶段候选
+
+1. **B2 点光/聚光阴影**（[大改]，独立一轮）—— 需要新增 binding，务必一次做完再合。
+2. **C2 角色推动态刚体**（[大改]）—— 把 `cCHARACTER` 的扫掠结果反馈给物理世界。
+3. **GPU 侧剔除**（[大改]）—— 实体数上万时 CPU 剔除成为瓶颈。
 4. **D1 真实资产验证**（[需资产]）—— 需要外部模型。

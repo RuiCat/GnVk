@@ -164,6 +164,7 @@ extern GN_API unsigned int GT_SystemInited; //标记引擎系统各部分是否�
 #include "GN_Character.h" //胶囊角色控制器（P5：斜坡/台阶/跳跃，纯 CPU 不参与刚体求解）
 #include "GN_Scene.h" //场景：统一剔除 / LOD / 排序（P6，逐实体粗排序）
 #include "GN_Gizmo.h" //编辑器基础控件：网格 / 坐标轴 / Gizmo / 包围盒 / 线框 / 样条（纯 CPU 几何）
+#include "GN_EditCommand.h" //编辑命令与撤销栈（A4：变换快照 + undo/redo）
 #include "giParams.h" //GI CPU 基座：GI UBO/SH9/SSAO 核/BRDF LUT/G-Buffer 打包（P12-G1）
 #endif
 #include "GN_Linear.h" //线性插值与曲线插值等功能

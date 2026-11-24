@@ -37,6 +37,22 @@ namespace GN3d {
 class cENTITY;
 class cPHYSICS_CONTROLLER;
 
+// ── 选择集（A3）──
+// 为什么放在 cSCENE 而不是单独一个类：选择天然是"场景里的一组实体"，
+// 而且要跟 Add/Remove/Clear 保持同步（实体被移出场景时若还留在选择集里，
+// 下一次拖拽就会操作一个已经不属于场景的对象）。放在场景内部才能保证这一点。
+//
+// 口径：
+//   * 选择集存**实体指针**（非拥有），与 aEntities 同一身份；
+//   * 单选语义下，`Select()` 会先清空再选中（这是编辑器最常见的操作）；
+//   * `Toggle()` 用于 Ctrl+点击；
+//   * 主选中（`Primary()`）= 最近一次被选中的那个，Gizmo 挂在它身上。
+struct sSELECTION_CHANGE {
+    bool aChanged; // 本次操作是否真的改变了选择集
+    bool aDeselected; // 是否是"取消选中"
+    sSELECTION_CHANGE();
+};
+
 // 一条绘制项：实体 + 本帧的排序键。
 struct sDRAW_ITEM {
     cENTITY *aEntity;
@@ -88,6 +104,23 @@ class cSCENE {
     // 阴影：按 DrawOrder 逐个提交投影体。
     uint32_t DrawShadow() const;
 
+    // ── 选择集（A3）──
+    // 单选：清空后只选 entity。entity 必须已在场景里（否则返回 false，不选）。
+    bool Select(cENTITY *entity);
+    // Ctrl+点击：已选中则取消，否则加入。返回选择集是否变化。
+    bool Toggle(cENTITY *entity);
+    // 加入（不去重之外的处理）；已在集合里返回 false。
+    bool AddToSelection(cENTITY *entity);
+    // 按索引选中（与 At() 同一编号，便于做"对象列表"UI）
+    bool SelectByIndex(uint32_t index);
+    bool IsSelected(const cENTITY *entity) const;
+    uint32_t SelectionCount() const;
+    cENTITY *SelectedAt(uint32_t index) const; // 越界返回 nullptr
+    // 主选中（最近一次点中的实体）。空选择返回 nullptr。
+    cENTITY *Primary() const;
+    void ClearSelection();
+    const std::vector<cENTITY *> &Selection() const;
+
     // ── 策略 ──
     void SetLodPolicy(const sLOD_POLICY &policy);
     const sLOD_POLICY &LodPolicy() const;
@@ -102,6 +135,8 @@ class cSCENE {
 
   private:
     std::vector<cENTITY *> aEntities;
+    std::vector<cENTITY *> aSelection; // 非拥有；与 aEntities 保持同步
+    cENTITY *aPrimary; // 最近选中的那个（Gizmo 挂点）
     std::vector<sDRAW_ITEM> aDrawOrder;
     sLOD_POLICY aPolicy;
     cPHYSICS_CONTROLLER *aPhysics; // 共享物理控制器（可空，见 Update 的注释）
