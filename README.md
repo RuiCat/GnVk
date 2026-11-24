@@ -35,7 +35,7 @@
 | gpuCheck 实跑 | `pass=116 fail=0 skip=0` |
 | 单测实跑 | `601 cases, 0 failed, 0 assertions failed` |
 | src 源文件 | 174 个 .cpp |
-| src 总行数 | 96052 |
+| src 总行数 | 96067 |
 | 编译产物着色器 | 47 个 .spv |
 
 <!-- AUTO-STATS:END -->

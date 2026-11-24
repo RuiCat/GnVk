@@ -28,6 +28,7 @@ layout(set = 0, binding = 1) readonly buffer ParticleBuffer {
 };
 
 layout(location = 0) out vec4 vColor;
+layout(location = 1) out vec2 vCorner; // [-1,1]² 的 quad 局部坐标（片元做径向衰减用）
 
 // 两个三角形覆盖 [-1,1]²（双面绘制，绕序无关）。
 const vec2 kCorners[6] = vec2[6](
@@ -47,4 +48,5 @@ void main() {
     gl_Position = u.viewProj * vec4(world, 1.0);
     float t = clamp(p.posAge.w / max(p.velLife.w, 1e-4), 0.0, 1.0);
     vColor = mix(u.colorStart, u.colorEnd, t);
+    vCorner = corner;
 }

@@ -670,6 +670,11 @@ bool GN_VkSetPost(const GN3d::sPOST_UBO &ubo);
 bool GN_VkGetPost(GN3d::sPOST_UBO *out);
 // 以 EV 设置曝光（exposure = 2^EV）；EV 钳制到 [-10,10]。
 void GN_VkSetExposure(float ev);
+
+// L1b：Bloom 三参数。intensity < 0 按 0 处理；threshold/knee 钳到 >= 0。
+// 用途：火焰/自发光的辉光需要比默认（0.3 / 0.8 / 0.3）更强的强度与更低的阈值，
+// 而夜景又不能让整屏发雾 —— 没有这个 setter 就只能改 POST UBO 的内部静态量。
+void GN_VkSetBloom(float intensity, float threshold, float knee);
 // 切换色调映射模式（0=NONE / 1=Reinhard / 2=ACES，越界钳制）。
 void GN_VkSetTonemapMode(int32_t mode);
 // L4c：读取大气 LUT 纹理（RGBA16F，SHADER_READ_ONLY；未就绪返回 false）。

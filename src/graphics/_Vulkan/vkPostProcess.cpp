@@ -103,6 +103,16 @@ void GN_VkSetExposure(float ev) {
     writePostUbo();
 }
 
+void GN_VkSetBloom(float intensity, float threshold, float knee) {
+    if(!(intensity >= 0.0f)) intensity = 0.0f; // 同时处理 NaN
+    if(!(threshold >= 0.0f)) threshold = 0.0f;
+    if(!(knee >= 0.0f)) knee = 0.0f;
+    s_postUbo.bloomIntensity = intensity;
+    s_postUbo.bloomThreshold = threshold;
+    s_postUbo.bloomKnee = knee;
+    writePostUbo();
+}
+
 void GN_VkSetTonemapMode(int32_t mode) {
     if(mode < GN3d::eTONEMAP_NONE || mode > GN3d::eTONEMAP_ACES) {
         mode = GN3d::eTONEMAP_ACES;
