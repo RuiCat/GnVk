@@ -39,7 +39,7 @@ sMESH_LOD::~sMESH_LOD() {
 //  sMESH 实现
 // ═══════════════════════════════════════════════════════════
 sMESH::sMESH() : aVertices(0), aIndices(0), aVertexCount(0), aIndexCount(0),
-                 aLods(0), aLodCount(0), aBoundRadius(0.0f)
+                 aLods(0), aLodCount(0), aBoundRadius(0.0f), aVisible(true)
 #ifdef GN_USING_3D
                  ,
                  aVertexBuffer(VK_NULL_HANDLE), aVertexMemory(VK_NULL_HANDLE), aIndexBuffer(VK_NULL_HANDLE), aIndexMemory(VK_NULL_HANDLE)
@@ -102,6 +102,7 @@ void sMESH::UploadToGPU() {
 }
 
 void sMESH::Draw(const sMAT44 *modelMatrix) const {
+    if(!aVisible) return;
 #ifdef GN_USING_3D
     float sr = 1.0f, sg = 1.0f, sb = 1.0f, sh = 32.0f;
     const GNg::sIMAGE *tex = aAlbedoTex; // 优先 mesh 纹理
@@ -130,6 +131,7 @@ void sMESH::Draw(const sMAT44 *modelMatrix) const {
 void sMESH::DrawPBR(const sMAT44 *modelMatrix) const { DrawPBRLevel(modelMatrix, 0); }
 
 void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level, bool forceBlend) const {
+    if(!aVisible) return;
 #ifdef GN_USING_3D
     float dr = 0.8f, dg = 0.8f, db = 0.8f, rough = 0.5f, metal = 0.0f, ao = 1.0f;
     float alphaCutoff = 0.0f; // 0 = 不裁
@@ -182,6 +184,7 @@ void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level, bool forceBl
 
 // L3：阴影深度绘制。顶点与 PBR 同格式（VkVertex3D，11 floats），由 GN_VkShadowDraw 上传。
 void sMESH::DrawShadow(const sMAT44 *modelMatrix) const {
+    if(!aVisible) return;
 #ifdef GN_USING_3D
     if(!aVertices || aVertexCount == 0 || !modelMatrix) return;
     GNg::GN_VkShadowDraw(aVertices, aVertexCount, aIndices, aIndexCount, modelMatrix);

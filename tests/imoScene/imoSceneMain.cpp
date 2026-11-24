@@ -8,6 +8,8 @@
 
 #include "imoSceneBlobShadow.h"
 #include "imoSceneCamera.h"
+#include "imoSceneOutfit.h"
+#include "imoScenePlayer.h"
 #include "imoSceneRoom.h"
 #include "imoSceneShadow.h"
 #include "imoSceneUpload.h"
@@ -297,9 +299,21 @@ GN_CALL void AppInit() {
                                       : (gRoomLoaded ? -0.40f : -0.5f);
         GNg::GN_VkSetExposure(ev);
     }
+    if (gLoaded) {
+        // P0/P5：角色从房间中央起步；胶囊高度取模型 AABB 高度（1.624 m），
+        // 起始中心 = 脚底 0 + 半高，留 5 cm 余量避免首帧解穿透。
+        const float height = gScene.aMax.y - gScene.aMin.y;
+        GNg::sVEC3 start;
+        start.x = 0.0f;
+        start.y = height * 0.5f + 0.05f;
+        start.z = 0.0f;
+        imoScene::playerInit(start, height);
+        imoScene::outfitInit(gScene.aModel);
+    }
 }
 
 GN_CALL void AppUnInit() {
+    imoScene::playerShutdown();
     imoScene::blobShadowRelease(gBlobShadow);
     gBlobShadowReady = false;
     gRoom.release();
@@ -338,6 +352,13 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     if (!imoScene::cameraBuildViewProj(aspect, viewProjection, &view)) {
         return;
     }
+    // P5：把胶囊位置写到模型世界变换（模型原点在脚底），并同步阴影拟合的包围盒。
+    const GNg::sVEC3 foot = imoScene::playerFootPosition();
+    gScene.aModel.aPosition = foot;
+    gScene.aModel.UpdateTransform();
+    if (gScene.aModel.computeWorldAABB()) {
+        gCasterBox = gScene.aModel.aWorldAABB;
+    }
     const GNg::sVEC3 eye = imoScene::cameraPosition();
     // 阴影深度图必须在 3D pass 之前画；只投角色（房间封闭，自己挡自己会让室内全黑）。
     if (gShadowsReady && gLoaded) {
@@ -361,7 +382,7 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
             gRoom.aModel.DrawPBRSorted(eye); // 房间先画（静态背景），角色再叠上去
         }
         if (gBlobShadowReady) {
-            imoScene::blobShadowDraw(gBlobShadow, 0.0f, 0.0f); // 角色站在世界原点
+            imoScene::blobShadowDraw(gBlobShadow, foot.x, foot.z); // 跟着角色走
         }
         gScene.aModel.DrawPBRSorted(eye); // OPAQUE/MASK 先画，BLEND 按网格距离由远到近
     }
@@ -381,7 +402,9 @@ GN_CALL void AppRun(unsigned int nTime) {
     if (!(delta > 0.0f) || delta > MAX_FRAME_SECONDS) {
         delta = 1.0f / 60.0f;
     }
-    imoScene::cameraUpdate(delta);
+    imoScene::cameraUpdate(delta); // 先采样输入（边沿只在这一次 Update 里算）
+    imoScene::playerUpdate(delta); // 再按固定步长推进角色并把相机焦点移到角色身上
+    imoScene::outfitUpdate(); // 数字键 1–4 切装饰、0 恢复全部
 }
 
 } // extern "C"

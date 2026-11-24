@@ -122,15 +122,20 @@ VkDescriptorSet findOrCreatePBRSet(VkImageView albedo, VkSampler albedoSampler,
 
 // 同步单个纹理 set：从规范 set 复制 12 个绑定，再覆盖 binding 1/3 的纹理与采样器。
 void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry) {
-        VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
-        copy.srcSet = GN_Vk.descriptorSetPBR;
-        copy.srcBinding = 0;
-        copy.srcArrayElement = 0;
-        copy.dstSet = entry.aSet;
-        copy.dstBinding = 0;
-        copy.dstArrayElement = 0;
-        copy.descriptorCount = 12;
-        vkUpdateDescriptorSets(GN_Vk.device, 0, nullptr, 1, &copy); // 复制用 update 的 copies 参数（Vulkan 1.0 无独立 copy 入口）
+        // 逐绑定复制：一次 copy 跨多个绑定会要求这些绑定的 descriptorCount 一致
+        // （校验层 VUID-VkCopyDescriptorSet-srcSet-00349：「next binding ... not consistent」），
+        // 这里改成每个绑定一条 copy，各 count=1，语义明确且无告警。
+        for(uint32_t binding = 0; binding < 12; ++binding) {
+            VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
+            copy.srcSet = GN_Vk.descriptorSetPBR;
+            copy.srcBinding = binding;
+            copy.srcArrayElement = 0;
+            copy.dstSet = entry.aSet;
+            copy.dstBinding = binding;
+            copy.dstArrayElement = 0;
+            copy.descriptorCount = 1;
+            vkUpdateDescriptorSets(GN_Vk.device, 0, nullptr, 1, &copy);
+        }
 
         VkDescriptorImageInfo albedoInfo = {};
         albedoInfo.sampler = entry.aAlbedoSampler ? entry.aAlbedoSampler : GN_Vk.defaultSampler;
@@ -158,13 +163,16 @@ void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry) {
 // 前向环集同步：descriptorLayout3D 的 5 个绑定（0 场景/1 纹理/2 光源/3 雾/4 GI）连续，
 // 一次 copy 搞定，再覆盖 binding 1 的纹理与采样器。
 void syncForwardTextureSet(const sFORWARD_TEXTURE_SET &entry) {
-        VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
-        copy.srcSet = GN_Vk.descriptorSet3D;
-        copy.srcBinding = 0;
-        copy.dstSet = entry.aSet;
-        copy.dstBinding = 0;
-        copy.descriptorCount = 5;
-        vkUpdateDescriptorSets(GN_Vk.device, 0, nullptr, 1, &copy);
+        // 同上：逐绑定复制，避免多绑定连续复制触发校验层 VUID。
+        for(uint32_t binding = 0; binding < 5; ++binding) {
+            VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
+            copy.srcSet = GN_Vk.descriptorSet3D;
+            copy.srcBinding = binding;
+            copy.dstSet = entry.aSet;
+            copy.dstBinding = binding;
+            copy.descriptorCount = 1;
+            vkUpdateDescriptorSets(GN_Vk.device, 0, nullptr, 1, &copy);
+        }
 
         VkDescriptorImageInfo info = {};
         info.sampler = entry.aSampler ? entry.aSampler : GN_Vk.defaultSampler;

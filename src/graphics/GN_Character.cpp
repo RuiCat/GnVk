@@ -469,7 +469,15 @@ sCHARACTER_STEP cCHARACTER::Move(const GNg::sVEC3 &wishDir, bool sprint, bool ju
     const float verticalStep = aVelocity.y * dt;
     if (verticalStep != 0.0f) {
         GNg::sVEC3 verticalPos = pos;
-        verticalPos.y += verticalStep;
+        // 贴地时把探测深度多压一个 skinWidth：否则"悬浮 skin 高度"的胶囊会先自由下落
+        // 几毫米、再被解穿透弹回，形成 3 帧锯齿（实测 1.8–10 mm）。多探一点让它在
+        // 每一步都被判定为接触并吸附到同一高度，位置才真正稳定。
+        // 只对"没有水平意图"的静止站立做贴地吸附：上台阶/斜坡时多探一个 skin
+        // 会把台阶侧面当成地面，挡住抬升（characterStepsUpShortStep 回归）。
+        const bool idleThisStep = (aVelocity.x == 0.0f && aVelocity.z == 0.0f);
+        const float snapProbe =
+            (aGrounded && idleThisStep && aVelocity.y <= 0.0f) ? aDesc.aSkinWidth : 0.0f;
+        verticalPos.y += verticalStep - snapProbe;
         GNg::sVEC3 normal;
         float depth = 0.0f;
         const bool blocked = deepestPenetration(verticalPos, normal, depth);

@@ -106,6 +106,10 @@ public:
     void OrbitRotate(float yawDelta, float pitchDelta);
     void OrbitZoom(float delta);
     void OrbitPan(float right, float up);
+    // 角色跟随：只移动轨道中心，保留 yaw/pitch/distance（不重置视角）。
+    void SetOrbitFocus(const GNg::sVEC3 &focus);
+    // 当前轨道 yaw（弧度）：调用方据此把输入转成世界方向（前方 = -sin/-cos）。
+    float OrbitYaw() const;
 
     // 目标/跟随
     void SetTarget(const sCAMERA_TARGET &target, float followRatio = -1.0f,

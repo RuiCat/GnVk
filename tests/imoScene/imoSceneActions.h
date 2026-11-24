@@ -13,6 +13,17 @@ namespace imoScene {
 enum eIMO_ACT : GN::eACTION {
     eIMO_ACT_DRAG_ROTATE = GN::INPUT_ACT_USER_FIRST, // 鼠标左/右键拖动旋转
     eIMO_ACT_DRAG_PAN, // 鼠标中键拖动平移
+    eIMO_ACT_MOVE_FRONT, // W：沿相机朝向前进
+    eIMO_ACT_MOVE_BACK, // S
+    eIMO_ACT_MOVE_LEFT, // A
+    eIMO_ACT_MOVE_RIGHT, // D
+    eIMO_ACT_JUMP, // Space：仅着地生效
+    eIMO_ACT_SPRINT, // Shift：走 aSprintSpeed
+    eIMO_ACT_OUTFIT_CAT, // 1：猫耳/铃铛/尾巴显隐
+    eIMO_ACT_OUTFIT_HAT, // 2：帽子（毛线帽/女巫帽）
+    eIMO_ACT_OUTFIT_MASK, // 3：口罩
+    eIMO_ACT_OUTFIT_RIBBON, // 4：丝带/领结/项圈
+    eIMO_ACT_OUTFIT_RESET, // 0：全部显示
     eIMO_ACT_COUNT
 };
 

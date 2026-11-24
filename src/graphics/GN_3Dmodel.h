@@ -48,6 +48,8 @@ struct sMESH {
     sMESH_LOD *aLods;
     uint32_t aLodCount;
     float aBoundRadius; // 局部包围球半径（0 = 未计算）
+    // 网格级显隐（换装/调试）：false 时三个绘制入口都直接跳过本网格。
+    bool aVisible;
 
 #ifdef GN_USING_3D
     VkBuffer aVertexBuffer;

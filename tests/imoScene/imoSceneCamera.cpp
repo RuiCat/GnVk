@@ -149,4 +149,12 @@ GNg::sVEC3 cameraPosition() {
     return gCamera.GetCoordV();
 }
 
+void cameraFollow(const GNg::sVEC3 &focus) {
+    gCamera.SetOrbitFocus(focus);
+}
+
+float cameraYaw() {
+    return gCamera.OrbitYaw();
+}
+
 } // namespace imoScene

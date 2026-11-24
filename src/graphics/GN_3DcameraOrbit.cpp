@@ -77,6 +77,16 @@ void cCAMERA::SetOrbit(const GNg::sVEC3 &focus, float distance, float yawRad, fl
     applyOrbit();
 }
 
+void cCAMERA::SetOrbitFocus(const GNg::sVEC3 &focus) {
+    if(!aOrbitValid || !finiteVec3(focus)) return;
+    aOrbitFocus = focus;
+    applyOrbit();
+}
+
+float cCAMERA::OrbitYaw() const {
+    return aOrbitYaw;
+}
+
 void cCAMERA::OrbitRotate(float yawDelta, float pitchDelta) {
     if(!aOrbitValid || !std::isfinite(yawDelta) || !std::isfinite(pitchDelta)) return;
     aOrbitYaw += yawDelta;

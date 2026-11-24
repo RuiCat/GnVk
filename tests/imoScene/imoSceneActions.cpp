@@ -22,6 +22,22 @@ void bindImoSceneActions(GN::cINPUT_MAP &map) {
     map.Bind(eIMO_ACT_DRAG_ROTATE, GN::INPUT_MOUSE_BASE + GM_LEFT);
     map.Bind(eIMO_ACT_DRAG_ROTATE, GN::INPUT_MOUSE_BASE + GM_RIGHT);
     map.Bind(eIMO_ACT_DRAG_PAN, GN::INPUT_MOUSE_BASE + GM_CENTRE);
+
+    // P0/P5：游戏侧移动意图（与相机输入共用同一张绑定表，改键只改这里）。
+    map.Bind(eIMO_ACT_MOVE_FRONT, GK_W);
+    map.Bind(eIMO_ACT_MOVE_BACK, GK_S);
+    map.Bind(eIMO_ACT_MOVE_LEFT, GK_A);
+    map.Bind(eIMO_ACT_MOVE_RIGHT, GK_D);
+    map.Bind(eIMO_ACT_JUMP, GK_SPACE);
+    map.Bind(eIMO_ACT_SPRINT, GK_SHIFT);
+    map.Bind(eIMO_ACT_SPRINT, GK_LSHIFT);
+
+    // 换装：数字键切换装饰组显隐，0 恢复全部。
+    map.Bind(eIMO_ACT_OUTFIT_CAT, GK_1);
+    map.Bind(eIMO_ACT_OUTFIT_HAT, GK_2);
+    map.Bind(eIMO_ACT_OUTFIT_MASK, GK_3);
+    map.Bind(eIMO_ACT_OUTFIT_RIBBON, GK_4);
+    map.Bind(eIMO_ACT_OUTFIT_RESET, GK_0);
 }
 
 } // namespace imoScene

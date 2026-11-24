@@ -28,5 +28,11 @@ float cameraFovYRadians();
 // 相机世界位置（绘制/排序用）。
 GNg::sVEC3 cameraPosition();
 
+// 角色跟随：只移动轨道焦点（保留 yaw/pitch/距离），每帧在 playerUpdate 里调。
+void cameraFollow(const GNg::sVEC3 &focus);
+
+// 当前轨道 yaw（弧度）：playerUpdate 用它把 WASD 输入转成世界方向。
+float cameraYaw();
+
 } // namespace imoScene
 #endif // GN_IMOSCENE_CAMERA_H

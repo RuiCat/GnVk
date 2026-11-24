@@ -51,7 +51,9 @@ GN_VK_INTERNAL uint32_t GN_VkCanonicalDescGeneration();
 // 2) 纹理解放时视图句柄会失效，环集里缓存的旧句柄必须作废。标记为「下帧帧首重置」，
 //    避开「录制中释放描述符集」的时机问题。
 GN_VK_INTERNAL void GN_VkRequestTextureSetCacheReset();
-const uint32_t kTextureSetCacheCap = 32; // 每套环集的条目上限（池只有 1024 描述符）
+// 每套环集的条目上限。32 太小：imoScene 这类真实场景（房间 59 张 + 角色 31 张）
+// 需要 90+ 套，超出后整段绘制回退到规范集（默认白图）→ 白模。池容量见 GN_Vk.cpp 的 dps。
+const uint32_t kTextureSetCacheCap = 256;
 
 // ═══════════════════════════════════════════════════════
 //  描述符改写守卫（VUID-vkUpdateDescriptorSets-None-03047）

@@ -612,13 +612,15 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
 
     // Descriptor pool (必须在默认纹理之前创建)
     // P9：新增 STORAGE_BUFFER 尺寸（粒子 SSBO：compute set + 绘制 set 各一份）。
-    VkDescriptorPoolSize dps[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1024},
-                                   {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024},
-                                   {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 256}};
+    // 纹理环集（kTextureSetCacheCap=256）每套占 8 个 COMBINED_IMAGE_SAMPLER + 4 个 UBO，
+    // 池子按 256 套的峰值预留，否则分配失败仍会回退共享 set（与白模同一现象）。
+    VkDescriptorPoolSize dps[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4096},
+                                   {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8192},
+                                   {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 512}};
     VkDescriptorPoolCreateInfo dpci = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     // P1c：允许材质实例单独归还描述符集（GN_VkMaterialDestroy），否则创建/销毁循环会耗尽池。
     dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    dpci.maxSets = 1024;
+    dpci.maxSets = 2048;
     dpci.poolSizeCount = 3;
     dpci.pPoolSizes = dps;
     vkCreateDescriptorPool(GN_Vk.device, &dpci, 0, &GN_Vk.descriptorPool);
