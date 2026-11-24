@@ -144,7 +144,11 @@ struct alignas(16) VkModelPushConstPBR {
     float model[16]; // 模型矩阵 (列主序)
     float albedo[4]; // Albedo RGB + _pad
     float pbrParams[4]; // x=roughness, y=metallic, z=ao, w=alphaCutoff（0=不裁）
-}; // 96 bytes total, 16-byte aligned
+    // RGB = 自发光颜色（线性），a = 强度倍率。**不做光照计算，直接加到出射辐射上**
+    // （因此在 ACES 之前，>1 的值能被 Bloom 抓住）。默认全 0 = 与旧行为逐位一致。
+    float emissive[4]; // 112 bytes total, 16-byte aligned
+};
+static_assert(sizeof(VkModelPushConstPBR) == 112, "PBR push constant 必须与 ModelPC 逐字段一致（112 B）");
 
 // 向后兼容别名 (Blinn-Phong 是默认)
 typedef VkModelPushConstBP VkModelPushConst;
@@ -582,7 +586,11 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
                     float diffuseR, float diffuseG, float diffuseB,
                     float roughness = 0.5f, float metallic = 0.0f, float ao = 1.0f,
                     const sIMAGE *albedoTex = nullptr, const sIMAGE *normalTex = nullptr,
-                    float alphaCutoff = 0.0f, bool alphaBlend = false);
+                    float alphaCutoff = 0.0f, bool alphaBlend = false,
+                    // 自发光：RGB = 颜色（线性），intensity = 强度倍率。
+                    // 默认 0 ⇒ 与旧调用点逐位一致（不加参数就是"不发光"）。
+                    float emissiveR = 0.0f, float emissiveG = 0.0f, float emissiveB = 0.0f,
+                    float emissiveIntensity = 0.0f);
 
 // 提交 3D 模型绘制 (Blinn-Phong 模式, 支持纹理)
 void GN_VkDraw3D(const void *vertices, uint32_t vertexCount,

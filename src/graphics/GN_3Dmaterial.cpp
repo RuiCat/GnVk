@@ -23,6 +23,7 @@ void sMATERIAL::SetDefault() {
     aEmissive.x = 0.0f;
     aEmissive.y = 0.0f;
     aEmissive.z = 0.0f;
+    aEmissiveIntensity = 0.0f;
     aRoughness = 0.5f;
     aMetallic = 0.0f;
     aAlphaMode = eALPHA_OPAQUE;

@@ -91,6 +91,7 @@ layout(push_constant) uniform ModelPC {
     mat4 model;
     vec4 diffuse;       // albedo
     vec4 specular;      // .x=roughness, .y=metallic, .z=ao, .w=alphaCutoff（0=不裁）
+    vec4 emissive;      // .rgb=自发光颜色（线性）, .a=强度倍率
 } pc;
 
 // 公共光照片段（B5d-S25）：本文件引用 SceneUBO/FogUBO/GIUBO/LightUBO 与
@@ -343,6 +344,12 @@ void main() {
     }
     
     vec3 color = ambient + Lo;
+
+    // 自发光（L1c）：不参与光照计算，直接加到出射辐射上。
+    // * 乘 .a 是强度倍率，默认 0 ⇒ 与加入本字段之前逐位一致（既有画面不受影响）；
+    // * 加在雾之前：自发光表面同样被大气/天气雾遮蔽，物理上更对；
+    // * 数值可以是 HDR（>1），Bloom 在 composite 阶段按阈值抓取。
+    color += pc.emissive.rgb * pc.emissive.a;
     
     // L1：着色器输出线性 HDR；曝光/色调映射/Bloom 统一在 gn3d_composite.frag 做一次。
     

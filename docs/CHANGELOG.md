@@ -1,5 +1,63 @@
 # Changelog
 
+## 2026-11-25 — 打通自发光材质（`aEmissive` 从死字段到可用）
+
+`sMATERIAL::aEmissive` 一直存在，但**从来没有被使用**：PBR 的 push constant 只有
+`albedo`/`pbrParams` 两组，着色器里没有任何地方引用它 —— 设了不发光。这一轮把它接通，
+并用它重做了火焰视频里的余烬/炭块（见上一节的 `fire-lighting-emissive.mp4`）。
+
+### 改动
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| PBR push constant 增加 `emissive` | `_Vulkan/GN_Vk.h`：`VkModelPushConstPBR` 96 → **112 B** | `static_assert(sizeof == 112)` 钉住 |
+| 绘制接口 | `GN_VkDraw3DPBR(...)` 末尾加 4 个默认参数 | 默认 0 ⇒ **所有既有调用点逐位不变** |
+| 材质到 GPU | `sMESH::DrawPBRLevel` 读 `aEmissive × aEmissiveIntensity` | 新增 `sMATERIAL::aEmissiveIntensity`（默认 0） |
+| 着色器 | `gn3d_pbr.{vert,frag}` 的 `ModelPC` 加 `vec4 emissive` | frag 里 `color += pc.emissive.rgb * pc.emissive.a`，加在**雾之前** |
+
+### 验收：`make gpuCheck` 116 → **120**（4 条新站点）
+
+```
+[PASS] light.emissiveOff            albedo=0/强度=0 lum=0.0059 ≈ 0（颜色给了也要乘 0）
+[PASS] light.emissiveOn             albedo=0/强度=2 lum=0.4455 > 0.05（亮度只能来自自发光）
+[PASS] light.emissiveIgnoresLights  无灯 0.4455 / 背光(N·L=0) 0.4455（相对差 0.000%）
+[PASS] light.emissiveSpecularStillLit 正面方向光 0.4563 > 自发光基准 0.4455
+```
+
+`make unit` 601/0、`make smoke` 7/7、`make ci` 全绿。
+
+### 写测试时踩的两个坑（都留在用例注释里）
+
+**1. 用绝对亮度跟 baseline 比是错的。**
+第一版：`albedo=0.02 + emissive=2`，断言 `lum > baseline + 0.10`。结果 lum=0.4530，
+baseline=0.5340 —— **自发光确实生效了（albedo=0.02 最多贡献 0.01），但比不过 IBL 兜底的
+0.53**，于是判失败。绝对亮度里混着 GI/曝光/天空盒这些与本次改动无关的量。
+改成 `albedo=0`（彻底切断 albedo 通路）+ 断言"明显大于 0"之后才干净。
+
+**2. `albedo = 0` 并不能消掉镜面反射。**
+验证"自发光不受光照影响"时，我用正面方向光做了对比，得到 0.4455 → 0.4563，差 2.4%。
+这不是 emissive 被照亮，而是 F0 = mix(0.04, albedo, metallic) 对非金属恒为 0.04 ——
+**镜面高光与 albedo 无关**。改用**背光**（N·L=0，直射与镜面项都被乘成 0）后差异变成
+0.000%。同时补了一条反向用例 `light.emissiveSpecularStillLit`：正面光必须让亮度**变化**，
+否则"不受光"就可能退化成"方向光整个没接上"。
+
+### 材质没有开关会让自发光无处安放
+
+`CreateCubeModel` 只填顶点色，**不建材质池**（`aMaterialCount = 0`，网格 `aMaterial` 为空
+⇒ `DrawPBRLevel` 走"无材质"分支）。所以示例里要给方块加自发光，得先自己 `new sMATERIAL[1]`
+并把网格指过去。这段在 `tests/fireLighting/main.cpp` 的 `addBox` 里，写清楚了。
+
+### 视频侧的变化
+
+`tests/fireLighting` 加了两类自发光几何：
+- **炭床 + 三根柴**：火塘内部在"呼吸"（三频正弦脉动，强度 0.42–1.15）；
+- **外围 7 块散炭**：故意放在火焰粒子之外，强度 5.4–6.8（**必须进 HDR 区间**：
+  ACES 会把 2.x 压到接近 1.0，看起来只是"亮黄"；5+ 才会在色调映射后仍溢出 1.0 被 Bloom
+  抓住，形成辉光）。
+
+月光段能清楚看到冷蓝方向光与暖橙余烬的对比 —— 这是自发光最实用的场景：
+**不需要任何光源照它，它自己就亮**。
+
 ## 2026-11-25 — 灯光 / 火焰场景 → 720p 视频（四段光照对比）
 
 同一堆火、同一套几何，靠换光源组合与后处理走出四种完全不同的氛围，编码成 10.5 秒 mp4。

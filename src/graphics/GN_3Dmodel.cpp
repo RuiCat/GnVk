@@ -135,6 +135,8 @@ void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level, bool forceBl
 #ifdef GN_USING_3D
     float dr = 0.8f, dg = 0.8f, db = 0.8f, rough = 0.5f, metal = 0.0f, ao = 1.0f;
     float alphaCutoff = 0.0f; // 0 = 不裁
+    // 自发光：颜色 × 强度。默认 0 = 不发光（与加入本字段之前的画面逐位一致）。
+    float emissiveR = 0.0f, emissiveG = 0.0f, emissiveB = 0.0f, emissiveIntensity = 0.0f;
     bool blend = forceBlend; // 排序绘制的第二趟可强制走混合管线
     const GNg::sIMAGE *albTex = aAlbedoTex;
     const GNg::sIMAGE *nrmTex = aNormalTex;
@@ -149,6 +151,10 @@ void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level, bool forceBl
         if(aMaterial->aAlphaMode == eALPHA_BLEND) blend = true;
         if(!albTex) albTex = aMaterial->aAlbedoTex;
         if(!nrmTex) nrmTex = aMaterial->aNormalTex;
+        emissiveR = aMaterial->aEmissive.x;
+        emissiveG = aMaterial->aEmissive.y;
+        emissiveB = aMaterial->aEmissive.z;
+        emissiveIntensity = aMaterial->aEmissiveIntensity;
     } else {
         dr = aDiffuse[0];
         dg = aDiffuse[1];
@@ -174,7 +180,8 @@ void sMESH::DrawPBRLevel(const sMAT44 *modelMatrix, uint32_t level, bool forceBl
                         dr, dg, db,
                         rough, metal, ao,
                         albTex, nrmTex,
-                        alphaCutoff, blend);
+                        alphaCutoff, blend,
+                        emissiveR, emissiveG, emissiveB, emissiveIntensity);
 #else
     (void)modelMatrix;
     (void)level;

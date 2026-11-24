@@ -31,6 +31,10 @@ struct sMATERIAL {
     GNg::sVEC3 aSpecular; // 镜面反射颜色 (默认 1.0, 1.0, 1.0)
     float aShininess; // 光泽度 (1-256, 默认 32)
     GNg::sVEC3 aEmissive; // 自发光颜色 (默认 0, 0, 0)
+    // 自发光强度（线性 HDR 倍率，默认 0 = 不发光）。>1 时会被 Bloom 抓住。
+    // 【历史】aEmissive 曾经是个**死字段**：PBR 的 push constant 只有 albedo/pbrParams 两组，
+    // 着色器里没有任何地方引用它，设了不发光（2026-11-25 打通，见 CHANGELOG）。
+    float aEmissiveIntensity;
     float aRoughness; // 粗糙度 PBR (0-1, 默认 0.5) — 阶段三使用
     float aMetallic; // 金属度 PBR (0-1, 默认 0.0) — 阶段三使用
     eALPHA_MODE aAlphaMode; // alpha 模式 (默认 eALPHA_OPAQUE)

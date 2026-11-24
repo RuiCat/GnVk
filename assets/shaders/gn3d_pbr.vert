@@ -19,6 +19,8 @@ layout(push_constant) uniform ModelPC {
     mat4 model;
     vec4 diffuse;       // albedo RGB + _pad
     vec4 specular;      // roughness, metallic, ao, _pad  (PBR模式下重映射)
+    // 自发光（RGB + 强度）。顶点阶段用不到，但 push constant 块必须与片元阶段逐字段一致。
+    vec4 emissive;
 } pc;
 
 layout(location = 0) out vec3 fragWorldPos;

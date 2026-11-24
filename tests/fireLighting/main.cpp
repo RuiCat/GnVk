@@ -127,8 +127,14 @@ bool writePng(const char *path, const unsigned char *rgba, int width, int height
 }
 
 // ── 场景构建 ──
+// 自发光材质的道具索引（动画里按时间脉动）。-1 = 空槽。
+const int kEmberSlots = 12; // 3 根柴 + 1 块炭床 + 7 块散炭（+1 余量）
+int gEmberMaterial[kEmberSlots] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+
+// emissive：材质自发光（RGB + 强度）。0 = 不发光，与旧调用点一致。
 void addBox(const GNg::sVEC3 &pos, const GNg::sVEC3 &half, float r, float g, float b,
-            float rotY = 0.0f) {
+            float rotY = 0.0f, float emR = 0.0f, float emG = 0.0f, float emB = 0.0f,
+            float emIntensity = 0.0f) {
     sStatic prop;
     prop.aModel = GN3d::CreateCubeModel(1.0f, r, g, b);
     prop.aModel->SetScale(half.x * 2.0f, half.y * 2.0f, half.z * 2.0f);
@@ -136,6 +142,32 @@ void addBox(const GNg::sVEC3 &pos, const GNg::sVEC3 &half, float r, float g, flo
     if (rotY != 0.0f) prop.aModel->SetRotation(GNg::sQUAT(0.0f, std::sin(rotY * 0.5f), 0.0f,
                                                          std::cos(rotY * 0.5f)));
     prop.aModel->computeWorldAABB();
+    // 自发光写进模型的材质。注意 **CreateCubeModel 不建材质**（aMaterialCount = 0，
+    // 网格的 aMaterial 为空 ⇒ DrawPBRLevel 走"无材质"分支，只用顶点色）。
+    // 所以要显式建一个材质池并把网格指向它，否则 aEmissive 根本没有载体。
+    if (emIntensity > 0.0f) {
+        prop.aModel->aMaterials = new GN3d::sMATERIAL[1];
+        prop.aModel->aMaterialCount = 1;
+        GN3d::sMATERIAL &material = prop.aModel->aMaterials[0];
+        material.SetDefault();
+        material.aDiffuse = GNg::sVEC3{r, g, b}; // 与顶点色一致，避免双重着色
+        material.aRoughness = 0.85f;
+        material.aMetallic = 0.0f;
+        material.aEmissive = GNg::sVEC3{emR, emG, emB};
+        material.aEmissiveIntensity = emIntensity;
+        for (uint32_t meshIndex = 0; meshIndex < prop.aModel->aMeshCount; ++meshIndex) {
+            prop.aModel->aMeshes[meshIndex].aMaterial = &material;
+        }
+    }
+    if (emIntensity > 0.0f) {
+        // 记下"第几个道具带自发光"，供 updateLighting 做脉动
+        for (int slot = 0; slot < kEmberSlots; ++slot) {
+            if (gEmberMaterial[slot] < 0) {
+                gEmberMaterial[slot] = (int)gProps.size();
+                break;
+            }
+        }
+    }
     gProps.push_back(prop);
 }
 
@@ -153,13 +185,35 @@ void buildScene() {
                shade * 0.90f, angle);
     }
 
-    // 柴堆：几根交叉的木头（能看出火光的方向性）
+    // 柴堆：几根交叉的木头。**材质自发光**表现"烧到发红的木头"——
+    // 这是 emissive 最典型的用法：木头自身在发光，不依赖任何光源照它。
+    // 强度是动画的（见 updateLighting 里的脉动），所以这里给一个基准值。
     addBox(GNg::sVEC3{-0.18f, 0.30f, 0.0f}, GNg::sVEC3{0.55f, 0.07f, 0.07f}, 0.26f, 0.16f, 0.09f,
-           0.42f);
+           0.42f, 1.0f, 0.22f, 0.05f, 0.55f);
     addBox(GNg::sVEC3{0.20f, 0.30f, 0.0f}, GNg::sVEC3{0.55f, 0.07f, 0.07f}, 0.24f, 0.15f, 0.08f,
-           -0.55f);
+           -0.55f, 1.0f, 0.18f, 0.04f, 0.42f);
     addBox(GNg::sVEC3{0.0f, 0.42f, 0.18f}, GNg::sVEC3{0.48f, 0.06f, 0.06f}, 0.22f, 0.14f, 0.08f,
-           1.57f);
+           1.57f, 1.0f, 0.26f, 0.06f, 0.70f);
+
+    // 火塘底部：一块"炭床"，几乎全黑但自发光很强 —— 火光的主要贡献者之一
+    addBox(GNg::sVEC3{0.0f, 0.05f, 0.0f}, GNg::sVEC3{0.42f, 0.045f, 0.42f}, 0.05f, 0.045f, 0.04f,
+           0.0f, 1.0f, 0.30f, 0.06f, 1.15f);
+
+    // 火塘外围散落的炭块（自发光）：**故意放在火焰粒子之外**，
+    // 让"材质自己发光"这件事在画面上看得清 —— 它们周围没有火焰，也没有点光直接照到，
+    // 亮度只能来自 aEmissive。脉动幅度比火塘内的余烬更大（像还在燃的小炭）。
+    for (int i = 0; i < 7; ++i) {
+        const float angle = 0.4f + (float)i * 0.86f;
+        const float radius = 1.55f + 0.18f * (float)(i % 3);
+        const float x = std::cos(angle) * radius;
+        const float z = std::sin(angle) * radius;
+        const float size = 0.075f + 0.030f * (float)(i % 2);
+        // 强度必须进入 HDR 区间：ACES 曲线会把 2.x 压到接近 1.0（看起来只是"亮黄"），
+        // 只有 5+ 才会在色调映射后仍然溢出 1.0，被 Bloom 抓住形成辉光。
+        const float glow = 5.4f + 1.6f * (float)(i % 3);
+        addBox(GNg::sVEC3{x, size, z}, GNg::sVEC3{size, size * 0.8f, size}, 0.06f, 0.05f, 0.045f,
+               angle, 1.0f, 0.24f + 0.06f * (float)(i % 3), 0.05f, glow);
+    }
 
     // 周围：几块木箱与一堵矮墙，用来"接"火光与月光
     addBox(GNg::sVEC3{-3.4f, 0.45f, -2.2f}, GNg::sVEC3{0.45f, 0.45f, 0.45f}, 0.42f, 0.30f, 0.18f,
@@ -309,7 +363,8 @@ void updateLighting() {
         smoothstep01((t - kPhaseFireEnd) / 1.2f) * (1.0f - smoothstep01((t - kPhaseSpotEnd + 0.6f) / 1.0f));
     const float spotPhase = smoothstep01((t - kPhaseMoonEnd) / 1.0f) *
                             (1.0f - smoothstep01((t - kPhaseSpotEnd) / 0.8f));
-    const float burst = 1.0f + 1.6f * smoothstep01((t - kPhaseSpotEnd) / 1.2f);
+    const float burstWeight = smoothstep01((t - kPhaseSpotEnd) / 1.2f);
+    const float burst = 1.0f + 1.6f * burstWeight;
     gEmitRate = 620.0f;
 
     // 火点光：强度抖动 + 位置微动（火舌在动，光源也该动）
@@ -343,6 +398,24 @@ void updateLighting() {
         const float pz = std::cos(sweep * 0.62f) * 2.4f;
         gLight->SetPosition(gSpotLight, GNg::sVEC3{px, 7.5f, pz});
         gLight->SetDirection(gSpotLight, GNg::sVEC3{-px * 0.32f, -1.0f, -pz * 0.32f});
+    }
+
+    // 材质自发光脉动：余烬/柴火在"呼吸"（比点光的抖动慢，且幅度更大）。
+    // 这是 emissive 这个通道独有的能力 —— 亮点本身在动，而不是被别的东西照亮。
+    // 基准强度按槽位分两类：前 4 个是火塘内（柴 + 炭床，较亮），其余是外围散炭。
+    // 火塘内（柴 + 炭床）保持中低强度：它们紧挨着火焰与点光，再亮只会糊成一团。
+    // 外围散炭给到 2.0+：越过 Bloom 阈值（0.62）才有"炽热小炭"的辉光。
+    const float emberBase[kEmberSlots] = {1.15f, 0.55f, 0.42f, 0.70f,
+                                          5.40f, 6.20f, 5.80f, 6.60f, 5.50f, 6.80f, 5.90f, 6.40f};
+    for (int slot = 0; slot < kEmberSlots; ++slot) {
+        const int index = gEmberMaterial[slot];
+        if (index < 0 || (size_t)index >= gProps.size()) continue;
+        GN3d::sMATERIAL &material = gProps[(size_t)index].aModel->aMaterials[0];
+        // 三频叠加，含一点与点光同相的成分（看起来像"被同一股火烧着"）
+        const float t2 = t * (1.6f + 0.25f * (float)slot);
+        const float pulse = 0.72f + 0.28f * std::sin(t2) + 0.12f * std::sin(t2 * 2.7f + 1.3f) +
+                            0.06f * std::sin(t2 * 5.3f + 2.1f);
+        material.aEmissiveIntensity = emberBase[slot] * pulse * (1.0f + 0.35f * burstWeight);
     }
 
     // 环境光：A 段为 0（只靠火光），B/C 段抬一点点冷色，D 段回落到接近 0

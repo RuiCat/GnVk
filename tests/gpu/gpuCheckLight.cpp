@@ -113,12 +113,17 @@ float Luminance(const sFLOAT_PIXEL &p) {
 
 // 用给的光照渲染一次白 quad，返回中心像素线性亮度；失败返回 -1。
 float RenderLuminance(const GN3d::sLIGHT_UBO &light, const GNg::sMAT44 &identity,
-                      const GNg::sVEC3 &eye, const sQUAD &quad, const GNg::sMAT44 &model) {
+                      const GNg::sVEC3 &eye, const sQUAD &quad, const GNg::sMAT44 &model,
+                      // 自发光（默认 0 = 不发光，既有调用点行为不变）
+                      float emR = 0.0f, float emG = 0.0f, float emB = 0.0f,
+                      float emIntensity = 0.0f, float albedo = 1.0f) {
     if (!GNg::GN_VkBeginFrame()) return -1.0f;
     GNg::GN_VkBegin3DPassPBR(&identity, &eye, &light, sizeof(light));
     // 纯白、粗糙、非金属、AO 全开：让中心像素亮度主要由光源决定。
     GNg::GN_VkDraw3DPBR(quad.verts, 4, kQuadIndexBA, 6, &model,
-                        1.0f, 1.0f, 1.0f, 0.9f, 0.0f, 1.0f);
+                        albedo, albedo, albedo, 0.9f, 0.0f, 1.0f,
+                        nullptr, nullptr, 0.0f, false,
+                        emR, emG, emB, emIntensity);
     GNg::GN_VkEnd3DPass();
     GNg::GN_VkEndFrame();
     vkQueueWaitIdle(Queue());
@@ -234,6 +239,77 @@ void RunLightChecks() {
     SetAmbient(ambientOnly, 1.0f, 1.0f, 1.0f, 1.0f);
     const float lumAmbient = RenderLuminance(ambientOnly, identity, eye, quad, model);
     ReportCompare("light.ambient", lumAmbient, baseline, lumAmbient > baseline + 0.02f);
+
+    // ── 7) 自发光（L1c）──────────────────────────────────
+    // 这条链路曾经是**断的**：sMATERIAL::aEmissive 字段存在，但 PBR 的 push constant
+    // 只有 albedo/pbrParams 两组，着色器里没有任何地方引用它 —— 设了不发光。
+    // 现在 emissive.rgb * emissive.a 直接加到出射辐射上（不经过 N·L、不经过 shadow）。
+    const GN3d::sLIGHT_UBO dark = MakeDarkLight();
+
+    // 7a) 强度 0：albedo 也压到 0 ⇒ 画面应当是纯黑（"默认不发光"的回归位）。
+    //     albedo=0 是为了把 IBL/环境光那条路彻底排除：它自己就贡献 0。
+    //     （第一版用 albedo=0.02 与 baseline 比绝对亮度，结果被 exposure/GI 的
+    //     全局状态压住，emissive 明明生效了却判失败 —— 绝对亮度不是可靠的量。）
+    const float lumEmOff = RenderLuminance(dark, identity, eye, quad, model, 1.0f, 0.2f, 0.1f, 0.0f, 0.0f);
+    {
+        const bool ok = lumEmOff <= 0.02f;
+        char detail[176];
+        std::snprintf(detail, sizeof(detail),
+                      "albedo=0/强度=0 lum=%.4f ≈ 0（颜色给了也要乘 0）", lumEmOff);
+        if (ok) ReportPass("light.emissiveOff", detail);
+        else ReportFail("light.emissiveOff", detail);
+    }
+
+    // 7b) 强度 2：同样 albedo=0，只靠自发光就该亮起来。
+    const float lumEmOn =
+        RenderLuminance(dark, identity, eye, quad, model, 0.9f, 0.15f, 0.10f, 2.0f, 0.0f);
+    {
+        const bool ok = lumEmOn > 0.05f;
+        char detail[192];
+        std::snprintf(detail, sizeof(detail),
+                      "albedo=0/强度=2 lum=%.4f > 0.05（亮度只能来自自发光）", lumEmOn);
+        if (ok) ReportPass("light.emissiveOn", detail);
+        else ReportFail("light.emissiveOn", detail);
+    }
+
+    // 7c) 自发光**不参与光照**：同样的 quad 加一盏**背光**方向光，亮度必须逐位相同。
+    //     这是 emissive 与 albedo 最本质的区别 —— albedo 要靠灯照，emissive 自己就亮。
+    //
+    //     为什么用背光而不是正面光：**albedo=0 并不能消掉镜面**。F0 = mix(0.04, albedo,
+    //     metallic)，非金属恒为 0.04，所以正面方向光仍会贡献 2.4% 的镜面高光（实测
+    //     0.4455 → 0.4563）。那不是 emissive 被照亮，而是 quad 自己反光 —— 第一版把这条
+    //     当成了失败。改用背光后 N·L=0，直射与镜面项都被乘成 0，差异只可能来自 emissive。
+    const float backSun[3] = {0.0f, 0.0f, 1.0f}; // 射向 +Z：法线 +Z 的背面
+    GN3d::sLIGHT_UBO litWorld = MakeDarkLight();
+    AddSun(litWorld, backSun, 3.0f, 0.0f);
+    const float lumEmLit =
+        RenderLuminance(litWorld, identity, eye, quad, model, 0.9f, 0.15f, 0.10f, 2.0f, 0.0f);
+    {
+        const float diff = std::fabs(lumEmLit - lumEmOn) / (lumEmOn > 1e-4f ? lumEmOn : 1e-4f);
+        const bool ok = diff <= 0.005f;
+        char detail[240];
+        std::snprintf(detail, sizeof(detail),
+                      "无灯 lum=%.4f / 背光(N·L=0) lum=%.4f（相对差 %.3f%% ≤ 0.5%%，自发光不该被照亮）",
+                      lumEmOn, lumEmLit, diff * 100.0f);
+        if (ok) ReportPass("light.emissiveIgnoresLights", detail);
+        else ReportFail("light.emissiveIgnoresLights", detail);
+    }
+
+    // 7d) 对照（把上面那条的边界钉住）：**正面**方向光会带来镜面，所以亮度必须变化。
+    //     没有这条，"emissive 不受光"就可能退化成"方向光整个没接上"。
+    GN3d::sLIGHT_UBO frontWorld = MakeDarkLight();
+    AddSun(frontWorld, kSunDirection, 3.0f, 0.0f);
+    const float lumEmFront =
+        RenderLuminance(frontWorld, identity, eye, quad, model, 0.9f, 0.15f, 0.10f, 2.0f, 0.0f);
+    {
+        const bool ok = lumEmFront > lumEmOn + 0.001f;
+        char detail[240];
+        std::snprintf(detail, sizeof(detail),
+                      "正面方向光 lum=%.4f > 自发光基准 %.4f（多出来的只能是 F0=0.04 的镜面）",
+                      lumEmFront, lumEmOn);
+        if (ok) ReportPass("light.emissiveSpecularStillLit", detail);
+        else ReportFail("light.emissiveSpecularStillLit", detail);
+    }
 }
 
 } // namespace GpuCheck

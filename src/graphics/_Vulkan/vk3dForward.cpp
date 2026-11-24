@@ -452,7 +452,8 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
                     float diffuseR, float diffuseG, float diffuseB,
                     float roughness, float metallic, float ao,
                     const sIMAGE *albedoTex, const sIMAGE *normalTex, float alphaCutoff,
-                    bool alphaBlend) {
+                    bool alphaBlend, float emissiveR, float emissiveG, float emissiveB,
+                    float emissiveIntensity) {
     if(!GN_Vk.initialized || !s_in3DPass || !vertices || vertexCount == 0) return;
     s_last3DIndexCount = (indices && indexCount > 0) ? indexCount : 0;
 
@@ -487,6 +488,10 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
     pc.pbrParams[1] = metallic;
     pc.pbrParams[2] = ao;
     pc.pbrParams[3] = alphaCutoff; // gn3d_pbr.frag: pc.specular.w，0=不裁
+    pc.emissive[0] = emissiveR;
+    pc.emissive[1] = emissiveG;
+    pc.emissive[2] = emissiveB;
+    pc.emissive[3] = emissiveIntensity;
     vkCmdPushConstants(GN_Vk.commandBuffers[GN_Vk.currentFrame],
                        GN_Vk.pipelineLayoutPBR,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
