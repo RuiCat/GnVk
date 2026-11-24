@@ -805,6 +805,22 @@ uint32_t GN_VkLast3DIndexCount();
 // ── P8：3D pass 内的调试线框（世界坐标，颜色 0xAARRGGBB）────
 void GN_VkDrawDebugLines(const void *lines, uint32_t lineCount, unsigned int color);
 
+// ── 编辑器控件：**每线自带颜色**的批量线段 ────
+// `lines` 指向 GN3d::sEDIT_LINE 数组（start/end/color 三段）。与上面那个的区别只有颜色
+// 粒度：网格/坐标轴/Gizmo 必须在一帧内出现 X红/Y绿/Z蓝 + 主线/次线等多种颜色，而单色
+// 批次就得拆成 5~6 次绘制（每次一个 vkCmdBindPipeline + 一段顶点上传），既慢又容易
+// 把顺序写错。顶点格式与调试线完全相同（位置 + RGBA），复用同一管线。
+// 返回值：实际提交的线段数（未初始化/不在 pass 内/空输入返回 0）。
+uint32_t GN_VkDrawEditLines(const void *lines, uint32_t lineCount);
+
+// 同上，但**关闭深度测试** —— 编辑器控件（Gizmo/网格/包围盒）必须画在实体之上。
+//
+// 为什么单独一个入口而不是全局改：物理调试线、BVH 可视化这些**需要**正确的遮挡关系
+// （看不到被墙挡住的碰撞盒才说明深度是对的）。两类需求不能共用一条管线。
+// 变换控件则相反：箭头从物体中心伸出去，一半在物体内部，开深度测试就只剩箭头尖
+// ——所有 DCC 都是把控件画在最上层，这是工具语义而不是渲染缺陷。
+uint32_t GN_VkDrawEditLinesOverlay(const void *lines, uint32_t lineCount);
+
 // ── P1c：纹理上传（RGBA8 → VkImage，glTF sampler → VkSampler）────
 struct sTEXTURE_GPU {
     VkImage aImage;

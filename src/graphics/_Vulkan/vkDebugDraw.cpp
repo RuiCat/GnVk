@@ -26,6 +26,11 @@ VkPipelineLayout s_debugPipelineLayout = VK_NULL_HANDLE;
 VkDescriptorSetLayout s_debugDescriptorLayout = VK_NULL_HANDLE;
 VkDescriptorSet s_debugDescriptorSet = VK_NULL_HANDLE;
 VkPipeline s_debugPipeline = VK_NULL_HANDLE;
+// 叠层管线：**关闭深度测试**，用于编辑器控件（网格/Gizmo/包围盒）。
+// 为什么必须有它：变换控件挂在物体中心，箭头/环的一大半在物体内部 —— 开深度测试时
+// 只剩箭头尖露在外面，看起来像"控件没画出来"（实测就是这样，排查了很久才定位到深度）。
+// 所有 DCC（Blender/Maya/Unity）都是把控件画在实体之上，这是行业默认行为，不是作弊。
+VkPipeline s_debugOverlayPipeline = VK_NULL_HANDLE;
 
 // 0xAARRGGBB → RGBA 浮点（每通道 /255）。
 void unpackColor(unsigned int color, float *rgba) {
@@ -129,6 +134,7 @@ void destroyDebugLines() {
     s_debugDescriptorLayout = VK_NULL_HANDLE;
     s_debugDescriptorSet = VK_NULL_HANDLE; // 描述符池由 GN_VkShutdown 统一销毁
     s_debugPipeline = VK_NULL_HANDLE; // VkPipeline 由 aPipelineCache 统一销毁
+    s_debugOverlayPipeline = VK_NULL_HANDLE;
 }
 
 // 在已开启的 3D pass 内绘制 lineCount 条线段；未初始化/不在 pass 内/空输入时安全返回。
@@ -165,6 +171,56 @@ void GN_VkDrawDebugLines(const void *lines, uint32_t lineCount, unsigned int col
     s_vtxOfs3D += vertexSize;
     vkCmdDraw(cmd, vertexCount, 1, 0, 0);
     vkValidationEndLabel(cmd);
+}
+
+// 每线自带颜色的批量线段（编辑器控件用）。与 GN_VkDrawDebugLines 共用管线与顶点格式，
+// 唯一区别是颜色逐线读取 —— 见 GN_Vk.h 里为什么需要它。
+uint32_t GN_VkDrawEditLinesImpl(const void *lines, uint32_t lineCount, VkPipeline pipeline,
+                                const char *label) {
+    if(!GN_Vk.initialized || !s_in3DPass || lines == 0 || lineCount == 0) return 0;
+    if(pipeline == VK_NULL_HANDLE || s_debugPipelineLayout == VK_NULL_HANDLE) return 0;
+
+    const GN3d::sEDIT_LINE *segments = (const GN3d::sEDIT_LINE *)lines;
+    const uint32_t vertexCount = lineCount * 2u;
+    const uint32_t vertexSize = vertexCount * (uint32_t)sizeof(sDEBUG_VERTEX);
+
+    Ensure3DBufferCapacity(vertexSize, 0);
+    if(GN_Vk.vertexBuffer3D == VK_NULL_HANDLE || GN_Vk.vertexMemory3D == VK_NULL_HANDLE) return 0;
+
+    void *mapped = 0;
+    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, s_vtxOfs3D, vertexSize, 0, &mapped);
+    if(mapped == 0) return 0;
+    sDEBUG_VERTEX *out = (sDEBUG_VERTEX *)mapped;
+    for(uint32_t i = 0; i < lineCount; ++i) {
+        // 逐线解包颜色：这是与单色版本的唯一差别
+        float rgba[4];
+        unpackColor(segments[i].aColor, rgba);
+        GN3d::sDEBUG_LINE converted;
+        converted.aStart = segments[i].aStart;
+        converted.aEnd = segments[i].aEnd;
+        writeSegment(&out[i * 2u], &out[i * 2u + 1u], converted, rgba);
+    }
+    vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory3D);
+
+    VkCommandBuffer cmd = GN_Vk.commandBuffers[GN_Vk.currentFrame];
+    vkValidationBeginLabel(cmd, label);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_debugPipelineLayout,
+                            0, 1, &s_debugDescriptorSet, 0, 0);
+    VkDeviceSize offset = s_vtxOfs3D;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &GN_Vk.vertexBuffer3D, &offset);
+    s_vtxOfs3D += vertexSize;
+    vkCmdDraw(cmd, vertexCount, 1, 0, 0);
+    vkValidationEndLabel(cmd);
+    return lineCount;
+}
+
+uint32_t GN_VkDrawEditLines(const void *lines, uint32_t lineCount) {
+    return GN_VkDrawEditLinesImpl(lines, lineCount, s_debugPipeline, "drawEditLines");
+}
+
+uint32_t GN_VkDrawEditLinesOverlay(const void *lines, uint32_t lineCount) {
+    return GN_VkDrawEditLinesImpl(lines, lineCount, s_debugOverlayPipeline, "drawEditLinesOverlay");
 }
 
 // task-26：按当前 swapchainExtent 重建调试线框固定视口管线（init 与 resize 共用）。
@@ -212,6 +268,20 @@ bool recreateDebugLinesPipeline() {
         return false;
     }
     s_debugPipeline = pipeline;
+
+    // 同一套 SPIR-V / 顶点布局 / 渲染通道，只把深度测试关掉 ⇒ 控件永远画在实体之上。
+    // 深度写本来就是关的，所以只改 aDepthTest / aDepthCompare。
+    desc.aDepthTest = false;
+    desc.aDepthCompare = VK_COMPARE_OP_ALWAYS;
+    VkPipeline overlay = GN_Vk.aPipelineCache.GetOrCreate(desc);
+    if(overlay == VK_NULL_HANDLE) {
+        // 叠层管线拿不到不算致命：退回有深度的版本，控件会部分被遮住但不会崩。
+        fprintf(stderr, "[GN_Vk] 叠层线框管线创建失败（控件将被实体遮挡）: %s\n",
+                GN_Vk.aPipelineCache.GetLastError());
+        s_debugOverlayPipeline = pipeline;
+    } else {
+        s_debugOverlayPipeline = overlay;
+    }
     return true;
 }
 

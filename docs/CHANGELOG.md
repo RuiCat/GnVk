@@ -1,5 +1,78 @@
 # Changelog
 
+## 2026-11-25 — 编辑器基础控件（网格 / 坐标轴 / Gizmo / 包围盒 / 线框 / 3D 样条）
+
+把"做一个编辑器还需要什么"里最基础的六件补齐，并渲染成 12 秒的演示视频。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| `GN3d::sEDIT_LINE` + 语义色板 | `src/graphics/GN_Gizmo.h` | 带**每线颜色**的线段；`gizmoColor::` 集中定义 X红/Y绿/Z蓝、主次网格、高亮等 |
+| 全局网格 | `sGRID_DESC` / `buildGridLines` | 主/次线分级、外圈淡出、中心两条线用轴语义色 |
+| 全局坐标轴 | `buildAxesLines` | 三根带四棱锥箭头的轴线 |
+| 变换控件 | `sGIZMO_DESC` / `buildGizmoLines` | 平移（箭头）/ 旋转（三环）/ 缩放（末端方块）+ 中心方块；支持局部/全局空间、高亮轴 |
+| 拾取与拖拽 | `pickGizmo` / `gizmoDragTranslate` / `gizmoDragRotate` / `gizmoDragScale` | 射线-线段 / 射线-环拾取；沿轴投影、绕轴夹角、缩放倍率 |
+| 包围盒 | `buildBoxLines` / `buildBoxCornerMarks` / `suggestedBoxPadding` | 12 棱 + 角标；**按屏幕像素**算外扩量 |
+| 线框显示 | `buildIndexedWireframeLines` | 三角网**去重边**（共享边只画一次） |
+| 3D 样条 | `sSPLINE_DESC` / `evaluateSpline` / `sampleSpline` / `buildSplineLines` / `buildSplineHandles` | Catmull-Rom（默认）/ 贝塞尔 / 折线，支持闭环与张力 |
+| GPU 入口 | `GN_VkDrawEditLines` / `GN_VkDrawEditLinesOverlay` | 每线自带颜色的批量线段；后者**关闭深度测试** |
+| 单测 24 例 | `tests/unit/testGizmo.cpp` | 见下 |
+| 演示视频 | `tests/editorGizmo`（`make gizmoVideo`） | 12 s / 1280×720 / 30 fps |
+
+产出：`.local/video/editor-gizmo.mp4`（1280×720 / 30fps / 12.00s / 3.5 MB / 2403 kb/s）。
+
+### 验收
+
+```
+make unit        625 cases, 0 failed     （601 → +24）
+make gpuCheck    120 pass, 0 fail
+make smoke       7/7      make ci 全绿
+```
+
+单测覆盖：网格线数/覆盖范围/轴色、坐标轴 15 段、包围盒 12 棱与角标 24 段、线框去重
+（正方形两三角 → 5 条边而非 6 条）、样条过控制点 / 端点 / 闭环 / C1 连续 / 退化情形
+（0/1/2 点）、Gizmo 三种模式的线段数、局部空间基、拾取（每根轴 + 中心 + 落空）、
+拖拽（沿轴投影与差值、绕轴夹角归一到 (-π,π]、缩放倍率钳制）。
+
+### 三个踩到的坑（都写进了代码注释）
+
+**1. `distanceRayToSegment` 的 t 推导符号写反了。**
+解 `minimize |P(s) - Q(t)|²` 时第二个方程是 `t = E + sB`，我写成了 `t = sB - E`。
+后果：`t` 恒为负、被钳成 0 ⇒ "射线上的点"永远是**相机位置**，距离恒等于原始距离，
+于是所有轴拾取全部失效（`gizmoPickTranslateAxis` 三条断言同时红）。
+这类错误在画面上完全看不出来——控件照常绘制，只是永远点不中。
+
+**2. 包围盒一根线都看不见 —— 不是没生成，是深度冲突。**
+AABB 的棱正好贴在物体表面上，而调试线管线是「深度测试开 / 深度写关」，
+同深度时线判为更远 ⇒ 整框消失。我先按"1.5% 对角长"给了外扩（1 m 的盒子 ≈ 1.3 cm），
+仍然看不见；把外扩放大到 25% 才出现 —— 说明物、线、深度三者都对，纯粹是**外扩量不到一个像素**
+（该视角下 1 px ≈ 1.4 cm）。正确做法是按屏幕像素换算：
+`worldPerPixel = 2·distance·tan(fovY/2)/screenHeight`，取 `max(2.5 px, 2% 对角长)`。
+封装成 `suggestedBoxPadding()`，注释里留了这次的数字。
+
+**3. 控件必须画在实体之上，而网格必须被实体遮挡 —— 两者不能共用一条管线。**
+第一版把所有线段都走同一个入口：
+* 开深度测试 ⇒ 变换控件挂在物体中心、箭头一半在物体内部，只剩箭头尖（像"控件没画出来"）；
+* 全关深度测试 ⇒ 网格"浮"在柱子前面，每根柱子都被网格划过。
+
+正解是分两批：场景内容（网格/样条/线框/包围盒）走 `GN_VkDrawEditLines`（有深度），
+控件走 `GN_VkDrawEditLinesOverlay`（无深度）。新增的 overlay 管线与原来那条**同一套 SPIR-V
+与顶点布局，只把 `aDepthTest` 关掉、`aDepthCompare` 设 ALWAYS**，成本为零。
+物理调试线仍然用有深度的那条 —— 看不到被墙挡住的碰撞盒才说明深度是对的，两类需求相反。
+
+### 视频里展示的东西
+
+| 时间 | 内容 |
+|---|---|
+| 0–3 s | 网格 + 坐标轴 + 实体 + 包围盒；样条从 0.4 s 开始逐段生长到 2.2 s 长满 |
+| 3–6 s | 切到线框显示（实体不画，只画三角网去重边），包围盒高亮 |
+| 6–9 s | 平移控件：拖 X 轴，物体沿 X 移动，控件跟随；相机拉近 |
+| 9–10.5 s | 旋转控件：拖 Y 环，物体绕 Y 自转（局部空间） |
+| 10.5–12 s | 缩放控件：拖 Y 轴，物体拉高到 2.2 倍，末端方块沿轴移动 |
+
+样条全程有一个亮色十字标记沿曲线巡游（三角波往返），说明它是参数曲线而不是静态折线。
+
 ## 2026-11-25 — 打通自发光材质（`aEmissive` 从死字段到可用）
 
 `sMATERIAL::aEmissive` 一直存在，但**从来没有被使用**：PBR 的 push constant 只有
