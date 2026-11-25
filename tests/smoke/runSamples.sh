@@ -148,6 +148,11 @@ run_one imoScene      ./build/imoScene
 # P4 物理场景：纯 CPU（不需要 Vulkan），放在这里是为了和"整仓示例都能跑"一起验。
 run_one physicsBoxes  ./build/physicsBoxes
 run_one characterDemo ./build/characterDemo
+# 动画演示：带**姿态自检**（demoPoseCheck.h）。自检失败会返回非零，
+# 所以这两个不只是"跑完不崩"，还能拦住"腿反了"这类方向错误。
+# 曾经根因：位置偏移与四元数符号相反 ⇒ 腿被扭成脚朝上，而截图肉眼没看出来。
+run_one rootMotion   ./build/rootMotion
+run_one animBlend    ./build/animBlend
 # 管线验收：无窗口跑同一批检查；按基线判（不把已知的 cull.debugLine 当失败）。
 # 基线 2026-11-24：P2 蒙皮 6 站 + P3 动画切换 1 站后为 116。
 run_baseline gpuCheck      ./build/gpuCheck 124 ""

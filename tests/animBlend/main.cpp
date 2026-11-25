@@ -12,6 +12,7 @@
 #include "GN_3Dmath.h"
 #include "GN_3Danim.h"
 #include "GN_AnimBlend.h"
+#include "demoPoseCheck.h" // 演示自检：抓"腿反了"这类方向错误
 
 #include <png.h>
 
@@ -29,6 +30,7 @@ int gFrames = 300; // 10 s @ 30fps
 const char *gOutDir = ".local/video/animBlend-frames";
 bool gVerbose = false;
 float gTime = 0.0f;
+bool gPoseCheckFailed = false;
 
 GN3d::cLIGHT *gLight = nullptr;
 GN3d::cCAMERA gCamera;
@@ -259,6 +261,22 @@ void poseStick(sStick &stick, float hipAngle, float shoulderAngle) {
                             stick.aLegR}) {
         m->computeWorldAABB();
     }
+
+    // ── 自检 ──（口径同 rootMotion：每帧查、大角度才判、失败只报一次）
+    static bool reported = false;
+    if (!reported && std::fabs(hipAngle) >= demoCheck::kMinAngleForCheck) {
+        const GNg::sVEC3 hipPos{x, hipY, 0.0f};
+        bool ok = true;
+        ok = demoCheck::checkLimb(stick.aLegL, hipPos, legLen, "AnimBlend 左腿", 0, -0.2f) && ok;
+        ok = demoCheck::checkLimb(stick.aLegR, hipPos, legLen, "AnimBlend 右腿", 0, -0.2f) && ok;
+        // **只查腿**：手臂有肩宽横向偏移，且张开后与肢体方向不垂直，
+        // 不满足 checkLimb 的前提（会误报正确实现）。详见 demoPoseCheck.h 的说明。
+        (void)shoulderAngle;
+        if (!ok) {
+            gPoseCheckFailed = true;
+            reported = true;
+        }
+    }
 }
 
 // 从 clip 采样一个关节的"绕 X 角度"（用四元数反推，够本演示用）
@@ -432,6 +450,10 @@ int main(int argc, char **argv) {
     if (!GN_StartRunHeadless((short)gWidth, (short)gHeight, gFrames, onFrame)) {
         std::fprintf(stderr, "[animBlend] 初始化失败\n");
         return 2;
+    }
+    if (gPoseCheckFailed) {
+        std::fprintf(stderr, "[animBlend] 姿态自检失败（见上面的 [poseCheck] 输出）\n");
+        return 3;
     }
     std::printf("[animBlend] 完成：%d 帧\n", gFrames);
     return 0;

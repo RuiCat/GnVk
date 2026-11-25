@@ -11,6 +11,7 @@
 #include "GN_RootMotion.h"
 #include "GN_Character.h"
 #include "GN_Gizmo.h"
+#include "demoPoseCheck.h" // 演示自检：抓"腿反了"这类方向错误
 
 #include <png.h>
 
@@ -28,6 +29,7 @@ int gFrames = 360; // 12 s @ 30fps
 const char *gOutDir = ".local/video/rootMotion-frames";
 bool gVerbose = false;
 float gTime = 0.0f;
+bool gPoseCheckFailed = false; // 自检失败 ⇒ main 返回非零（smoke 能拦住）
 
 GN3d::cLIGHT *gLight = nullptr;
 GN3d::cCAMERA gCamera;
@@ -226,6 +228,30 @@ void poseWalker(sWalker &w, float legAngle) {
     w.aBody->computeWorldAABB();
     w.aHead->SetPosition(x, hipY + bodyH + headH * 0.5f, z);
     w.aHead->computeWorldAABB();
+
+    // ── 自检（防止"腿反了"那类错误再次溜过去）──
+    // **每帧都查**，但只在肢体有明显摆动时（|angle| >= kMinAngleForCheck）——
+    // 静止姿势下"位置与旋转不一致"和"一致"算出来的量几乎相同，查不出东西。
+    // 失败只报一次（避免刷屏），但 gPoseCheckFailed 会一直保持。
+    static bool reported = false;
+    if (!reported && std::fabs(legAngle) >= demoCheck::kMinAngleForCheck) {
+        const GNg::sVEC3 hipPos{x, hipY, z};
+        bool ok = true;
+        ok = demoCheck::checkLimb(w.aLegL, hipPos, legLen, "RootMotion 左腿", 0, -0.2f) && ok;
+        ok = demoCheck::checkLimb(w.aLegR, hipPos, legLen, "RootMotion 右腿", 0, -0.2f) && ok;
+        // 头顶 ≈ foot.y + 胶囊高度（模型与碰撞体比例一致）
+        const float headTop = w.aHead->aWorldAABB.aMax.y;
+        const float wantTop = foot.y + w.aCharacter.Desc().aHeight;
+        if (std::fabs(headTop - wantTop) > 0.30f) {
+            std::fprintf(stderr, "[poseCheck] FAIL 头顶 y=%.3f，期望 %.3f（差 %.3f > 0.30）\n",
+                         headTop, wantTop, std::fabs(headTop - wantTop));
+            ok = false;
+        }
+        if (!ok) {
+            gPoseCheckFailed = true;
+            reported = true;
+        }
+    }
 }
 
 bool buildCamera(float aspect, GNg::sMAT44 &viewProj, GNg::sMAT44 &view, GNg::sVEC3 &eye) {
@@ -409,6 +435,10 @@ int main(int argc, char **argv) {
     if (!GN_StartRunHeadless((short)gWidth, (short)gHeight, gFrames, onFrame)) {
         std::fprintf(stderr, "[rootMotion] 初始化失败\n");
         return 2;
+    }
+    if (gPoseCheckFailed) {
+        std::fprintf(stderr, "[rootMotion] 姿态自检失败（见上面的 [poseCheck] 输出）\n");
+        return 3;
     }
     std::printf("[rootMotion] 完成：%d 帧\n", gFrames);
     return 0;

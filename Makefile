@@ -470,7 +470,7 @@ $(UNDO_DEMO_BIN): $(UNDO_DEMO_SRC) $(TARGET)
 # ── Root Motion 演示（C3）──
 ROOTMOTION_SRC   := $(wildcard tests/rootMotion/*.cpp)
 ROOTMOTION_BIN   := build/rootMotion
-ROOTMOTION_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+ROOTMOTION_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES) -Itests/common
 
 .PHONY: rootMotion
 rootMotion: $(ROOTMOTION_BIN)
@@ -482,7 +482,7 @@ rootMotion: $(ROOTMOTION_BIN)
 		$(GIZMO_VIDEO_OUT)/root-motion.mp4
 	@ls -lh $(GIZMO_VIDEO_OUT)/root-motion.mp4
 
-$(ROOTMOTION_BIN): $(ROOTMOTION_SRC) $(TARGET)
+$(ROOTMOTION_BIN): $(ROOTMOTION_SRC) $(wildcard tests/common/*.h) $(TARGET)
 	@echo "$(YELLOW)🦶 编译 Root Motion 演示...$(RESET)"
 	@mkdir -p build
 	$(CXX) $(ROOTMOTION_FLAGS) $(ROOTMOTION_SRC) $(TEST_LIBS) -o $(ROOTMOTION_BIN)
@@ -490,7 +490,7 @@ $(ROOTMOTION_BIN): $(ROOTMOTION_SRC) $(TARGET)
 # ── 混合树 / 动画层演示（D3）──
 ANIMBLEND_SRC   := $(wildcard tests/animBlend/*.cpp)
 ANIMBLEND_BIN   := build/animBlend
-ANIMBLEND_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+ANIMBLEND_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES) -Itests/common
 
 .PHONY: animBlend
 animBlend: $(ANIMBLEND_BIN)
@@ -502,7 +502,7 @@ animBlend: $(ANIMBLEND_BIN)
 		$(GIZMO_VIDEO_OUT)/anim-blend.mp4
 	@ls -lh $(GIZMO_VIDEO_OUT)/anim-blend.mp4
 
-$(ANIMBLEND_BIN): $(ANIMBLEND_SRC) $(TARGET)
+$(ANIMBLEND_BIN): $(ANIMBLEND_SRC) $(wildcard tests/common/*.h) $(TARGET)
 	@echo "$(YELLOW)🎭 编译混合树/动画层演示...$(RESET)"
 	@mkdir -p build
 	$(CXX) $(ANIMBLEND_FLAGS) $(ANIMBLEND_SRC) $(TEST_LIBS) -o $(ANIMBLEND_BIN)
@@ -532,7 +532,7 @@ $(CHAR_PUSH_BIN): $(CHAR_PUSH_SRC) $(TARGET)
 # 否则它们会先以窗口模式跑一次（无显示时 SKIP → make 直接失败）。
 # 没有 Vulkan 设备时整体 SKIP（退出码 2）。
 .PHONY: smoke
-smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene
+smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene physicsBoxes characterDemo $(ROOTMOTION_BIN) $(ANIMBLEND_BIN)
 	@echo "$(YELLOW)🚦 示例无窗口冒烟...$(RESET)"
 	@GN_HEADLESS_FRAMES=$(if $(SMOKE_FRAMES),$(SMOKE_FRAMES),8) \
 		LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH bash tests/smoke/runSamples.sh

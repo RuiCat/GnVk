@@ -1,5 +1,75 @@
 # Changelog
 
+## 2026-11-25 — 给演示加姿态自检（并用它证明能抓住"腿反了"）
+
+上一轮修了「腿反了」之后说"这类错误需要数值断言，不是肉眼看截图"。这一轮把它做出来，
+并且**先验证门禁真的能抓住原 bug**，再认为它有效。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| `demoCheck::checkLimb` | `tests/common/demoPoseCheck.h` | 比较"位置偏移方向"与"四元数给出的朝向"是否一致 |
+| `limbDirFromQuat` | 同上 | 从单轴旋转的四元数反推肢体朝向 |
+| 两个演示接入 | `tests/rootMotion`、`tests/animBlend` | 失败 ⇒ `main` 返回 3 |
+| smoke 扩展 | `make smoke` 7 → **9** 项 | 两个动画演示现在**不只是"跑完不崩"** |
+| Makefile | `smoke:` 依赖 + 演示的头文件依赖 | 见下面两个"顺带修的坑" |
+
+### 判据的推导（第一版写错过两次，记下来）
+
+设关节 J、肢体中心 C、半长 h = L/2、横向偏移 lat（左右腿分开那段）。正确实现里
+`C = J + dir·h + lat`，其中 dir 就是四元数给出的朝向。若位置偏移用 dir_pos 而四元数
+给 dir_quat，且两者不一致（本次 bug 只有 z 分量符号相反）：
+
+```
+C - J 沿 dir_quat 的**垂直分量** = |lat + (dir_pos - dir_quat)·h|
+正确时 = |lat|（只有横向偏移）；不一致时会显著变大
+```
+
+实测（L=0.72, lat=0.13）：
+
+| 摆动角 | 正确 垂直分量 | bug 垂直分量 | 阈值 0.55h=0.198 |
+|---|---|---|---|
+| 0.30 rad | 0.130 | **0.241** | 抓到 ✓ |
+| 0.09 rad | 0.130 | 0.146 | **抓不到** |
+
+⇒ **两个前提**，都写进了头文件：
+1. **必须在肢体有明显摆动时查**（`kMinAngleForCheck = 0.15`）。静止姿势下两种实现
+   算出的量几乎相同。
+2. **横向偏移必须垂直于肢体方向**。腿满足（朝下、左右分开在 X）；**张开的手臂不满足**
+   （肩宽偏移在 X，手臂转开后也有了 X 分量），会误报正确实现 —— 我第一版对 animBlend
+   的手臂也查了，结果正确代码被判成 bug。
+
+### 门禁有效性（双向都验过，不是"加了就算"）
+
+```
+rootMotion  注入 bug（去掉 q.x 的负号） → EXIT=3，报"左腿/右腿 垂直分量 0.208 过大"
+rootMotion  恢复正确                     → EXIT=0
+animBlend   注入 bug                     → EXIT=3，报"左腿/右腿 垂直分量 0.211 过大"
+animBlend   恢复正确                     → EXIT=0
+```
+
+### 顺带修的两个 Makefile 坑
+
+**1. 演示的依赖里没有共享头文件** ⇒ 改 `tests/common/demoPoseCheck.h` 不触发重编译，
+于是"改了自检却没生效"，我为此多花了三轮。现在依赖里有 `$(wildcard tests/common/*.h)`。
+
+**2. `smoke:` 的依赖只列了 4 个示例** ⇒ 新加进 runSamples.sh 的 `rootMotion` /
+`animBlend` 不会被构建，smoke 会拿旧二进制跑。现在依赖补齐（含 `physicsBoxes`、
+`characterDemo`）。
+
+### 验收
+
+```
+make unit        716 cases, 0 failed
+make gpuCheck    124 pass, 0 fail
+make smoke       9/9（新增 rootMotion / animBlend，带姿态自检）
+make spv-check   PASS
+make ci          全绿
+```
+
+两个视频已重渲（腿方向正确）。
+
 ## 2026-11-25 — 修：演示里的腿是反的（脚朝上）
 
 用户指出「腿反了，脚在上面」。查下来是**两个演示程序共有的姿态计算 bug**，
