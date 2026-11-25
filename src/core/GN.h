@@ -170,6 +170,7 @@ extern GN_API unsigned int GT_SystemInited; //标记引擎系统各部分是否�
 #include "GN_IK.h" //两骨 IK（C3b：脚部落地/手部抓握的解析解）
 #include "GN_CapsuleSweep.h" //胶囊扫掠（C4：真连续碰撞，替代"抬-移-落"）
 #include "GN_Ragdoll.h" //布娃娃（C3b：物理驱动的倒地/击飞）
+#include "GN_HiZ.h" //Hi-Z 遮挡剔除 + Overdraw 测量（B4，纯 CPU）
 #include "giParams.h" //GI CPU 基座：GI UBO/SH9/SSAO 核/BRDF LUT/G-Buffer 打包（P12-G1）
 #endif
 #include "GN_Linear.h" //线性插值与曲线插值等功能

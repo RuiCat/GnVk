@@ -200,3 +200,92 @@ TEST_CASE(sceneCullBenchCompareWithCullDisabled) {
     CHECK(withoutCull > 0.0);
     bench.free();
 }
+
+// ── Overdraw 实测（B4 的前置测量）──────────────────────
+//
+// 与剔除性能同理：**先测再说值不值得做遮挡剔除**。
+// overdraw 倍数（每像素被着色几次）与硬件无关 —— 真实 GPU 上同样是这个倍数，
+// 只是每次的代价不同。所以这个数字可以直接用来判断"要不要做 Hi-Z"。
+TEST_CASE(sceneOverdrawBaseline) {
+    sBenchScene bench;
+    bench.build(2000u);
+
+    // 真透视视锥（与剔除用例同一口径）
+    GNg::sMAT44 view;
+    GNg::sMAT44 proj;
+    GNg::sMAT44 viewProj;
+    const GNg::sVEC3 eye{0.0f, 0.0f, 0.0f};
+    const GNg::sVEC3 target{0.0f, 0.0f, -1.0f};
+    const GNg::sVEC3 up{0.0f, 1.0f, 0.0f};
+    GNg::Mat44LookAtRH(&view, &eye, &target, &up);
+    GNg::Mat44PerspectiveVK(&proj, 1.0472f, 16.0f / 9.0f, 0.5f, 300.0f);
+    GNg::Mat44Mul(&viewProj, &proj, &view);
+
+    const sFRUSTUM frustum = sFRUSTUM::FromViewProj(viewProj);
+    sLOD_VIEW lodView;
+    lodView.aCamPos = eye;
+    lodView.aScreenHeight = 720.0f;
+    lodView.aFovYRad = 1.0472f;
+    bench.aScene.PrepareRender(lodView, &frustum);
+
+    // 只统计通过剔除的（真正会绘制的）物体
+    std::vector<sAABB> boxes;
+    boxes.reserve(bench.aScene.VisibleCount());
+    for (uint32_t i = 0; i < bench.aScene.VisibleCount(); ++i) {
+        const sDRAW_ITEM &item = bench.aScene.DrawItem(i);
+        if (item.aEntity == nullptr) continue;
+        cMODEL *model = item.aEntity->aMesh.Model();
+        if (model == nullptr) continue;
+        boxes.push_back(model->aWorldAABB);
+    }
+
+    const sOVERDRAW_STATS st = measureOverdraw(viewProj, 1280, 720, boxes.empty() ? nullptr : &boxes[0],
+                                               (uint32_t)boxes.size());
+    std::fprintf(stderr,
+                 "[overdraw] 2000 实体（剔除后 %u 个参与绘制）：overdraw = %.2fx"
+                 "（片元 %llu / 覆盖像素 %llu）\n",
+                 st.aObjects, st.OverdrawRatio(), (unsigned long long)st.aFragments,
+                 (unsigned long long)st.aCoveredPixels);
+    CHECK(st.aObjects > 0u);
+    CHECK(st.OverdrawRatio() >= 0.9f); // 至少有一层
+    bench.free();
+}
+
+// ── 对照：密集重叠几何的 overdraw 应当明显更高 ─────────
+//
+// 上面那个 1.06x 是"稀疏小物体"的形态。遮挡剔除真正有收益的是**密集重叠几何**
+// （城市、树林、室内堆叠）。这条用例验证 `measureOverdraw` 确实能区分两者 ——
+// 否则工具本身就没有说服力。
+TEST_CASE(sceneOverdrawDenseGeometry) {
+    // 200 个大盒子叠在同一块屏幕上（模拟密集场景）
+    std::vector<sAABB> boxes;
+    boxes.reserve(200);
+    for (int i = 0; i < 200; ++i) {
+        sAABB b;
+        const float t = (float)i;
+        // **相机朝 -Z 看，物体必须在负 z**（我第一次写成 +10..+109，全在相机背后，
+        // projectToNdc 的 w<=0 检查把它们全跳过 ⇒ 0.00x。那是测试数据错，不是工具错。）
+        // 另外 y 也要落在视锥内：半高 = |z|*tan(30°)，|z| 最小 10 ⇒ 半高 5.77。
+        b.aMin = GNg::sVEC3{-3.0f + std::fmod(t * 0.7f, 2.0f), -3.0f + std::fmod(t * 0.9f, 2.0f),
+                            -(10.0f + t * 0.5f)};
+        b.aMax = GNg::sVEC3{b.aMin.x + 2.5f, b.aMin.y + 2.5f, b.aMin.z + 2.0f};
+        boxes.push_back(b);
+    }
+    GNg::sMAT44 view;
+    GNg::sMAT44 proj;
+    GNg::sMAT44 viewProj;
+    const GNg::sVEC3 eye{0.0f, 0.0f, 0.0f};
+    const GNg::sVEC3 target{0.0f, 0.0f, -1.0f};
+    const GNg::sVEC3 up{0.0f, 1.0f, 0.0f};
+    GNg::Mat44LookAtRH(&view, &eye, &target, &up);
+    GNg::Mat44PerspectiveVK(&proj, 1.0472f, 16.0f / 9.0f, 0.5f, 300.0f);
+    GNg::Mat44Mul(&viewProj, &proj, &view);
+
+    const sOVERDRAW_STATS st =
+        measureOverdraw(viewProj, 1280, 720, &boxes[0], (uint32_t)boxes.size());
+    std::fprintf(stderr, "[overdraw] 200 个重叠大盒：overdraw = %.2fx（稀疏场景是 1.06x）\n",
+                 st.OverdrawRatio());
+    CHECK(st.aObjects == 200u);
+    // 密集重叠必须有明显 overdraw（>2 才算"值得做遮挡剔除"的量级）
+    CHECK(st.OverdrawRatio() > 2.0f);
+}
