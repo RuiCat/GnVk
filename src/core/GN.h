@@ -167,6 +167,7 @@ extern GN_API unsigned int GT_SystemInited; //标记引擎系统各部分是否�
 #include "GN_EditCommand.h" //编辑命令与撤销栈（A4：变换快照 + undo/redo）
 #include "GN_AnimBlend.h" //混合树与动画层遮罩（D3：1D 混合空间 + 关节遮罩）
 #include "GN_RootMotion.h" //Root Motion（C3：从动画根关节位移驱动角色移动）
+#include "GN_IK.h" //两骨 IK（C3b：脚部落地/手部抓握的解析解）
 #include "giParams.h" //GI CPU 基座：GI UBO/SH9/SSAO 核/BRDF LUT/G-Buffer 打包（P12-G1）
 #endif
 #include "GN_Linear.h" //线性插值与曲线插值等功能

@@ -525,6 +525,16 @@ void QuatRotateVec3(sVEC3 *out, const sVEC3 *v, const sQUAT *q) {
     out->z = v->z + t.z + result.z;
 }
 
+void QuatMul(sQUAT *out, const sQUAT *a, const sQUAT *b) {
+    if (out == 0 || a == 0 || b == 0) return;
+    sQUAT r;
+    r.w = a->w * b->w - a->x * b->x - a->y * b->y - a->z * b->z;
+    r.x = a->w * b->x + a->x * b->w + a->y * b->z - a->z * b->y;
+    r.y = a->w * b->y - a->x * b->z + a->y * b->w + a->z * b->x;
+    r.z = a->w * b->z + a->x * b->y - a->y * b->x + a->z * b->w;
+    *out = r;
+}
+
 void QuatInverse(sQUAT *out, const sQUAT *in) {
     // 对单位四元数，逆就是共轭
     float lenSq = in->x * in->x + in->y * in->y + in->z * in->z + in->w * in->w;

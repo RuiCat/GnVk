@@ -246,6 +246,11 @@ GN_API void QuatToMatrix44(sMAT44 *out, const sQUAT *q);
 GN_API void QuatSlerp(sQUAT *out, const sQUAT *a, const sQUAT *b, float t);
 GN_API void QuatRotateVec3(sVEC3 *out, const sVEC3 *v, const sQUAT *q);
 GN_API void QuatInverse(sQUAT *out, const sQUAT *in);
+// 四元数乘法（Hamilton 积，w,x,y,z 顺序）。
+// 注意顺序：`QuatMul(a, b)` 表示"先施加 b 再施加 a"（与矩阵乘法同序）。
+// 引擎此前一直没有它 —— Gizmo 的旋转拖拽与 IK 各自在文件内实现过一份，
+// 现提升到这里避免三份实现漂移。
+GN_API void QuatMul(sQUAT *out, const sQUAT *a, const sQUAT *b);
 
 GN_API void Mat44ComposeTRS(sMAT44 *out, const sVEC3 *translation, const sQUAT *rotation, const sVEC3 *scale);
 GN_API void Mat44DecomposeTRS(const sMAT44 *m, sVEC3 *translation_out, sQUAT *rotation_out, sVEC3 *scale_out);

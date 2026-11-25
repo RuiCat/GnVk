@@ -807,15 +807,12 @@ sGIZMO_DRAG_STATE::sGIZMO_DRAG_STATE()
       aStartModelScale{1.0f, 1.0f, 1.0f}, aStartProjection(0.0f),
       aStartPlanePoint{0.0f, 0.0f, 0.0f}, aStartAngleRad(0.0f), aLocalSpace(false) {}
 
-// 四元数乘法（w,x,y,z 顺序的 Hamilton 积）。引擎只暴露了 FromAxisAngle，
-// 没有 Mul —— 旋转拖拽需要"新旋转 = 增量 × 原始旋转"，所以在这里实现一份。
+// 四元数乘法已提升到 GNg::QuatMul（GN_3Dmath）。这里曾经有一份文件内实现，
+// 与 IK 里的那份是逐字相同的两份 —— 统一到一处避免漂移。
 namespace {
-GNg::sQUAT quatMul(const GNg::sQUAT &a, const GNg::sQUAT &b) {
+inline GNg::sQUAT quatMul(const GNg::sQUAT &a, const GNg::sQUAT &b) {
     GNg::sQUAT out;
-    out.w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z;
-    out.x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y;
-    out.y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x;
-    out.z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w;
+    GNg::QuatMul(&out, &a, &b);
     return out;
 }
 } // namespace

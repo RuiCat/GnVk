@@ -153,6 +153,8 @@ run_one characterDemo ./build/characterDemo
 # 曾经根因：位置偏移与四元数符号相反 ⇒ 腿被扭成脚朝上，而截图肉眼没看出来。
 run_one rootMotion   ./build/rootMotion
 run_one animBlend    ./build/animBlend
+# IK 演示带**量化验收**：有 IK 的平均脚离地误差必须显著小于无 IK（失败返回 4）。
+run_one ikDemo       ./build/ikDemo
 # 管线验收：无窗口跑同一批检查；按基线判（不把已知的 cull.debugLine 当失败）。
 # 基线 2026-11-24：P2 蒙皮 6 站 + P3 动画切换 1 站后为 116。
 run_baseline gpuCheck      ./build/gpuCheck 124 ""

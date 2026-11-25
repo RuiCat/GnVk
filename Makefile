@@ -467,6 +467,26 @@ $(UNDO_DEMO_BIN): $(UNDO_DEMO_SRC) $(TARGET)
 	@mkdir -p build
 	$(CXX) $(UNDO_DEMO_FLAGS) $(UNDO_DEMO_SRC) $(TEST_LIBS) -o $(UNDO_DEMO_BIN)
 
+# ── 两骨 IK 演示（C3b）──
+IKDEMO_SRC   := $(wildcard tests/ikDemo/*.cpp)
+IKDEMO_BIN   := build/ikDemo
+IKDEMO_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES) -Itests/common
+
+.PHONY: ikDemo
+ikDemo: $(IKDEMO_BIN)
+	@echo "$(YELLOW)🦵 渲染两骨 IK 演示...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(IKDEMO_BIN) --out $(GIZMO_VIDEO_OUT)/ik-frames \
+		--frames 360 --size $(GIZMO_VIDEO_SIZE)
+	@$(FFMPEG) -y -loglevel error -framerate 30 -i $(GIZMO_VIDEO_OUT)/ik-frames/frame_%05d.png \
+		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart \
+		$(GIZMO_VIDEO_OUT)/two-bone-ik.mp4
+	@ls -lh $(GIZMO_VIDEO_OUT)/two-bone-ik.mp4
+
+$(IKDEMO_BIN): $(IKDEMO_SRC) $(wildcard tests/common/*.h) $(TARGET)
+	@echo "$(YELLOW)🦵 编译两骨 IK 演示...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(IKDEMO_FLAGS) $(IKDEMO_SRC) $(TEST_LIBS) -o $(IKDEMO_BIN)
+
 # ── Root Motion 演示（C3）──
 ROOTMOTION_SRC   := $(wildcard tests/rootMotion/*.cpp)
 ROOTMOTION_BIN   := build/rootMotion
@@ -532,7 +552,7 @@ $(CHAR_PUSH_BIN): $(CHAR_PUSH_SRC) $(TARGET)
 # 否则它们会先以窗口模式跑一次（无显示时 SKIP → make 直接失败）。
 # 没有 Vulkan 设备时整体 SKIP（退出码 2）。
 .PHONY: smoke
-smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene physicsBoxes characterDemo $(ROOTMOTION_BIN) $(ANIMBLEND_BIN)
+smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene physicsBoxes characterDemo $(ROOTMOTION_BIN) $(ANIMBLEND_BIN) $(IKDEMO_BIN)
 	@echo "$(YELLOW)🚦 示例无窗口冒烟...$(RESET)"
 	@GN_HEADLESS_FRAMES=$(if $(SMOKE_FRAMES),$(SMOKE_FRAMES),8) \
 		LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH bash tests/smoke/runSamples.sh
