@@ -500,8 +500,8 @@ smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene
 # ── CI 一条命令：构建 + 单测 + 无窗口渲染验收 + 示例冒烟 ──
 # 与 check 的区别：check 只跑纯逻辑单测（不需要 GPU）；ci 额外验真实渲染。
 .PHONY: ci
-ci: check smoke doc-check
-	@echo "$(GREEN)✅ ci 通过: 构建 + 单测 + 物理场景 + 无窗口渲染 + 示例冒烟 + 文档数字一致$(RESET)"
+ci: check smoke doc-check spv-check
+	@echo "$(GREEN)✅ ci 通过: 构建 + 单测 + 物理场景 + 无窗口渲染 + 示例冒烟 + 文档数字 + 内嵌 SPIR-V 一致$(RESET)"
 
 # ── 分层依赖检查（只报告；架构重组完成后改 --strict 进 make ci）──
 .PHONY: lint
@@ -762,6 +762,23 @@ shaders:
 	done; \
 	glslangValidator -V --target-env vulkan1.2 $(SHADER_DIR)/gn_cornell_rq.comp -o $(SHADER_DIR)/gn_cornell_rq.comp.spv 2>/dev/null && c=$$((c+1)); \
 	echo "$(GREEN)✅ $$c 个着色器$(RESET)"
+	@$(MAKE) --no-print-directory embed-spv
+
+# ── 内嵌 SPIR-V 数组同步（必须跟 make shaders 一起跑）──
+#
+# 引擎运行时**优先**读磁盘 assets/shaders/*.spv，读不到才退回内嵌数组（src/graphics/_Vulkan/ 下的 *_spv.h）。
+# 内嵌数组曾经是"一次性手工生成"的：改了 .glsl → make shaders 更新了 .spv →
+# 程序却仍在跑旧的内嵌代码。表现是"改了完全没效果"，排查了整整一轮
+# （docs/CHANGELOG.md 的 cube shadow 条目有完整记录）。
+#
+# 现在：make shaders 末尾自动同步；make spv-check 在 CI 里当门禁。
+.PHONY: embed-spv spv-check
+embed-spv:
+	@echo "$(YELLOW)📦 同步内嵌 SPIR-V 数组...$(RESET)"
+	@python3 tools/embedSpv.py --write
+
+spv-check:
+	@python3 tools/embedSpv.py --check
 
 # ═══════════════════════════════════════════════════════════
 #  9. 帮助
