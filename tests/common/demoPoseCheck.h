@@ -118,5 +118,53 @@ inline bool checkLimb(const GN3d::cMODEL *limb, const GNg::sVEC3 &jointPos, floa
     return true;
 }
 
+// ═══════════════════════════════════════════════════════════
+//  通用版：不假设"绕单轴旋转"
+// ═══════════════════════════════════════════════════════════
+// 上面那个 checkLimb 用 limbDirFromQuat 反推朝向，只对"绕 X/Y/Z 单轴"成立。
+// 但用 `quatFromTo(down, dir)` 摆出来的骨头是任意轴旋转 —— 那个假设不成立。
+//
+// 这里直接**用四元数把局部 -Y 转过去**（与真实渲染完全同一套数学），所以对任意
+// 旋转都成立，且不依赖"哪根轴"。
+//
+// 判据同前：肢体中心相对关节的位移，必须**平行于**肢体朝向
+//   * 平行分量 ≈ 半长（容差 25%）
+//   * 垂直分量 ≤ 半长 × 0.55（只允许横向偏移那点量级）
+inline bool checkLimbAny(const GN3d::cMODEL *limb, const GNg::sVEC3 &jointPos, float limbLength,
+                         const char *name) {
+    if(limb == 0) return true;
+    const float dx = limb->aPosition.x - jointPos.x;
+    const float dy = limb->aPosition.y - jointPos.y;
+    const float dz = limb->aPosition.z - jointPos.z;
+
+    // 局部 -Y 经该旋转后的世界朝向（与渲染同源，不做单轴假设）
+    const GNg::sVEC3 localDown{0.0f, -1.0f, 0.0f};
+    GNg::sVEC3 dir;
+    GNg::QuatRotateVec3(&dir, &localDown, &limb->aRotation);
+
+    const float parallel = dx * dir.x + dy * dir.y + dz * dir.z;
+    const float px = dx - dir.x * parallel;
+    const float py = dy - dir.y * parallel;
+    const float pz = dz - dir.z * parallel;
+    const float perp = std::sqrt(px * px + py * py + pz * pz);
+    const float half = (limbLength > 0.0f) ? limbLength * 0.5f : 0.0f;
+
+    if(half > 0.0f && (parallel < half * 0.75f || parallel > half * 1.25f)) {
+        std::fprintf(stderr,
+                     "[poseCheck] FAIL %s: 沿肢体方向的偏移 %.3f，期望 ≈ %.3f"
+                     " —— 位置偏移与旋转方向不一致\n",
+                     name, parallel, half);
+        return false;
+    }
+    if(half > 0.0f && perp > half * 0.55f) {
+        std::fprintf(stderr,
+                     "[poseCheck] FAIL %s: 垂直分量 %.3f 过大（上限 %.3f）"
+                     " —— 肢体被扭成斜的\n",
+                     name, perp, half * 0.55f);
+        return false;
+    }
+    return true;
+}
+
 } // namespace demoCheck
 #endif // _GN_DEMO_POSE_CHECK_H_

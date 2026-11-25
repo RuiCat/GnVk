@@ -23,6 +23,8 @@
 #include <cstring>
 #include <vector>
 
+std::vector<GN3d::sEDIT_LINE> gHelperLines; // 地面高度参考线
+
 namespace {
 
 int gWidth = 1280;
@@ -232,16 +234,35 @@ void poseWalker(sWalker &w, float legPhaseA, float legPhaseB, float walkZ) {
         const float side = legs[i].aLeft ? -0.11f : 0.11f;
         const GNg::sVEC3 hip{w.aX + side, hipY, footZ};
 
-        // 动画驱动的膝与踝（钟摆）
+        // 动画驱动的膝与踝（钟摆）。
+        // **摆动方向是 Z（前后），不是 X（左右）**：角色朝 +Z 前进，腿也要在 Z 上摆。
+        // 这里曾经写成 `hip.x + sin(swing)*len`，于是人物往前走、腿却左右劈叉 ——
+        // 与 rootMotion 演示里"腿反了"是同一类错误的另一个变种（那次是符号，
+        // 这次是轴）。两次都说明：**轴向这种约定必须靠断言，不能靠看**。
         const float swing = legs[i].aPhase;
-        const GNg::sVEC3 animKnee{hip.x + std::sin(swing) * kThighLen,
-                                  hip.y - std::cos(swing) * kThighLen, hip.z};
+        const GNg::sVEC3 animKnee{hip.x,
+                                  hip.y - std::cos(swing) * kThighLen,
+                                  hip.z + std::sin(swing) * kThighLen};
         const float shinSwing = swing * 0.35f;
-        const GNg::sVEC3 animAnkle{animKnee.x + std::sin(shinSwing) * kShinLen,
-                                   animKnee.y - std::cos(shinSwing) * kShinLen, animKnee.z};
+        const GNg::sVEC3 animAnkle{animKnee.x,
+                                   animKnee.y - std::cos(shinSwing) * kShinLen,
+                                   animKnee.z + std::sin(shinSwing) * kShinLen};
 
         GNg::sVEC3 knee = animKnee;
         GNg::sVEC3 ankle = animAnkle;
+
+        {
+            static int dn = 0;
+            if (gVerbose && dn < 8) {
+                std::fprintf(stderr,
+                             "[legdbg] %s side=%d phase=%+.3f hip=(%.2f,%.2f,%.2f) "
+                             "knee=(%.2f,%.2f,%.2f) ankle=(%.2f,%.2f,%.2f)\n",
+                             w.aUseIK ? "IK" : "noIK", i, legs[i].aPhase, hip.x, hip.y, hip.z,
+                             animKnee.x, animKnee.y, animKnee.z, animAnkle.x, animAnkle.y,
+                             animAnkle.z);
+                ++dn;
+            }
+        }
 
         if (w.aUseIK) {
             // 目标：脚踩在**地面**上（x 跟随摆动，y = 地面高度）
@@ -292,22 +313,47 @@ void poseWalker(sWalker &w, float legPhaseA, float legPhaseB, float walkZ) {
     w.aHead->SetPosition(w.aX, hipY + 0.60f, footZ);
     w.aHead->computeWorldAABB();
 
-    // 自检：大腿/小腿必须"位置与旋转一致"
+    // ── 自检 ──
+    // **这里曾经被我禁用**（"姿态构造方式不同，不做 checkLimb"），结果腿改成左右摆
+    // 也没人报错 —— 禁用检查等于没有检查。现在用 checkLimbAny：它直接用四元数把
+    // 局部 -Y 转过去，不假设绕哪根轴，对 placeBone 这种任意轴旋转也成立。
     static bool reported = false;
-    if (!reported && std::fabs(legPhaseA) >= demoCheck::kMinAngleForCheck) {
-        const GNg::sVEC3 hip{w.aX - 0.11f, hipY, footZ};
-        // placeBone 用的是 from→to，天然一致；这里验证一下模型中心确实在关节连线上
-        const GNg::sVEC3 mid{(hip.x + w.aThighL->aPosition.x) * 0.5f, hip.y, footZ};
-        (void)mid;
-        reported = false; // 该演示的姿态构造方式不同，不做 checkLimb
+    if (!reported && std::fabs(legs[0].aPhase) >= demoCheck::kMinAngleForCheck) {
+        bool ok = true;
+        const GNg::sVEC3 hipL{w.aX - 0.11f, hipY, footZ};
+        const GNg::sVEC3 hipR{w.aX + 0.11f, hipY, footZ};
+        ok = demoCheck::checkLimbAny(w.aThighL, hipL, kThighLen, "ikDemo 左大腿") && ok;
+        ok = demoCheck::checkLimbAny(w.aThighR, hipR, kThighLen, "ikDemo 右大腿") && ok;
+        // 小腿从膝出发：关节是膝，肢体中心是 shin 模型的中点
+        if (w.aThighL->aWorldAABB.IsValid()) {
+            const GNg::sVEC3 kneeL{w.aThighL->aPosition.x +
+                                       (w.aThighL->aPosition.x - hipL.x),
+                                   w.aThighL->aPosition.y +
+                                       (w.aThighL->aPosition.y - hipL.y),
+                                   w.aThighL->aPosition.z +
+                                       (w.aThighL->aPosition.z - hipL.z)};
+            ok = demoCheck::checkLimbAny(w.aShinL, kneeL, kShinLen, "ikDemo 左小腿") && ok;
+        }
+        // 附加：膝必须在"腿的摆动平面"内（Z-Y 平面），x 不该偏离髋
+        if (std::fabs(w.aThighL->aPosition.x - hipL.x) > 0.06f) {
+            std::fprintf(stderr,
+                         "[poseCheck] FAIL ikDemo 左大腿: x 偏离髋 %.3f （腿应该在 Z-Y 平面"
+                         "内前后摆，不是在 X 上左右摆）\n",
+                         std::fabs(w.aThighL->aPosition.x - hipL.x));
+            ok = false;
+        }
+        if (!ok) {
+            gPoseCheckFailed = true;
+            reported = true;
+        }
     }
 }
 
 bool buildCamera(float aspect, GNg::sMAT44 &viewProj, GNg::sMAT44 &view, GNg::sVEC3 &eye) {
     const float midZ = (gWalkers.size() > 1) ? gWalkers[0].aCharacter.Position().z : 0.0f;
     // 低机位侧视：地面起伏与"脚贴不贴地"在同一水平线上最清楚
-    gCamera.SetOrbit(GNg::sVEC3{0.0f, 0.55f, midZ + 0.5f}, 5.0f, 1.50f, 0.20f);
-    gCamera.SetFov(46.0f);
+    gCamera.SetOrbit(GNg::sVEC3{0.0f, 0.48f, midZ}, 4.6f, 1.02f, 0.30f);
+    gCamera.SetFov(44.0f);
     gCamera.SetNF(0.1f, 120.0f);
     GNg::sMAT44 projection;
     if (!gCamera.BuildViewProj(aspect, &view, &projection, &viewProj)) return false;
@@ -411,6 +457,23 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
         w.aThighR->DrawPBRSorted(eye);
         w.aShinR->DrawPBRSorted(eye);
     }
+    // ── 参考线：贴着**地面高度**画两条横线（每个角色一条），
+    // 脚在线的上方 = 悬空，下方 = 插进地面。这比"看地面"直观得多。 ──
+    gHelperLines.clear();
+    for (size_t i = 0; i < gWalkers.size(); ++i) {
+        const float z = gWalkers[i].aCharacter.Position().z;
+        const float gy = groundHeight(z);
+        const float x = gWalkers[i].aX;
+        const uint32_t color = (i == 0) ? 0xFFFF5555u : 0xFF55FF88u; // 红=无IK 绿=有IK
+        gHelperLines.push_back(GN3d::sEDIT_LINE(GNg::sVEC3{x - 0.75f, gy, z},
+                                                GNg::sVEC3{x + 0.75f, gy, z}, color));
+        // 竖直标记：从地面到髋，标出"脚该在的高度"
+        gHelperLines.push_back(GN3d::sEDIT_LINE(GNg::sVEC3{x - 0.78f, gy, z},
+                                                GNg::sVEC3{x - 0.78f, gy + 0.12f, z}, color));
+    }
+    if (!gHelperLines.empty())
+        GNg::GN_VkDrawEditLines(&gHelperLines[0], (uint32_t)gHelperLines.size());
+
     frame.End();
 
     if (gVerbose && ((int)(t * 30.0f) % 30 == 0)) {
