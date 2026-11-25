@@ -98,8 +98,15 @@ bool initAnimation(const imoScene::sModelData &data) {
     }
     gSkinClipIndex = -1;
     gSkinClipTime = 0.0f;
-    std::printf("[imoScene] 动画: 关节 %zu，剪辑 %zu 段（idle/walk/run）\n",
-                gSkinRig.aJointNodes.size(), gSkinClips.size());
+    size_t followingMeshes = 0;
+    for (size_t index = 0; index < gBindVertices.size(); ++index) {
+        if (!gBindVertices[index].empty()) {
+            ++followingMeshes;
+        }
+    }
+    std::printf("[imoScene] 动画: 关节 %zu，剪辑 %zu 段，跟随网格 %zu/%zu（含刚性跟随的静态衣物）\n",
+                gSkinRig.aJointNodes.size(), gSkinClips.size(), followingMeshes,
+                gBindVertices.size());
     return true;
 }
 

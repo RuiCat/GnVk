@@ -125,10 +125,76 @@ void measureTextureAlpha(const GN3d::sASSET_TEXTURE &source, sTextureData &out) 
     out.aPartialAlphaRatio = static_cast<float>(partialPixels) / static_cast<float>(total);
 }
 
+// 非蒙皮网格若挂在骨骼下，找它最近的 skin 关节（-1 = 没有）：动画时用该关节的调色板刚性跟随。
+// 典型物件：项圈、发饰、镜片 —— 在 glTF 里没有 skin，但父节点是骨头。
+int32_t nearestSkinJoint(const GN3d::sASSET &asset, uint32_t skinIndex, int32_t nodeIndex) {
+    if (skinIndex >= asset.aSkins.size()) {
+        return -1;
+    }
+    const GN3d::sASSET_SKIN &skin = asset.aSkins[skinIndex];
+    int32_t current = nodeIndex;
+    while (current >= 0 && static_cast<size_t>(current) < asset.aNodes.size()) {
+        for (size_t joint = 0; joint < skin.aJoints.size(); ++joint) {
+            if (static_cast<int32_t>(skin.aJoints[joint]) == current) {
+                return static_cast<int32_t>(joint);
+            }
+        }
+        current = asset.aNodes[static_cast<size_t>(current)].aParent;
+    }
+    return -1;
+}
+
+// 逆绑定矩阵 → 关节的绑定世界位置（刚性矩阵：p = -R^T t）。
+GNg::sVEC3 inverseBindPosition(const GNg::sMAT44 &inverseBind) {
+    const float tx = inverseBind.m[12];
+    const float ty = inverseBind.m[13];
+    const float tz = inverseBind.m[14];
+    GNg::sVEC3 out;
+    out.x = -(inverseBind.m[0] * tx + inverseBind.m[1] * ty + inverseBind.m[2] * tz);
+    out.y = -(inverseBind.m[4] * tx + inverseBind.m[5] * ty + inverseBind.m[6] * tz);
+    out.z = -(inverseBind.m[8] * tx + inverseBind.m[9] * ty + inverseBind.m[10] * tz);
+    return out;
+}
+
+// 没有骨骼父级的物件（项圈、发饰等挂在 Armature 下、顶点已烘进世界坐标）：
+// 按顶点质心选最近的关节，让它们至少跟着身体动，而不是留在原地。
+int32_t nearestJointToCentroid(const GN3d::sASSET &asset, uint32_t skinIndex,
+                               const std::vector<sBindVertex> &vertices) {
+    if (skinIndex >= asset.aSkins.size() || vertices.empty()) {
+        return -1;
+    }
+    const GN3d::sASSET_SKIN &skin = asset.aSkins[skinIndex];
+    GNg::sVEC3 centroid = {0.0f, 0.0f, 0.0f};
+    for (size_t index = 0; index < vertices.size(); ++index) {
+        centroid.x += vertices[index].aPosition.x;
+        centroid.y += vertices[index].aPosition.y;
+        centroid.z += vertices[index].aPosition.z;
+    }
+    const float inverseCount = 1.0f / static_cast<float>(vertices.size());
+    centroid.x *= inverseCount;
+    centroid.y *= inverseCount;
+    centroid.z *= inverseCount;
+    int32_t best = -1;
+    float bestDistance = 1.0e30f;
+    for (size_t joint = 0; joint < skin.aJoints.size(); ++joint) {
+        const GNg::sVEC3 position = inverseBindPosition(skin.aInverseBinds[joint]);
+        const float dx = position.x - centroid.x;
+        const float dy = position.y - centroid.y;
+        const float dz = position.z - centroid.z;
+        const float distance = dx * dx + dy * dy + dz * dz;
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = static_cast<int32_t>(joint);
+        }
+    }
+    return best;
+}
+
 // 烘焙一个 primitive 的顶点/索引；返回 false 表示该 primitive 不可用（已计入 skipped）。
 bool bakePrimitive(const GN3d::sASSET &asset, const GN3d::sASSET_PRIMITIVE &primitive,
                    bool skinned, const std::vector<GNg::sMAT44> *palette,
-                   const GNg::sMAT44 &nodeWorld, sModelData &out, const std::string &meshName) {
+                   const GNg::sMAT44 &nodeWorld, sModelData &out, const std::string &meshName,
+                   int32_t followJoint) {
     if (primitive.aVertices.empty()) {
         return false;
     }
@@ -210,6 +276,14 @@ bool bakePrimitive(const GN3d::sASSET &asset, const GN3d::sASSET_PRIMITIVE &prim
                 bindVertex.aWeights[slot] = source.aWeights[slot];
             }
             mesh.aBindVertices.push_back(bindVertex);
+        } else if (!skinned) {
+            // 静态网格：顶点已烘进世界坐标，先登记，循环结束后统一选一个关节刚性跟随。
+            sBindVertex bindVertex;
+            bindVertex.aPosition = position;
+            bindVertex.aNormal = normal;
+            bindVertex.aUv[0] = source.aUv[0];
+            bindVertex.aUv[1] = source.aUv[1];
+            mesh.aBindVertices.push_back(bindVertex);
         }
         if (position.x < mesh.aMin.x) mesh.aMin.x = position.x;
         if (position.y < mesh.aMin.y) mesh.aMin.y = position.y;
@@ -217,6 +291,21 @@ bool bakePrimitive(const GN3d::sASSET &asset, const GN3d::sASSET_PRIMITIVE &prim
         if (position.x > mesh.aMax.x) mesh.aMax.x = position.x;
         if (position.y > mesh.aMax.y) mesh.aMax.y = position.y;
         if (position.z > mesh.aMax.z) mesh.aMax.z = position.z;
+    }
+
+    if (!skinned && !mesh.aBindVertices.empty()) {
+        int32_t joint = followJoint;
+        if (joint < 0) {
+            joint = nearestJointToCentroid(asset, 0, mesh.aBindVertices);
+        }
+        if (joint >= 0) {
+            for (size_t index = 0; index < mesh.aBindVertices.size(); ++index) {
+                mesh.aBindVertices[index].aJoints[0] = static_cast<uint16_t>(joint);
+                mesh.aBindVertices[index].aWeights[0] = 1.0f;
+            }
+        } else {
+            mesh.aBindVertices.clear(); // 没有骨架可跟：保持原来的静态烘焙
+        }
     }
 
     if (primitive.aIndices.empty()) {
@@ -281,8 +370,10 @@ void bakeNodes(const GN3d::sASSET &asset, const std::vector<GNg::sMAT44> &world,
                 ++out.aFilteredMeshes;
                 continue;
             }
+            const int32_t followJoint =
+                skinned ? -1 : nearestSkinJoint(asset, 0, static_cast<int32_t>(nodeIndex));
             if (!bakePrimitive(asset, mesh.aPrimitives[primitiveIndex], skinned, palette,
-                               world[nodeIndex], out, meshName)) {
+                               world[nodeIndex], out, meshName, followJoint)) {
                 ++out.aSkippedPrimitives;
             }
         }
