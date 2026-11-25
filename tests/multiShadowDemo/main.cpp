@@ -90,6 +90,12 @@ void buildScene() {
         gPillars.push_back(m);
     }
 
+    // **按 UBO 槽位索引**：initLights() 里先加了一盏方向光，它占槽 0，
+    // 四盏点光落在槽 1..4。所以这里先压一个占位，避免下标错位
+    // （错位的后果是"按灯号取位置"取到别人的坐标，影子位置会整体偏掉）。
+    gLightPos.push_back(GNg::sVEC3{0.0f, 0.0f, 0.0f}); // 槽 0：方向光（无位置）
+    gLightColor.push_back(GNg::sVEC3{0.0f, 0.0f, 0.0f});
+
     // 四盏点光：位置在柱子外侧，颜色各不相同（红/绿/蓝/琥珀）
     // 灯放低（掠射角）→ 影子拉长，四道影子更容易分辨
     gLightPos.push_back(GNg::sVEC3{-5.5f, 1.4f, -5.5f});
@@ -117,10 +123,13 @@ void initLights() {
 }
 
 bool buildCamera(float aspect, GNg::sMAT44 &viewProj, GNg::sMAT44 &view, GNg::sVEC3 &eye) {
-    // 俯视 + 缓慢环绕：转一圈能看到四根柱子各自被**不同灯**投出的影子
-    // （灯在四个角，柱子挡住哪一盏取决于视角方向）
-    const float yaw = 0.72f + gTime * 0.22f;
-    gCamera.SetOrbit(GNg::sVEC3{0.0f, 0.6f, 0.0f}, 15.0f, yaw, 0.62f);
+    // **机位固定**。
+    //
+    // 之前让相机缓慢环绕 —— 这不必要也容易误导：影子是"光源 + 遮挡物"的几何结果，
+    // 转镜头时它在世界空间里**不该动**（屏上因视差移动，但落点不变）。
+    // 固定机位让"四根柱子各投四道不同颜色的影子"一眼可辨，
+    // 也避免把视差误读成"影子跟着视角变"。
+    gCamera.SetOrbit(GNg::sVEC3{0.0f, 0.6f, 0.0f}, 15.0f, 0.72f, 0.62f);
     gCamera.SetFov(48.0f);
     gCamera.SetNF(0.1f, 120.0f);
     GNg::sMAT44 projection;
@@ -168,40 +177,47 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     GNg::sVEC3 eye;
     if (!buildCamera(aspect, viewProj, view, eye)) return;
 
-    // ── 多灯选灯：挑最多 gMaxShadowLights 盏，按评分降序 ──
-    const GN3d::sCUBE_SHADOW_PICKS picks =
-        GN3d::pickCubeShadowLights(*gLight->GetUBO(), eye, 40.0f,
-                                   (uint32_t)gMaxShadowLights);
-
-    // 每盏选中的灯：告诉光源它的深度范围与**层号**（层号 = 在 picks 里的下标）
+    // ── 层号分配：**与相机无关**（按光源注册顺序）──
+    //
+    // 这里曾经写成"层号 = pickCubeShadowLights 的排名"。那是错的：
+    // 排名依赖 cameraPos，相机一动同一盏灯就换层；灯数超过上限时
+    // 影子会随视角闪进闪出。影子只该由"光源 + 遮挡物"决定。
     const float cubeNear = 0.10f;
     const float cubeFar = 18.0f;
-    for (uint32_t k = 0; k < picks.aCount; ++k) {
-        const int li = picks.aLightIndex[k];
-        if (li < 0) continue;
-        gLight->SetCubeShadowRangeForLight((uint32_t)li, cubeNear, cubeFar, (int32_t)k);
-    }
-    // 没被选中的灯：层号置 -1（保守返回全亮，而不是去采样别人的层）
-    for (int i = 0; i < (int)GN_MAX_LIGHTS; ++i) {
-        bool picked = false;
-        for (uint32_t k = 0; k < picks.aCount; ++k)
-            if (picks.aLightIndex[k] == i) picked = true;
-        if (!picked) gLight->SetCubeShadowRangeForLight((uint32_t)i, cubeNear, cubeFar, -1);
-    }
+    const uint32_t layerCount =
+        gLight->AssignCubeShadowLayers(cubeNear, cubeFar, (uint32_t)gMaxShadowLights);
 
     // ── 逐个渲染 cube shadow（必须在主 3D pass 之前）──
+    // 层号直接取 UBO 里的 cubeShadowRange[i][2]（上面分配的稳定值）
+    {
+        static bool once = false;
+        if (!once) {
+            once = true;
+            for (int i = 0; i < (int)GN_MAX_LIGHTS; ++i) {
+                std::fprintf(stderr, "[dbg] slot %d: layer=%.1f near=%.2f far=%.2f\n", i,
+                             gLight->GetUBO()->cubeShadowRange[i][2],
+                             gLight->GetUBO()->cubeShadowRange[i][0],
+                             gLight->GetUBO()->cubeShadowRange[i][1]);
+            }
+        }
+    }
     GNg::GN_VkResetCubeShadowLightCount();
-    for (uint32_t k = 0; k < picks.aCount; ++k) {
-        const int li = picks.aLightIndex[k];
-        if (li < 0) continue;
-        if (!GNg::GN_VkCubeShadowBeginForLight(k, gLightPos[(size_t)li], cubeNear, cubeFar))
+    uint32_t renderedCount = 0;
+    for (int i = 0; i < (int)GN_MAX_LIGHTS; ++i) {
+        const int32_t layer = (int32_t)gLight->GetUBO()->cubeShadowRange[i][2];
+        if (layer < 0) continue;
+        if (!GNg::GN_VkCubeShadowBeginForLight((uint32_t)layer, gLightPos[(size_t)i], cubeNear,
+                                              cubeFar)) {
+            std::fprintf(stderr, "[dbg] light %d 层 %d: CubeShadowBegin 失败\n", i, layer);
             continue;
+        }
         for (uint32_t face = 0; face < 6; ++face) {
-            GNg::GN_VkCubeShadowFaceBegin(gLightPos[(size_t)li], face, cubeNear, cubeFar);
+            GNg::GN_VkCubeShadowFaceBegin(gLightPos[(size_t)i], face, cubeNear, cubeFar);
             for (size_t p = 0; p < gPillars.size(); ++p) gPillars[p]->DrawShadow();
             GNg::GN_VkCubeShadowFaceEnd();
         }
         GNg::GN_VkCubeShadowEnd();
+        ++renderedCount;
     }
 
     GNg::cRENDER_FRAME frame;
@@ -219,7 +235,7 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     frame.End();
 
     if (gVerbose && ((int)(gTime * 30.0f) % 60 == 0)) {
-        std::fprintf(stderr, "[dbg] t=%.1f 选中 %u 盏灯，已渲染 %u 盏\n", gTime, picks.aCount,
+        std::fprintf(stderr, "[dbg] t=%.1f 分配 %u 层，已渲染 %u 盏\n", gTime, layerCount,
                      GNg::GN_VkCubeShadowLightCount());
     }
     gTime += 1.0f / 30.0f;

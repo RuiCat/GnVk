@@ -90,9 +90,10 @@ layout(binding = 2, set = 0) uniform LightUBO {
     vec4 shadowParams;      // x=阴影图分辨率, y=级数(1..4), z/w=0
     vec4 cascadeSplits;     // 各级视距分割（米，升序；选级用包含测试）
     vec4 shadowTexelWorld;  // 各级 texel 世界尺寸（米/texel，法线偏移用）
-    // B2 扩展：多光源 cube shadow。每项 .x=near, .y=far, .z=层索引(0..3，<0=无)，.w 保留。
-    // **顺序必须与 C++ 的 sLIGHT_UBO::cubeShadowRange 完全一致**（std140 下 vec4[4] 是 64 B）。
-    vec4 cubeShadowRange[4];
+    // B2 扩展：多光源 cube shadow。**按灯槽索引**（8 项），每项 .x=near .y=far
+    // .z=层索引(0..3，<0=无) .w 保留。
+    // **顺序必须与 C++ 的 sLIGHT_UBO::cubeShadowRange 完全一致**（std140 下 vec4[8] = 128 B）。
+    vec4 cubeShadowRange[MAX_LIGHTS];
 } lightData;
 
 // PBR 模式下 push_constant 重映射:

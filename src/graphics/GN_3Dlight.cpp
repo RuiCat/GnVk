@@ -25,7 +25,7 @@ cLIGHT::cLIGHT() : aCount(0), aDirty(true) {
     // **必须显式写 layer = -1**：memset 后全是 0，而 0 是**有效的**层号 ——
     // 着色器会以为"这盏灯有 cube shadow、层号 0"，于是去采样一张从没渲染过的深度图，
     // 结果是整片场景被错误遮挡（比没有阴影黑得多）。
-    for(uint32_t i = 0; i < 4; ++i) {
+    for(uint32_t i = 0; i < GN_MAX_LIGHTS; ++i) {
         aData.cubeShadowRange[i][0] = 0.0f;
         aData.cubeShadowRange[i][1] = 0.0f;
         aData.cubeShadowRange[i][2] = -1.0f;
@@ -44,7 +44,7 @@ void cLIGHT::Clear() {
     aCount = 0;
     aDirty = true;
     // 清空光源后也要把 cube shadow 的层号置回 -1（见构造函数里的说明）
-    for(uint32_t i = 0; i < 4; ++i) aData.cubeShadowRange[i][2] = -1.0f;
+    for(uint32_t i = 0; i < GN_MAX_LIGHTS; ++i) aData.cubeShadowRange[i][2] = -1.0f;
 }
 
 int cLIGHT::AddDirectional(const sVEC3 &dir, const sVEC3 &color, float intensity, bool enableShadow) {
@@ -164,7 +164,7 @@ float cLIGHT::CubeShadowFar() const { return aData.shadowParams[3]; }
 // ═══════════════════════════════════════════════════════════
 void cLIGHT::SetCubeShadowRangeForLight(uint32_t lightSlot, float nearZ, float farZ,
                                         int32_t layer) {
-    if(lightSlot >= 4) return; // cubeShadowRange 只有 4 项
+    if(lightSlot >= GN_MAX_LIGHTS) return; // cubeShadowRange 按灯槽索引
     if(!(nearZ > 0.0f)) nearZ = 0.05f;
     if(!(farZ > nearZ)) farZ = nearZ + 1.0f;
     // layer < 0 表示"这盏灯没有 cube shadow"：把 near 写成 0，
@@ -177,7 +177,7 @@ void cLIGHT::SetCubeShadowRangeForLight(uint32_t lightSlot, float nearZ, float f
 }
 
 void cLIGHT::ClearCubeShadowRanges() {
-    for(uint32_t i = 0; i < 4; ++i) {
+    for(uint32_t i = 0; i < GN_MAX_LIGHTS; ++i) {
         for(uint32_t k = 0; k < 4; ++k) aData.cubeShadowRange[i][k] = 0.0f;
         aData.cubeShadowRange[i][2] = -1.0f; // 层号 -1 = 无
     }
@@ -398,5 +398,45 @@ sCUBE_SHADOW_PICKS pickCubeShadowLights(const sLIGHT_UBO &light, const GNg::sVEC
     }
     return picks;
 }
+
+// ═══════════════════════════════════════════════════════════
+//  层号分配（与相机无关）
+// ═══════════════════════════════════════════════════════════
+sCUBE_SHADOW_LAYOUT::sCUBE_SHADOW_LAYOUT() : aLayerCount(0), aDroppedLights(0) {
+    for(uint32_t i = 0; i < GN_MAX_LIGHTS; ++i) aLayer[i] = -1;
+}
+
+sCUBE_SHADOW_LAYOUT assignCubeShadowLayers(const sLIGHT_UBO &light, uint32_t maxLayers) {
+    sCUBE_SHADOW_LAYOUT layout;
+    if(maxLayers > GN_MAX_CUBE_SHADOW_PICKS) maxLayers = GN_MAX_CUBE_SHADOW_PICKS;
+
+    const int count = (int)light.lightCount;
+    if(count <= 0 || count > GN_MAX_LIGHTS) return layout; // 数据损坏：一个都不给
+
+    uint32_t next = 0;
+    for(int i = 0; i < count; ++i) {
+        const sLIGHT_GPU &L = light.lights[i];
+        // 只给"开了 cube shadow"的点光/聚光分层（shadowType == 2 且有点位置）
+        if(L.direction[3] < 1.5f || L.direction[3] > 2.5f) continue;
+        if(L.position[3] < 0.5f) continue;
+        if(next >= maxLayers) {
+            ++layout.aDroppedLights;
+            continue; // 超出上限：layer 保持 -1（无阴影）
+        }
+        layout.aLayer[i] = (int32_t)next;
+        ++next;
+    }
+    layout.aLayerCount = next;
+    return layout;
+}
+
+uint32_t cLIGHT::AssignCubeShadowLayers(float nearZ, float farZ, uint32_t maxLayers) {
+    const sCUBE_SHADOW_LAYOUT layout = assignCubeShadowLayers(aData, maxLayers);
+    for(uint32_t i = 0; i < GN_MAX_LIGHTS; ++i) {
+        SetCubeShadowRangeForLight(i, nearZ, farZ, layout.aLayer[i]);
+    }
+    return layout.aLayerCount;
+}
+
 
 } // namespace GN3d

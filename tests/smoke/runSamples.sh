@@ -159,6 +159,10 @@ run_one ikDemo       ./build/ikDemo
 run_one ragdollDemo  ./build/ragdollDemo
 # 多光源 cube shadow：量化验收"至少渲染了 2 盏灯的阴影"（失败返回 4）。
 run_one multiShadowDemo ./build/multiShadowDemo
+# 阴影视角无关性：定量探针（世界点投影到屏幕取像素）。验证
+#   相机转 40° 同一世界点亮度不变（差 <15%），灯换边则明暗互换。
+# 失败返回 4 —— 这条守卫"阴影被做成屏幕空间效果"这类回归。
+run_one shadowProbe  ./build/shadowProbe
 # 管线验收：无窗口跑同一批检查；按基线判（不把已知的 cull.debugLine 当失败）。
 # 基线 2026-11-24：P2 蒙皮 6 站 + P3 动画切换 1 站后为 116。
 run_baseline gpuCheck      ./build/gpuCheck 124 ""

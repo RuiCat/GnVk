@@ -21,6 +21,10 @@ enum eLIGHT_TYPE {
 
 #define GN_MAX_LIGHTS 8 // 着色器中的最大光源数
 
+// cube shadow 最多几层（= 最多几盏灯能同时有 cube shadow）。
+// 必须在使用它的类/结构**之前**定义。
+#define GN_MAX_CUBE_SHADOW_PICKS 4
+
 // ═══════════════════════════════════════════════════════════
 //  单个光源 GPU 数据结构 (与着色器 LightUBO 对齐)
 //  sizeof = 80 bytes, 需要 16 字节对齐
@@ -57,15 +61,20 @@ struct alignas(16) sLIGHT_UBO {
     float shadowTexelWorld[4]; // 各级 texel 世界尺寸 (米/texel，法线偏移用)
 
     // ── 多光源 cube shadow（B2 扩展）──
-    // 每盏带 cube shadow 的灯占一项：.x = near, .y = far, .z = 层索引(0..3)，.w 保留。
+    // **按灯槽索引（GN_MAX_LIGHTS = 8）**，不是按层索引。
+    // 每项：.x = near, .y = far, .z = 层索引(0..3 或 -1=无)，.w 保留。
     //
-    // **在末尾追加**而不是改已有字段偏移：前面 976 B 的布局是既有的着色器契约
-    // （lao 的 CSM 字段偏移被文档固定为 672/1696/1712/1728），改动会让所有
-    // 引用它的着色器静默错位。追加只影响 sizeof，不破坏任何既有偏移。
-    float cubeShadowRange[4][4];
+    // 为什么是 8 项而不是 4 项（这里踩过一次）：层号只有 4 个，但**灯**有 8 盏。
+    // 若只留 4 项，槽 4..7 就写不进去，保留 memset 的 0 —— 而 0 是**有效**层号，
+    // 着色器会以为"这盏灯有 shadow、层号 0"，去采样一张从没渲染过的深度图，
+    // 整片场景被错误遮挡。（这正是"层号默认必须 -1"那条坑的另一个入口。）
+    //
+    // **在末尾追加**而不是改已有字段偏移：前面 976 B 的布局是既有的着色器契约，
+    // 改动会让所有引用它的着色器静默错位。追加只影响 sizeof。
+    float cubeShadowRange[GN_MAX_LIGHTS][4];
 };
-static_assert(sizeof(sLIGHT_UBO) == 1040,
-              "sLIGHT_UBO = 976（既有契约）+ 4×16（cube shadow 每灯 near/far/layer）");
+static_assert(sizeof(sLIGHT_UBO) == 1104,
+              "sLIGHT_UBO = 976（既有契约）+ 8×16（cube shadow 每灯 near/far/layer）");
 
 // ═══════════════════════════════════════════════════════════
 //  cLIGHT — 光源管理器
@@ -108,6 +117,12 @@ class cLIGHT {
     // 旧接口 SetCubeShadowRange 保留（等价于对 layer 0 的灯设置）。
     void SetCubeShadowRangeForLight(uint32_t lightSlot, float nearZ, float farZ, int32_t layer);
     void ClearCubeShadowRanges();
+    // 一步到位：按**注册顺序**（与相机无关）给所有开 cube shadow 的灯分配层号并写入
+    // cubeShadowRange。返回分配到的层数。
+    //
+    // 这是推荐用法 —— 手写"层号 = 选灯排名"会让影子随视角闪动（见 assignCubeShadowLayers）。
+    uint32_t AssignCubeShadowLayers(float nearZ, float farZ,
+                                    uint32_t maxLayers = GN_MAX_CUBE_SHADOW_PICKS);
     void SetCubeShadowRange(float nearZ, float farZ);
     float CubeShadowNear() const;
     float CubeShadowFar() const;
@@ -170,7 +185,6 @@ sCUBE_SHADOW_PICK pickCubeShadowLight(const sLIGHT_UBO &light, const GNg::sVEC3 
 // ═══════════════════════════════════════════════════════════
 //  多光源 cube shadow 的选灯（B2 扩展）
 // ═══════════════════════════════════════════════════════════
-#define GN_MAX_CUBE_SHADOW_PICKS 4
 
 struct sCUBE_SHADOW_PICKS {
     int aLightIndex[GN_MAX_CUBE_SHADOW_PICKS]; // 按评分**从高到低**排；-1 表示空位
@@ -186,11 +200,40 @@ struct sCUBE_SHADOW_PICKS {
 // 这样"单灯时代挑中的那一盏"在多灯时代依然是第一名，行为可预测。
 // 并列时**先注册的在前**（与单灯版一致）。
 //
-// **返回的灯按评分排序后，cube 层号 = 它在返回数组里的下标**（0..3）。
-// 这样层号与"重要性"一致，且不会因为某些灯没开阴影而出现空洞。
+// **注意：返回数组的下标是"评分排名"，不是层号，不要直接拿它当层号用。**
+// 层号必须用 `assignCubeShadowLayers`（它只看注册顺序，与相机无关）。
+//
+// 为什么：本函数依赖 cameraPos，相机一动排名就变。若把排名当层号，
+// 同一盏灯在相邻两帧会落到不同的层 —— 灯数超过上限（或 maxCount < 4）时，
+// 影子就会随着视角**闪进闪出**。影子只该由"光源 + 遮挡物"决定，与相机无关。
+// 本函数的用途是"在灯很多时选出最该有阴影的几盏"，选完之后**仍要**用
+// 稳定的层号去渲染。
 sCUBE_SHADOW_PICKS pickCubeShadowLights(const sLIGHT_UBO &light, const GNg::sVEC3 &cameraPos,
                                         float maxDistance = 40.0f,
                                         uint32_t maxCount = GN_MAX_CUBE_SHADOW_PICKS);
+
+
+
+// ═══════════════════════════════════════════════════════════
+//  层号分配（**与相机无关**）
+// ═══════════════════════════════════════════════════════════
+// 影子是"光源 + 遮挡物"的几何结果，**不允许依赖相机**。
+// 所以层号只按光源在 UBO 里的**注册顺序**分配：第 1 盏开 cube shadow 的灯 → 层 0，
+// 第 2 盏 → 层 1 …… 超过 maxLayers 的灯拿不到层（-1 = 无阴影，保守返回全亮）。
+//
+// 这个函数是纯函数（不碰 cLIGHT），便于单测直接钉住"换个相机也得到同样的层号"。
+struct sCUBE_SHADOW_LAYOUT {
+    int32_t aLayer[GN_MAX_LIGHTS]; // 每盏灯的层号；-1 = 无 cube shadow
+    uint32_t aLayerCount; // 实际分配了几层（0..maxLayers）
+    uint32_t aDroppedLights; // 因为是第 maxLayers+1 盏之后而没分到层的灯数
+
+    sCUBE_SHADOW_LAYOUT();
+};
+
+// 按注册顺序给"开了 cube shadow 的点光/聚光"分配层号。
+// maxLayers 超过 GN_MAX_CUBE_SHADOW_PICKS 时会被钳制（cube array 只有那么多层）。
+sCUBE_SHADOW_LAYOUT assignCubeShadowLayers(const sLIGHT_UBO &light,
+                                          uint32_t maxLayers = GN_MAX_CUBE_SHADOW_PICKS);
 
 } // namespace GN3d
 #endif // _GN_3DLIGHT_H_

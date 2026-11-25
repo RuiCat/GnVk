@@ -467,6 +467,21 @@ $(UNDO_DEMO_BIN): $(UNDO_DEMO_SRC) $(TARGET)
 	@mkdir -p build
 	$(CXX) $(UNDO_DEMO_FLAGS) $(UNDO_DEMO_SRC) $(TEST_LIBS) -o $(UNDO_DEMO_BIN)
 
+# ── 阴影视角无关性探针（定量验证）──
+SPROBE_SRC   := $(wildcard tests/shadowProbe/*.cpp)
+SPROBE_BIN   := build/shadowProbe
+SPROBE_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES) -Itests/common
+
+.PHONY: shadowProbe
+shadowProbe: $(SPROBE_BIN)
+	@echo "$(YELLOW)🔍 验证阴影是否随视角变化...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(SPROBE_BIN) --out $(GIZMO_VIDEO_OUT)/shadow-probe --verbose
+
+$(SPROBE_BIN): $(SPROBE_SRC) $(wildcard tests/common/*.h) $(TARGET)
+	@echo "$(YELLOW)🔍 编译阴影探针...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(SPROBE_FLAGS) $(SPROBE_SRC) $(TEST_LIBS) -o $(SPROBE_BIN)
+
 # ── 多光源 cube shadow 演示（B2 扩展）──
 MSHADOW_SRC   := $(wildcard tests/multiShadowDemo/*.cpp)
 MSHADOW_BIN   := build/multiShadowDemo
@@ -592,7 +607,7 @@ $(CHAR_PUSH_BIN): $(CHAR_PUSH_SRC) $(TARGET)
 # 否则它们会先以窗口模式跑一次（无显示时 SKIP → make 直接失败）。
 # 没有 Vulkan 设备时整体 SKIP（退出码 2）。
 .PHONY: smoke
-smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene physicsBoxes characterDemo $(ROOTMOTION_BIN) $(ANIMBLEND_BIN) $(IKDEMO_BIN) $(RAGDOLL_BIN) $(MSHADOW_BIN)
+smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene physicsBoxes characterDemo $(ROOTMOTION_BIN) $(ANIMBLEND_BIN) $(IKDEMO_BIN) $(RAGDOLL_BIN) $(MSHADOW_BIN) $(SPROBE_BIN)
 	@echo "$(YELLOW)🚦 示例无窗口冒烟...$(RESET)"
 	@GN_HEADLESS_FRAMES=$(if $(SMOKE_FRAMES),$(SMOKE_FRAMES),8) \
 		LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH bash tests/smoke/runSamples.sh
