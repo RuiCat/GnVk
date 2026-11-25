@@ -7,6 +7,7 @@
 #include "imoSceneActions.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -76,8 +77,7 @@ void applyGroups();
 void buildFamilies() {
     for (uint32_t family = 0; family < kFamilyCount; ++family) {
         kFamilies[family].aMeshes.clear();
-        // 发型默认只显示第一套（9 套发型叠在一起会明显"头发过厚"）；身体/服装默认全显示。
-        kFamilies[family].aSelected = (family == 0) ? 1 : -1;
+        kFamilies[family].aSelected = -1; // 默认全部显示（9 套头发里有头皮/刘海等零件，只留一套会露出光头）
     }
     if (gModel == nullptr) {
         return;
@@ -146,14 +146,25 @@ void outfitInit(GN3d::cMODEL &model) {
         kGroups[groupIndex].aVisible = true;
     }
     buildFamilies();
-    // 家族 -1 = 全部；把默认选中的那套换算成下标（0 = 显示第一套）。
-    for (uint32_t family = 0; family < kFamilyCount; ++family) {
-        if (!kFamilies[family].aMeshes.empty()) {
-            kFamilies[family].aSelected = (family == 0) ? 0 : -1;
+    // 默认显示集合可用环境变量固定（便于挑好之后固化）；-1 = 全部。
+    const char *hairEnv = std::getenv("IMO_SCENE_HAIR");
+    const char *bodyEnv = std::getenv("IMO_SCENE_BODY");
+    if (hairEnv != 0) {
+        kFamilies[0].aSelected = static_cast<int32_t>(std::atoi(hairEnv));
+        if (kFamilies[0].aSelected >= static_cast<int32_t>(kFamilies[0].aMeshes.size())) {
+            kFamilies[0].aSelected = -1;
         }
     }
-    std::printf("[imoScene] 换装: 发型 %zu 套 / 身体 %zu 套（5/6 循环切换，0 恢复全部）\n",
-                kFamilies[0].aMeshes.size(), kFamilies[1].aMeshes.size());
+    if (bodyEnv != 0) {
+        kFamilies[1].aSelected = static_cast<int32_t>(std::atoi(bodyEnv));
+        if (kFamilies[1].aSelected >= static_cast<int32_t>(kFamilies[1].aMeshes.size())) {
+            kFamilies[1].aSelected = -1;
+        }
+    }
+    std::printf("[imoScene] 换装: 发型 %zu 套 / 身体 %zu 套（5/6 循环切换，0 恢复全部；"
+                "默认 hair=%d body=%d）\n",
+                kFamilies[0].aMeshes.size(), kFamilies[1].aMeshes.size(),
+                kFamilies[0].aSelected, kFamilies[1].aSelected);
     applyGroups();
 }
 
