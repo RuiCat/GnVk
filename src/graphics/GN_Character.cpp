@@ -15,6 +15,7 @@
 #include <GN.h> // 先于 GN_Character.h：那一头依赖 GN_API（见它的注释）
 #include "GN_Character.h"
 #include "GN_Physics.h" // queryCapsuleTriangle + CollideBodies + cPHYSICS_WORLD
+#include "GN_CapsuleSweep.h" // C4：扫掠版台阶
 
 #include <cmath>
 
@@ -89,7 +90,7 @@ cCHARACTER::sINTENT::sINTENT()
 cCHARACTER::cCHARACTER()
     : aPosition{0.0f, 0.0f, 0.0f}, aFootPosition{0.0f, 0.0f, 0.0f}, aVelocity{0.0f, 0.0f, 0.0f},
       aGravity{0.0f, -9.81f, 0.0f}, aInited(false), aPhysicsWorld(nullptr),
-      aPushStrength(1.0f), aLastPushedCount(0), aRootMotionEnabled(false),
+      aPushStrength(1.0f), aLastPushedCount(0), aSweptSteps(true), aRootMotionEnabled(false),
       aPendingRootMotion{0.0f, 0.0f, 0.0f}, aFacingYaw(0.0f), aGrounded(false), aStuck(false),
       aGroundNormalY(0.0f), aSlopeDeg(0.0f) {
     aFootPosition.y = -aDesc.aHeight * 0.5f;
@@ -259,6 +260,107 @@ void cCHARACTER::SetPushStrength(float strength) {
 }
 
 float cCHARACTER::PushStrength() const { return aPushStrength; }
+
+// ═══════════════════════════════════════════════════════════
+//  台阶：扫掠模式（C4）
+// ═══════════════════════════════════════════════════════════
+void cCHARACTER::SetSweptStepsEnabled(bool enabled) { aSweptSteps = enabled; }
+
+bool cCHARACTER::SweptStepsEnabled() const { return aSweptSteps; }
+
+bool cCHARACTER::stepUpSwept(const GNg::sVEC3 &fromPos, const GNg::sVEC3 &wantDelta,
+                             float stepHeight, GNg::sVEC3 &outPos) {
+    if(aTriangles.empty() || stepHeight <= 0.0f) return false;
+
+    // 把"抬起 + 前移"合成一次扫掠：起点先抬到台阶高度，再沿期望方向扫。
+    //
+    // **为什么不是"扫完再抬"**：抬升会让胶囊离开当前的支撑面，扫掠需要从"抬起来
+    // 之后的位置"开始，否则会把"自己和当前站立面"的接触也算进去。
+    const GNg::sVEC3 lifted = add(fromPos, vec(0.0f, stepHeight, 0.0f));
+
+    // 三角形转成扫掠结构（sTRIANGLE 与 sSWEEP_TRIANGLE 布局一致，直接逐字段拷）
+    // 三角形缓存放在函数内（static thread_local）：不污染头文件依赖，
+    // 也不会每帧反复分配（容量只增不减）。
+    static thread_local std::vector<sSWEEP_TRIANGLE> aSweepScratch;
+    aSweepScratch.clear();
+    aSweepScratch.reserve(aTriangles.size());
+    for(size_t i = 0; i < aTriangles.size(); ++i) {
+        sSWEEP_TRIANGLE t;
+        t.aA = aTriangles[i].aA;
+        t.aB = aTriangles[i].aB;
+        t.aC = aTriangles[i].aC;
+        aSweepScratch.push_back(t);
+    }
+
+    sCAPSULE_SWEEP_PARAMS params;
+    params.aRadius = aDesc.aRadius;
+    params.aHalfHeight = cylinderHalf();
+    params.aSkinWidth = 1e-3f;
+    params.aMaxIterations = 32;
+    params.aTolerance = 1e-4f;
+
+    const GNg::sVEC3 goal = add(lifted, wantDelta);
+    const sCAPSULE_SWEEP_RESULT swept =
+        sweepCapsuleAgainstTriangles(lifted, goal, params, &aSweepScratch[0],
+                                     (uint32_t)aSweepScratch.size());
+
+    // 扫掠没走完期望距离 ⇒ 被更高处的东西挡住，不是能上的台阶
+    if(swept.aHit) {
+        const float moved2 = (swept.aPosition.x - lifted.x) * (swept.aPosition.x - lifted.x) +
+                             (swept.aPosition.z - lifted.z) * (swept.aPosition.z - lifted.z);
+        const float want2 = wantDelta.x * wantDelta.x + wantDelta.z * wantDelta.z;
+        if(moved2 < want2 * 0.25f) return false; // 前进不到 1/4：没上去
+    }
+
+    // 落点：从扫掠终点往下探，直到要穿进去为止
+    GNg::sVEC3 dropped = swept.aPosition;
+    GNg::sVEC3 dropNormal = vec(0.0f, 1.0f, 0.0f);
+    {
+        GNg::sVEC3 e0, e1;
+        segment(dropped, e0, e1);
+        const int dropSteps = 24;
+        const float dropStep = stepHeight / (float)dropSteps;
+        for(int i = 0; i < dropSteps; ++i) {
+            GNg::sVEC3 probe = dropped;
+            probe.y -= dropStep;
+            segment(probe, e0, e1);
+            // 该位置有没有接触
+            bool hit = false;
+            GNg::sVEC3 n = vec(0.0f, 1.0f, 0.0f);
+            float deepest = 0.0f;
+            for(size_t k = 0; k < aTriangles.size(); ++k) {
+                sCONTACT_MANIFOLD m;
+                if(!queryCapsuleTriangle(e0, e1, aDesc.aRadius, aTriangles[k].aA,
+                                         aTriangles[k].aB, aTriangles[k].aC, m))
+                    continue;
+                if(m.aCount == 0) continue;
+                if(!hit || m.aPoints[0].aPenetration > deepest) {
+                    hit = true;
+                    deepest = m.aPoints[0].aPenetration;
+                    n = m.aNormal;
+                }
+            }
+            if(hit) {
+                dropNormal = n;
+                break;
+            }
+            dropped = probe;
+        }
+    }
+
+    // 落点必须站得住（坡面 <= maxSlope），否则这是在爬墙不是上台阶
+    float landNormalY = 0.0f;
+    float landSlope = 0.0f;
+    if(!probeGround(dropped, landNormalY, landSlope)) return false;
+    if(landSlope > aDesc.aMaxSlopeDeg + 0.5f) return false;
+
+    // 落点不能比出发点低太多（往下掉不叫上台阶）
+    if(dropped.y < fromPos.y - 0.05f) return false;
+
+    outPos = dropped;
+    (void)dropNormal;
+    return true;
+}
 
 // ═══════════════════════════════════════════════════════════
 //  Root Motion（C3）
@@ -563,8 +665,25 @@ sCHARACTER_STEP cCHARACTER::Move(const GNg::sVEC3 &wishDir, bool sprint, bool ju
     //    四个条件缺一不可 —— 少了"非可走"这一条会在斜坡上每帧抬一次，人就像飘着走。
     float horizontalMoved = std::sqrt((pos.x - startPos.x) * (pos.x - startPos.x) +
                                       (pos.z - startPos.z) * (pos.z - startPos.z));
-    if (hasInput && aGrounded && !walkedSlope && aDesc.aStepHeight > 0.0f &&
+    // 5a) **扫掠版台阶**（C4）：先试扫掠，成功就直接用它的落点，
+    //     不再走下面那套"抬-移-落"。扫掠对薄台阶更稳（落点精确贴面，不会抖）。
+    if (aSweptSteps && hasInput && aGrounded && !walkedSlope && aDesc.aStepHeight > 0.0f &&
         horizontalMoved < wanted * 0.5f) {
+        GNg::sVEC3 sweptPos;
+        const GNg::sVEC3 wantDelta = vec(aVelocity.x * dt, 0.0f, aVelocity.z * dt);
+        if (stepUpSwept(pos, wantDelta, aDesc.aStepHeight, sweptPos)) {
+            pos = sweptPos;
+            result.aSteppedUp = true;
+            aVelocity.x = 0.0f; // 这一帧的水平位移已经用掉
+            aVelocity.z = 0.0f;
+        }
+    }
+
+    // 5b) 旧版台阶（抬-移-落）。扫掠关闭或扫掠失败时才走这里。
+    horizontalMoved = std::sqrt((pos.x - startPos.x) * (pos.x - startPos.x) +
+                                (pos.z - startPos.z) * (pos.z - startPos.z));
+    if (!result.aSteppedUp && hasInput && aGrounded && !walkedSlope &&
+        aDesc.aStepHeight > 0.0f && horizontalMoved < wanted * 0.5f) {
         GNg::sVEC3 lifted = pos;
         lifted.y += aDesc.aStepHeight;
         if (resolvePenetration(lifted)) {

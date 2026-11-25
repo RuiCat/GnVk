@@ -41,7 +41,7 @@
 | C3a | ~~root motion~~ | ✅ 2026-11-25 完成：`cROOT_MOTION_EXTRACTOR` + `cCHARACTER::ApplyRootMotion` + 循环回绕补偿 | — | 已完成 |
 | C3b-IK | ~~两骨 IK~~ | ✅ 2026-11-25 完成：`solveTwoBoneIK`（余弦定理 + 极向量）+ `cIK_SOLVER`（骨架取链）+ `GNg::QuatMul` 提升到数学库 | — | 已完成 |
 | C3b-布娃娃 | 布娃娃（约束求解） | 无 | 死亡/受击表现缺失 | [大改] |
-| C4 | 台阶抬升是"抬-移-落" | 不是真正的 capsule sweep | 薄台阶（< 胶囊半径）有轻微穿插感 | [大改] |
+| C4 | ~~台阶抬升是"抬-移-落"~~ | ✅ 2026-11-25 完成：`sweepCapsuleAgainstTriangles`（保守推进 + 二分）+ `cCHARACTER::stepUpSwept`（可开关，默认开） | — | 已完成 |
 
 ## D. 资产与验证
 

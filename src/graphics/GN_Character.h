@@ -134,6 +134,15 @@ class cCHARACTER {
     float SlopeDeg() const; // 无地面 = 0
     bool IsStuck() const; // 上一帧解穿透没解干净（被夹住）
 
+    // ── 台阶：扫掠模式（C4）──
+    // 传统"抬-移-落"对薄台阶（高度 < 胶囊半径）会有穿插感：抬起来那一帧脚已越过
+    // 台阶顶，往下探却"还没进"台阶内部，于是落点悬空，下一帧再掉一次（抖一下）。
+    //
+    // 开启后改用**胶囊扫掠**：把"抬起 + 前移"合成一次扫掠，直接求出最早接触点，
+    // 落点精确贴住台阶面。默认开启；关闭可回到旧行为（便于对比/回退）。
+    void SetSweptStepsEnabled(bool enabled);
+    bool SweptStepsEnabled() const;
+
     // ── Root Motion（C3）──
     // "位移由动画决定"的模式。启用后 `Move` **忽略 wishDir 的速度分量**，
     // 改用最近一次 `ApplyRootMotion` 给的位移作为本步的水平目标。
@@ -193,6 +202,9 @@ class cCHARACTER {
     bool resolvePenetration(GNg::sVEC3 &center) const;
     // 地面探测：返回是否着地，并输出法线 y 与坡度。
     bool probeGround(const GNg::sVEC3 &center, float &outNormalY, float &outSlopeDeg) const;
+    // 扫掠版台阶抬升（C4）。返回是否成功上台阶。
+    bool stepUpSwept(const GNg::sVEC3 &fromPos, const GNg::sVEC3 &wantDelta, float stepHeight,
+                     GNg::sVEC3 &outPos);
     // 推动态刚体（见 SetPhysicsWorld 的注释）。返回推开数量。
     uint32_t pushDynamicBodies(const GNg::sVEC3 &center);
     void resetTransient();
@@ -206,6 +218,8 @@ class cCHARACTER {
     bool aInited; // Init() 是否调用过
     // C2：推动态刚体
     cPHYSICS_WORLD *aPhysicsWorld; // 非拥有，默认 nullptr = 关闭
+    // C4：台阶用扫掠
+    bool aSweptSteps;
     // C3：root motion
     bool aRootMotionEnabled;
     GNg::sVEC3 aPendingRootMotion; // 本帧待消费的位移（世界空间）
