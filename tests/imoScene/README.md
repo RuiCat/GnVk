@@ -152,6 +152,7 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
 - 选段：水平速度 <0.4 m/s 播 idle、<4.2 m/s 播 walk、其余播 run；播放速率 = 速度 ÷ 3.0 或 5.5，脚不滑；
 - 转身：模型按移动方向平滑转向（模型正面 = +Z）。没有独立的倒退/侧移动画，倒退与侧移就是「转身走过去」；
 - 调试：`IMO_SCENE_TEST_MOVE=front|back|left|right` 强制移动意图（无键鼠时验证朝向/选段），`IMO_SCENE_ANIM_DIR` 换剪辑目录；
+- **默认服装组合（方案 A）**：`.local/imoScene/outfitDefault.json` 的 `hidden` 名单来自游戏 prefab（level1 的 `Clothes_imo_chan`）里**激活的服装槽**，按材质名映射回网格；默认只隐藏 `Mesh_Body*`（身体/衣服），装饰仍归 1–4 键。文件缺失时行为与旧版一致；`IMO_SCENE_OUTFIT_DEFAULT=<path>` 可换文件，键 6 可临时覆盖；
 - 换装/变体：资产里 `Mesh_Hair` 有 9 个头发网格（头皮/刘海/长发等零件混杂，只留一套会露头皮，所以默认全部显示）、`Mesh_Body` 有 12 个身体/服装网格；**键 5 循环切换发型、键 6 循环切换身体/服装、0 恢复全部**，默认值可用 `IMO_SCENE_HAIR=N` / `IMO_SCENE_BODY=N` 固定（-1 = 全部）；
 - 头发物理：游戏里头发由 VRM SpringBone（游戏目录里有 `FastSpringBone.dll`）驱动，不在 MuscleClip 里；本场景头发刚性跟随头骨，属预期行为，不是绑定错误；
 - 静态配件也跟随：项圈、发饰、Jirai 等网格在 glTF 里没有 skin（父节点是 Armature、顶点已烘进世界坐标），现在按顶点质心绑到最近关节做刚性跟随（项圈→铃铛骨、发饰→头发骨），跟随网格 43/43；

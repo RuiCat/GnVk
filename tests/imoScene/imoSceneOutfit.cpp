@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace imoScene {
@@ -32,6 +33,52 @@ sOUTFIT_GROUP kGroups[] = {
 const uint32_t kGroupCount = sizeof(kGroups) / sizeof(kGroups[0]);
 
 GN3d::cMODEL *gModel = nullptr;
+// 默认服装组合（方案 A）：从游戏 prefab 的激活槽位导出的"只保留这一套"名单，
+// 只作用于身体/衣服（Mesh_Body*），装饰仍归 1–4 键管。空 = 不启用。
+std::vector<unsigned char> gForceHidden;
+std::vector<std::string> gHiddenNames;
+
+// 从 JSON 里取出 "hidden": [ "..." ] 名单（文件很简单，按引号切分足够）。
+bool loadOutfitDefault(const char *path) {
+    std::FILE *file = std::fopen(path, "rb");
+    if (file == 0) {
+        return false;
+    }
+    std::string text;
+    char buffer[4096];
+    while (true) {
+        const size_t read = std::fread(buffer, 1, sizeof(buffer), file);
+        if (read == 0) {
+            break;
+        }
+        text.append(buffer, read);
+    }
+    std::fclose(file);
+    const size_t key = text.find("\"hidden\"");
+    if (key == std::string::npos) {
+        return false;
+    }
+    const size_t begin = text.find('[', key);
+    const size_t end = text.find(']', key);
+    if (begin == std::string::npos || end == std::string::npos || end < begin) {
+        return false;
+    }
+    gHiddenNames.clear();
+    size_t cursor = begin;
+    while (true) {
+        const size_t quote = text.find('"', cursor);
+        if (quote == std::string::npos || quote > end) {
+            break;
+        }
+        const size_t close = text.find('"', quote + 1);
+        if (close == std::string::npos || close > end) {
+            break;
+        }
+        gHiddenNames.push_back(text.substr(quote + 1, close - quote - 1));
+        cursor = close + 1;
+    }
+    return !gHiddenNames.empty();
+}
 
 // 变体族：导入资产里同名网格（Mesh_Hair / Mesh_Hair.001 …、Mesh_Body / Mesh_Body.001 …）
 // 是同一槽位的不同套发型/服装，游戏里同一时刻只激活一套。默认 -1 = 全部显示（保持导入画面），
@@ -134,7 +181,11 @@ void applyGroups() {
                 break;
             }
         }
-        mesh.aVisible = visible && variantFamilyVisible(meshIndex);
+        bool forced = false;
+        if (meshIndex < gForceHidden.size() && gForceHidden[meshIndex] != 0) {
+            forced = true;
+        }
+        mesh.aVisible = visible && !forced && variantFamilyVisible(meshIndex);
     }
 }
 
@@ -146,6 +197,31 @@ void outfitInit(GN3d::cMODEL &model) {
         kGroups[groupIndex].aVisible = true;
     }
     buildFamilies();
+    // 方案 A：默认服装组合。只隐藏 Mesh_Body*（身体/衣服），装饰留给 1–4 键。
+    gForceHidden.assign(gModel->aMeshCount, 0);
+    const char *defaultPath = std::getenv("IMO_SCENE_OUTFIT_DEFAULT");
+    const std::string fallback = ".local/imoScene/outfitDefault.json";
+    if (loadOutfitDefault(defaultPath != 0 ? defaultPath : fallback.c_str())) {
+        size_t hiddenBody = 0;
+        for (uint32_t meshIndex = 0; meshIndex < gModel->aMeshCount; ++meshIndex) {
+            const std::string name = gModel->aMeshes[meshIndex].aName;
+            if (name.compare(0, 9, "Mesh_Body") != 0) {
+                continue;
+            }
+            // 网格名可能带 "#prim" 后缀；按去掉后缀的节点名精确比较（否则 Mesh_Body 会命中所有 Mesh_Body.*）。
+            const size_t hash = name.find('#');
+            const std::string base = (hash == std::string::npos) ? name : name.substr(0, hash);
+            for (size_t item = 0; item < gHiddenNames.size(); ++item) {
+                if (base == gHiddenNames[item]) {
+                    gForceHidden[meshIndex] = 1;
+                    ++hiddenBody;
+                    break;
+                }
+            }
+        }
+        std::printf("[imoScene] 默认服装组合: 隐藏身体网格 %zu 个（.local/imoScene/outfitDefault.json）\n",
+                    hiddenBody);
+    }
     // 默认显示集合可用环境变量固定（便于挑好之后固化）；-1 = 全部。
     const char *hairEnv = std::getenv("IMO_SCENE_HAIR");
     const char *bodyEnv = std::getenv("IMO_SCENE_BODY");

@@ -16,7 +16,9 @@ Unity humanoid 动画在 `m_MuscleClip` 里存的是 95 个肌肉值而不是骨
 
 髋部与上身：Unity humanoid 的身体前倾/左右摆/上下起伏**不在肌肉里**，而在 `RootT`（身体位置）与 `RootQ`（身体朝向）。第一版漏了这两个通道，表现正是「腰部固定、腿在动、上半身不跟着动」；现在导出时把它们施加到髋部（绕髋关节旋转 + `(RootT-RootT_rest)×m_Scale` 位移），走路时髋部旋转 0–9.6°、脊柱 0–12.8°、跑动 `RootT.y` 起伏 11.7 cm。
 
-换装/变体：`Mesh_Hair` 是 9 个头发网格（头皮/刘海/长发零件混杂 —— 只留第一个会露头皮，实测截图确认）、`Mesh_Body` 有 12 个身体/服装网格。`imoSceneOutfit` 按前缀分族，**键 5 / 6 循环切换发型 / 身体，0 恢复全部**；默认全部显示，可用 `IMO_SCENE_HAIR=N` / `IMO_SCENE_BODY=N` 固定（-1 = 全部）。头发飘动未接：游戏用 VRM SpringBone（`FastSpringBone.dll`）驱动，不在 MuscleClip 里。
+换装/变体：`Mesh_Hair` 是 9 个头发网格（头皮/刘海/长发零件混杂 —— 只留第一个会露头皮，实测截图确认）、`Mesh_Body` 有 12 个身体/服装网格。`imoSceneOutfit` 按前缀分族，**键 5 / 6 循环切换发型 / 身体，0 恢复全部**；默认全部显示，可用 `IMO_SCENE_HAIR=N` / `IMO_SCENE_BODY=N` 固定（-1 = 全部）。默认服装组合（方案 A）：从 `level1` 的 `Clothes_imo_chan` prefab 读出各服装槽自身的 `m_IsActive`（编辑期保存的搭配：`Sera_Top0815`+`sera_sukart0824`+`Hair_Model` 激活，`T_syatu0824`/`jazi_uwagi0824`/`under_*`/`zinz_0824`/`Acse_*`/`Clo_Ruru_Soccks` 未激活），按**材质名**把槽位映射回 glTF 网格，生成 `.local/imoScene/outfitDefault.json` 的 `hidden` 名单；引擎只对 `Mesh_Body*` 生效（装饰仍归 1–4 键），实测隐藏 8 个身体网格、画面变成「黑色水手服上衣 + 白裙 + 白袜」一套完整搭配而不是多层叠穿。
+
+头发飘动未接：游戏用 VRM SpringBone（`FastSpringBone.dll`）驱动，不在 MuscleClip 里。
 
 静态配件跟随：项圈/发饰/Jirai 这类网格在 glTF 里没有 skin（父节点是 `Armature`、顶点已烘进世界坐标），原先动画时留在原地；现在按顶点质心选最近关节做刚性跟随（项圈→铃铛骨、发辫挂坠→头发骨），跟随网格 39/43 → **43/43**。
 
