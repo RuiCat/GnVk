@@ -137,6 +137,44 @@ int selectCascade(vec3 worldPos) {
     return -1;
 }
 
+// ═══════════════════════════════════════════════════════════
+//  B2：点光/聚光 cube shadow
+// ═══════════════════════════════════════════════════════════
+// 传统做法是用 `texture(samplerCubeShadow, vec4(dir, refZ))` 让硬件比较。本项目已有的
+// CSM 走的是"手动比较 + PCSS"，为了口径统一，这里也手动比较（sampler 关闭 compare）。
+//
+// 为什么 PCF 的偏移要在**方向空间**做而不是 uv 空间：cube 的 6 个面用的是不同的 2D 投影，
+// 在某一面的 uv 上偏移到面外会跳变。做法是把方向扰动后重新采样 —— 代价是多几次 normalize。
+float cubeShadowFactor(vec3 worldPos, vec3 lightPos, vec3 N, float softness) {
+    vec3 toFrag = worldPos - lightPos; // 从光源指向片元（正好是 cube 的采样方向）
+    float dist = length(toFrag);
+    if (dist < 1e-4) return 1.0;
+    vec3 dir = toFrag / dist;
+
+    // 法线偏移：沿法线抬高一点再比较，避免自阴影痤疮（与 CSM 的 2 texel 偏移同思路）
+    vec3 biasedPos = worldPos + N * max(dist * 0.0025, 0.002);
+    vec3 biasedDir = normalize(biasedPos - lightPos);
+    float refZ = length(biasedPos - lightPos);
+
+    // 5 点 PCF：中心 + 4 个沿切线的扰动。softness 由调用方按光源半径/距离给。
+    vec3 up = abs(dir.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, dir));
+    vec3 bitangent = cross(dir, tangent);
+    float sum = 0.0;
+    const int kSamples = 5;
+    vec2 offsets[5] = vec2[5](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0),
+                              vec2(0.0, 1.0), vec2(0.0, -1.0));
+    for (int i = 0; i < kSamples; ++i) {
+        vec3 sampleDir = normalize(biasedDir + (tangent * offsets[i].x + bitangent * offsets[i].y) *
+                                                        softness);
+        // 用**未偏移的** refZ 比较：偏移只影响采样方向，不该改变被测点的深度
+        float occluder = textureLod(cubeShadowSampler, sampleDir, 0.0).r;
+        // 图外（border=白=1.0）自然算"无遮挡"
+        sum += (refZ <= occluder + 1e-4) ? 1.0 : 0.0;
+    }
+    return sum / float(kSamples);
+}
+
 // 原始深度比较：receiver <= occluder 视为受光（layer = 选中的 CSM 级）。
 float shadowCompare(vec2 uv, float layer, float receiver) {
     float occluder = textureLod(shadowSampler, vec3(uv, layer), 0.0).r;

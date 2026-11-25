@@ -25,7 +25,7 @@
 | # | 缺口 | 现状 | 影响 | 标记 |
 |---|---|---|---|---|
 | B1 | ~~IBL 强度不可连续调节~~ | ✅ 2026-11-25 完成：`GN_VkSetGIIntensity(scale, specularRatio)`，复用 `indirect[0]/[1]` | — | 已完成 |
-| B2 | 点光/聚光无阴影 | `AddPoint/AddSpot` 的 `enableShadow` 会被写进 `direction.w`，但着色器只处理 `shadowType ∈ [0.5,1.5)`（= 方向光的 2D 级联） | 火光/聚光灯照不出投影 | [大改] cube shadow map |
+| B2 | ~~点光/聚光无阴影~~ | ✅ 2026-11-25 完成：cube shadow map（单光源 6 面）+ `samplerCube` binding 12 + `GN_VkCubeShadow{Begin,FaceBegin,FaceEnd,End}` | — | 已完成 |
 | B3 | 无 GPU 侧剔除 | CPU 逐实体剔除（`cSCENE`） | 实体数上万时 CPU 侧成为瓶颈 | [大改] compute culling |
 | B4 | 无遮挡剔除 / 阴影剔除 | 只有视锥剔除 | overdraw 偏高 | [大改] |
 | B5 | `sMATERIAL::aEmissive` 已打通 ✅ | 2026-11-25 完成 | — | 已完成 |

@@ -71,15 +71,16 @@ class cLIGHT {
     int AddDirectional(const GNg::sVEC3 &dir, const GNg::sVEC3 &color,
                        float intensity = 1.0f, bool enableShadow = true);
 
-    // 添加点光源
+    // 添加点光源。enableShadow = true 时写入 cube shadow（**只有一盏能生效**：
+    // 引擎只有一张 cube map，后写入的会覆盖前面的；见 GN_VkSetCubeShadowLight）。
     int AddPoint(const GNg::sVEC3 &pos, float range,
-                 const GNg::sVEC3 &color, float intensity = 1.0f);
+                 const GNg::sVEC3 &color, float intensity = 1.0f, bool enableShadow = false);
 
     // 添加聚光灯 (enableShadow=false 可关闭阴影)
     int AddSpot(const GNg::sVEC3 &pos, const GNg::sVEC3 &dir,
                 float range, float innerConeRad, float outerConeRad,
                 const GNg::sVEC3 &color, float intensity = 1.0f,
-                bool enableShadow = true);
+                bool enableShadow = false); // 同上：点光/聚光共用一张 cube map
 
     // 修改/获取光源
     void SetColor(int index, const GNg::sVEC3 &color);

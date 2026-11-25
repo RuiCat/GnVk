@@ -152,6 +152,14 @@ GN_VK_INTERNAL void recordAtmosphereLutUpdate(VkCommandBuffer cb);
 GN_VK_INTERNAL void wireAtmosphereDescriptors();
 // L3c CSM：4 层阴影图的按层 framebuffer（cascadeIndex 越界返回层 0）
 GN_VK_INTERNAL void destroy3DShadowCascades();
+// B2：点光/聚光 cube shadow（单光源，6 面）。size 会钳到 [128, 2048]。
+GN_VK_INTERNAL void init3DCubeShadow(uint32_t size);
+// cube shadow 第 face 面用的描述符集（绑着该面自己的 light-VP UBO 槽）。
+// 未初始化/分配失败返回 VK_NULL_HANDLE。
+GN_VK_INTERNAL VkDescriptorSet cubeShadowFaceDescriptorSet(uint32_t face);
+// 写第 face 面的 light-VP 到它自己的 UBO 槽（槽基址 kCubeShadowSlotBase）。
+GN_VK_INTERNAL void writeCubeShadowLightVP(uint32_t face, const float *matrix16);
+GN_VK_INTERNAL void destroy3DCubeShadow();
 GN_VK_INTERNAL VkFramebuffer shadowFramebufferForCascade(uint32_t cascadeIndex);
 GN_VK_INTERNAL bool isPostReady();       // POST UBO 可用才允许合成（避免未绑定 UBO 的 draw）
 GN_VK_INTERNAL bool init3DBloom();       // L1d：Bloom mip 链（render pass/管线/描述符/图）

@@ -240,10 +240,15 @@ void initLights() {
                                  {0.02f, 0.10f, -0.16f},
                                  {-0.06f, 0.16f, -0.02f}};
     for (int i = 0; i < 4; ++i) {
+        // B2：只有第 0 盏带 cube shadow。引擎只有一张 cube map，后写入的会覆盖前面的；
+        // 火堆的 4 盏位置几乎重合，让主火炬投影就够 —— 4 张 cube map 的代价
+        // （6×1024²×4 ≈ 100 MB + 4 遍场景渲染）换不来可辨的画面差异。
         gFireLight[i] = gLight->AddPoint(
             GNg::sVEC3{gFireOrigin.x + offsets[i][0], gFireOrigin.y + offsets[i][1],
                        gFireOrigin.z + offsets[i][2]},
-            6.5f, GNg::sVEC3{1.0f, 0.52f, 0.16f}, 2.4f);
+            6.5f, GNg::sVEC3{1.0f, 0.52f, 0.16f}, 2.4f,
+            // FIRE_NO_POINT_SHADOW=1 可关掉做 A/B 对比
+            /* enableShadow = */ (i == 0) && std::getenv("FIRE_NO_POINT_SHADOW") == nullptr);
     }
 
     // 月光：冷蓝方向光（B 段渐亮）
@@ -503,6 +508,26 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
 
     // 3) 3D pass
     GNg::cRENDER_FRAME frame;
+
+    // ── B2：点光 cube shadow（主火炬）──
+    // 必须在主 3D pass **之前**录：它结束时会关掉自己的 render pass，
+    // 而主 pass 的 Begin 会重新开一个。
+    std::vector<const GN3d::cMODEL *> cubeCasters;
+    cubeCasters.reserve(gProps.size());
+    for (size_t i = 0; i < gProps.size(); ++i) cubeCasters.push_back(gProps[i].aModel);
+    if (!cubeCasters.empty() && std::getenv("FIRE_NO_POINT_SHADOW") == nullptr) {
+        const GNg::sVEC3 lightPos = {gFireOrigin.x, gFireOrigin.y + 0.35f, gFireOrigin.z};
+        // near 要给一点余量（贴近光源的投射体会被裁），far 覆盖火光影响半径
+        if (GNg::GN_VkCubeShadowBegin(lightPos, 0.08f, 14.0f)) {
+            for (uint32_t face = 0; face < 6; ++face) {
+                GNg::GN_VkCubeShadowFaceBegin(lightPos, face, 0.08f, 14.0f);
+                for (size_t i = 0; i < cubeCasters.size(); ++i) cubeCasters[i]->DrawShadow();
+                GNg::GN_VkCubeShadowFaceEnd();
+            }
+            GNg::GN_VkCubeShadowEnd();
+        }
+    }
+
     GNg::sRENDER_FRAME_DESC desc;
     desc.aViewProj = &viewProj;
     desc.aCameraPos = &eye;

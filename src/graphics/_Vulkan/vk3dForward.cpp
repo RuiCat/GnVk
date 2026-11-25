@@ -120,12 +120,14 @@ VkDescriptorSet findOrCreatePBRSet(VkImageView albedo, VkSampler albedoSampler,
     return set;
 }
 
-// 同步单个纹理 set：从规范 set 复制 12 个绑定，再覆盖 binding 1/3 的纹理与采样器。
+// 同步单个纹理 set：从规范 set 复制 13 个绑定（B2 起含 cube shadow），再覆盖 binding 1/3。
 void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry) {
         // 逐绑定复制：一次 copy 跨多个绑定会要求这些绑定的 descriptorCount 一致
         // （校验层 VUID-VkCopyDescriptorSet-srcSet-00349：「next binding ... not consistent」），
         // 这里改成每个绑定一条 copy，各 count=1，语义明确且无告警。
-        for(uint32_t binding = 0; binding < 12; ++binding) {
+        // B2：12 -> 13（含 binding 12 的 cube shadow）。新增槽位自动被复制，
+        // 不需要在每个纹理组合里单独写一遍。
+        for(uint32_t binding = 0; binding < 13; ++binding) {
             VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
             copy.srcSet = GN_Vk.descriptorSetPBR;
             copy.srcBinding = binding;

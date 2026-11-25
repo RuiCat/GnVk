@@ -9,6 +9,9 @@ namespace GpuCheck {
 // → gn3d_pbr.frag 的 LightUBO → CalcPBRLight → 合成 → 交换链。任何一环断开都会让
 // 下面这些「变亮/变暗」的断言失败。
 void RunLightChecks();
+
+// B2：点光/聚光 cube shadow 的端到端验收（资源存在 + 真的渲染出深度）。
+void RunCubeShadowChecks();
 }
 
 #endif // _GN_GPU_CHECK_LIGHT_H_

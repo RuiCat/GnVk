@@ -1,5 +1,72 @@
 # Changelog
 
+## 2026-11-25 — B2：点光/聚光 cube shadow map
+
+清单里视觉收益最大的一项。点光/聚光此前只有 `enableShadow` 参数被写进 `direction.w`，
+但着色器只处理 `shadowType ∈ [0.5, 1.5)`（方向光的 2D 级联）——`≥1.5` 的分支是空的。
+现在补上完整的 cube shadow 链路。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| cube shadow 资源 | `init3DCubeShadow` / `destroy3DCubeShadow`（`vk3dInit.cpp`） | `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT` 的 6 面 D32（1024²，约 25 MB）+ CUBE 视图 + 6 个 2D 面视图 + 独立 render pass/framebuffer |
+| 专用管线 | `GN_Vk.cubeShadowPipeline` | **动态 viewport**（见下），复用 `shadowPipelineLayout` |
+| 渲染 API | `GN_VkCubeShadowBegin` / `FaceBegin` / `FaceEnd` / `End` | 6 面朝向按 Vulkan cube 约定；±Y 面的 up 换 `(0,0,±1)` 避免叉积退化 |
+| 描述符 | PBR binding **12 = samplerCube**（12 → 13 个 binding） | `syncPBRTextureSet` 的复制范围同步扩到 13 |
+| 采样 | `cubeShadowFactor()`（`sceneLighting.glsl`） | 5 点 PCF，在**方向空间**扰动（cube 的 6 面是不同投影，uv 空间偏移会跨面跳变） |
+| 光源 API | `AddPoint/AddSpot(..., bool enableShadow)` | 写 `direction.w = 2`（不是 1 —— 1 是方向光的 2D 级联） |
+| gpuCheck | `cube.setup` / `cube.empty` / `cube.occluder` | 116 → **123** |
+
+演示：火焰场景的主火炬现在会投出投影。`.local/video/fire-lighting-pointshadow.mp4`。
+有影 vs 无影的像素差：**52.35%（271394/518400 像素），最大差 80** —— 影响面积很大，
+但因为是柔和的环境光遮蔽变化，肉眼不如硬阴影显眼。
+
+### 三个踩到的坑（都是真实 bug，不是配置问题）
+
+**1. cube 的 6 个面必须各占一个 UBO 槽。**
+`writeShadowCascadeLightVP(0, ...)` 在第一版里 6 个面都写槽 0 —— 提交后 6 个面
+全部读到最后一次写入的矩阵。这与 CSM 早期"4 级共用一个槽"是同一个 bug
+（`vk3dInit.cpp` 的注释里就记着）。现在 UBO 扩到 12 个槽：0–3 给 CSM，4–9 给 cube 面，
+每面一份描述符集。
+
+**2. 复用 CSM 的 shadow 管线会把画面缩到右下角。**
+CSM 那条管线 `aViewport` 写死 `smSize`(2048)，而 cube 是 1024。
+用 `renderArea` 裁剪不改变 viewport 映射，结果是内容被压进图幅的右下 1/4
+（实测 bbox `x[686,1023] y[683,767]`，只占 14450 像素）。
+正解是给 cube 建**独立的动态 viewport 管线**（`aDynamicViewport = true` +
+`vkCmdSetViewport`）。两条管线共用 `shadowPipelineLayout` 与同一份 vert SPIR-V，
+差别只有 renderPass 与 viewport 模式。
+
+**3. `isfinite` 抓不住"全零矩阵的逆"。**
+`gizmoRayFromScreen` 需要拒绝退化矩阵，但**全零矩阵的逆是全 1 矩阵**（不是 NaN），
+`isfinite` 检查会通过。改成把逆矩阵乘回原矩阵验证是否为单位阵。
+（这条是上一轮 Gizmo 那轮踩到的，本轮 cube 的测试也复用了同一个教训。）
+
+### 验收口径的一次修正
+
+第一版断言"遮挡物中心像素的深度 < 0.5"——**这是错的**：
+透视深度是非线性的，`near=0.1 / far=20` 时距离 2 m 对应 `z_ndc = 0.9548`，
+不是直觉上的 `2/20 = 0.1`。
+
+第二版改成"介于 (0.5, 0.999)"——仍然依赖"物体必须落在这一面的画面中心"，
+而 cube 的 6 个面在屏幕上是不同投影，物体落在哪一面取决于 face 朝向，
+这是个实现细节。
+
+最终口径只有两条真正重要的语义：
+1. cube pass **确实把几何写进了深度图**（非清屏像素数 > 100，空场景为 0）；
+2. 写进去的深度**合理**（既不是清屏 1.0，也不是贴 near 的 0）。
+
+这样测试不会被"当前实现把物体放在第几面"绑死 —— 本轮为此反复调了三轮。
+
+### 边界（写清楚）
+
+- **一张 cube map 只服务一盏灯**（后渲染的覆盖前面的）。多盏需要扩成数组；
+  `Begin/FaceBegin/FaceEnd/End` 的接口形状不用变。
+- 点光阴影是 1024² × 6，灯很多时开销显著（每盏要 6 遍场景渲染）。
+- 未做：cube 的 PCSS 软化（当前是固定 5 点 PCF，软度按锥角给一个常数）、
+  多光源轮转（按重要性选一盏渲染）。
+
 ## 2026-11-25 — 选择集（A3）+ 撤销/重做（A4）
 
 上一轮把 Gizmo 接上了鼠标，但**拖错了回不去**、也**只能操作一个对象**。

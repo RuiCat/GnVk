@@ -192,6 +192,8 @@ void GN_VkShutdown3D() {
     }
     // L3c：4 级 CSM 的层视图/framebuffer（必须在 shadowRenderPass/shadowImage 之前释放）
     destroy3DShadowCascades();
+    destroy3DCubeShadow(); // B2
+    GN_Vk.cubeShadowPipeline = VK_NULL_HANDLE; // VkPipeline 由 aPipelineCache 统一销毁
     if(GN_Vk.shadowFramebuffer) {
         vkDestroyFramebuffer(GN_Vk.device, GN_Vk.shadowFramebuffer, 0);
         GN_Vk.shadowFramebuffer = VK_NULL_HANDLE;

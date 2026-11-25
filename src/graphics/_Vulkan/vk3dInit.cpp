@@ -468,7 +468,7 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
     //  G1b：7 = GI UBO（§3.7 冻结槽位），8 = 预滤波环境 cubemap，9 = BRDF LUT
     // ═══════════════════════════════════════════════════════
     {
-        VkDescriptorSetLayoutBinding dslb[12] = {};
+        VkDescriptorSetLayoutBinding dslb[13] = {};
         dslb[0].binding = 0;
         dslb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         dslb[0].descriptorCount = 1;
@@ -517,8 +517,15 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
             dslb[b].descriptorCount = 1;
             dslb[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         }
+        // B2：binding 12 = 点光/聚光的 cube shadow（samplerCube）。
+        // 为什么新开一个槽位而不是复用 binding 4：4 是 2D array（CSM，方向光）。
+        // cube 与 2D array 是**不同的 image view 类型**，描述符类型上就不能互换。
+        dslb[12].binding = 12;
+        dslb[12].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        dslb[12].descriptorCount = 1;
+        dslb[12].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        dslci.bindingCount = 12;
+        dslci.bindingCount = 13;
         dslci.pBindings = dslb;
         vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.descriptorLayoutPBR);
     }
@@ -551,7 +558,14 @@ VkImageView s_shadowCascadeViews[kShadowCascadeCount] = {};
 // minUniformBufferOffsetAlignment 的上限；单槽会被最后一级覆盖）。
 const uint32_t kShadowUBOSlotSize = 64;
 const uint32_t kShadowUBOSlotStride = 256;
+// B2：CSM 用槽 0..3，cube shadow 的 6 个面用槽 4..9。
+// **cube 的面必须各占一个槽**：只写槽 0 的话 6 面都会读到最后一次写入的矩阵 ——
+// 这与 CSM 早期"4 级共用一个槽"是同一个 bug（当时的表现是所有级联都用最后一级）。
+const uint32_t kCubeShadowSlotBase = 4;
+const uint32_t kShadowUBOSlotCount = 12;
 VkDescriptorSet s_shadowCascadeSets[kShadowCascadeCount] = {};
+// B2：cube shadow 6 面各一份（绑槽 kCubeShadowSlotBase + face）
+VkDescriptorSet s_cubeShadowFaceSets[6] = {};
 // 常驻映射（初始化期 vkMapMemory 一次）：每级只写自己的槽，避免逐级 map/unmap。
 void *s_shadowUBOMapped = nullptr;
 } // namespace
@@ -582,6 +596,18 @@ void releaseShadowCascadeUbo() {
 }
 
 uint32_t GN_VkShadowCascadeCount() { return kShadowCascadeCount; }
+
+VkDescriptorSet cubeShadowFaceDescriptorSet(uint32_t face) {
+    if(face >= 6u) return VK_NULL_HANDLE;
+    return s_cubeShadowFaceSets[face];
+}
+
+void writeCubeShadowLightVP(uint32_t face, const float *matrix16) {
+    if(!s_shadowUBOMapped || !matrix16 || face >= 6u) return;
+    // **每面一个槽**：写同一槽会让 6 个面读到最后一次写入的矩阵
+    memcpy((char *)s_shadowUBOMapped + (size_t)(kCubeShadowSlotBase + face) * kShadowUBOSlotStride,
+           matrix16, 64);
+}
 
 void destroy3DShadowCascades() {
     for(uint32_t i = 0; i < kShadowCascadeCount; ++i) {
@@ -726,7 +752,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
 
     // Shadow UBO：每级一个独立槽（64 B 矩阵，槽距 256 B）。
     // 旧实现只有 64 B / 单槽：4 级 cascade 每级写同一位置，提交后全部读到最后一级矩阵。
-    CreateBuf(kShadowCascadeCount * kShadowUBOSlotStride, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+    CreateBuf(kShadowUBOSlotCount * kShadowUBOSlotStride, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
               GN_Vk.shadowUBOBuffer, GN_Vk.shadowUBOMemory);
     // 常驻映射（offset 0 一定满足 minMemoryMapAlignment）；逐级只写自己的槽。
@@ -775,6 +801,36 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         GN_Vk.shadowDescriptorSet = s_shadowCascadeSets[0];
     }
 
+    // B2：cube shadow 的 6 面各一份描述符集（绑槽 4..9）。
+    {
+        for(uint32_t f = 0; f < 6; ++f) s_cubeShadowFaceSets[f] = VK_NULL_HANDLE;
+        VkDescriptorSetLayout layouts[6];
+        for(uint32_t f = 0; f < 6; ++f) layouts[f] = GN_Vk.shadowDescriptorLayout;
+        VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        dai.descriptorPool = GN_Vk.descriptorPool;
+        dai.descriptorSetCount = 6;
+        dai.pSetLayouts = layouts;
+        VkResult res = vkAllocateDescriptorSets(GN_Vk.device, &dai, s_cubeShadowFaceSets);
+        if(res != VK_SUCCESS) {
+            VkCheck(res, "vkAllocateDescriptorSets cube shadow");
+            for(uint32_t f = 0; f < 6; ++f) s_cubeShadowFaceSets[f] = VK_NULL_HANDLE;
+        } else {
+            for(uint32_t f = 0; f < 6; ++f) {
+                VkDescriptorBufferInfo dbi = {
+                    GN_Vk.shadowUBOBuffer,
+                    (VkDeviceSize)(kCubeShadowSlotBase + f) * kShadowUBOSlotStride,
+                    kShadowUBOSlotSize};
+                VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                w.dstSet = s_cubeShadowFaceSets[f];
+                w.dstBinding = 0;
+                w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                w.descriptorCount = 1;
+                w.pBufferInfo = &dbi;
+                vkUpdateDescriptorSets(GN_Vk.device, 1, &w, 0, 0);
+            }
+        }
+    }
+
     // Shadow pipeline（P1b：深度专用走缓存：无片元阶段、0 颜色附件、深度偏移 1.25/1.75）
     if(!shadowVertSpv.empty()) {
         GN3d::sVERTEX_LAYOUT layoutShadow;
@@ -815,6 +871,203 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
             fprintf(stderr, "[GN_Vk] 阴影管线创建失败: %s\n", GN_Vk.aPipelineCache.GetLastError());
         }
     }
+
+    // B2：cube 专用的 depth-only 管线（动态 viewport）。
+    // 与上面那条**同一个 render pass 结构**（都是单深度附件、同格式），但 viewport 走动态，
+    // 因为 cube 是 1024 而 CSM 是 2048 —— 复用会让渲染缩到图幅右下角（实测踩过）。
+    if(!shadowVertSpv.empty() && GN_Vk.cubeShadowRenderPass != VK_NULL_HANDLE) {
+        GN3d::sVERTEX_LAYOUT layoutCubeShadow;
+        layoutCubeShadow.Add(0, (uint32_t)offsetof(VkVertex3D, px), VK_FORMAT_R32G32B32_SFLOAT);
+        layoutCubeShadow.aStride = (uint32_t)sizeof(VkVertex3D);
+
+        GN3d::sPIPELINE_DESC descCube;
+        descCube.aKind = GN3d::ePIPE_GRAPHICS;
+        descCube.aVertSpv = shadowVertSpv.data();
+        descCube.aVertSize = shadowVertSpv.size() * sizeof(uint32_t);
+        descCube.aFragSpv = 0;
+        descCube.aFragSize = 0;
+        descCube.aVertexLayout = layoutCubeShadow;
+        descCube.aRenderPass = GN_Vk.cubeShadowRenderPass; // 注意：不是 shadowRenderPass
+        descCube.aSubpass = 0;
+        descCube.aLayout = GN_Vk.shadowPipelineLayout;
+        descCube.aDepthTest = true;
+        descCube.aDepthWrite = true;
+        descCube.aDepthCompare = VK_COMPARE_OP_LESS;
+        descCube.aDepthStencil = true;
+        descCube.aDepthBiasEnable = true;
+        descCube.aDepthBiasConstant = 1.25f;
+        descCube.aDepthBiasSlope = 1.75f;
+        descCube.aCullBack = true;
+        descCube.aFrontFace = VK_FRONT_FACE_CLOCKWISE;
+        descCube.aBlend = GN3d::eBLEND_NONE;
+        descCube.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        descCube.aSamples = VK_SAMPLE_COUNT_1_BIT;
+        descCube.aColorAttachmentCount = 0;
+        descCube.aDynamicViewport = true;
+        descCube.aDynamicScissor = true;
+        descCube.aCustomBlend = false;
+        GN_Vk.cubeShadowPipeline = GN_Vk.aPipelineCache.GetOrCreate(descCube);
+        if(GN_Vk.cubeShadowPipeline == VK_NULL_HANDLE) {
+            fprintf(stderr, "[GN_Vk] cube shadow 管线创建失败: %s\n",
+                    GN_Vk.aPipelineCache.GetLastError());
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  B2：点光/聚光 cube shadow（单个光源，6 面）
+// ═══════════════════════════════════════════════════════════
+// 为什么是"单个光源"：每盏点光都要 6 面 × N² 的深度图，8 盏光就是 48 张。
+// 现实的取舍是"当前最重要的一盏"（火焰场景就是主火炬）—— 这也是多数实时引擎
+// 在移动端/中端配置下的默认策略。需要多盏时把这个结构扩展成数组即可，接口不用变。
+//
+// 与 CSM 完全独立：CSM 是方向光的 2D array（4 层），cube 是点光的 6 面。
+// 两者共用一张图会让渲染时机互相踩（CSM 在帧首按相机拟合，cube 要按点光位置）。
+void init3DCubeShadow(uint32_t size) {
+    if(size < 128u) size = 128u;
+    if(size > 2048u) size = 2048u;
+    if(GN_Vk.device == VK_NULL_HANDLE) return;
+
+    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.extent = {size, size, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 6;
+    ii.format = VK_FORMAT_D32_SFLOAT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ii.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    // **这个标志是 cube 视图的硬性要求**（VUID-VkImageViewCreateInfo-image-01003）：
+    // 少了它在 vkCreateImageView(VIEW_TYPE_CUBE) 时会直接校验失败。
+    ii.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    if(vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.cubeShadowImage) != VK_SUCCESS) {
+        fprintf(stderr, "[GN_Vk] cube shadow image 创建失败（点光阴影关闭）\n");
+        GN_Vk.cubeShadowImage = VK_NULL_HANDLE;
+        return;
+    }
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.cubeShadowImage, &mr);
+    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if(vkAllocateMemory(GN_Vk.device, &mai, 0, &GN_Vk.cubeShadowMemory) != VK_SUCCESS) {
+        vkDestroyImage(GN_Vk.device, GN_Vk.cubeShadowImage, 0);
+        GN_Vk.cubeShadowImage = VK_NULL_HANDLE;
+        return;
+    }
+    vkBindImageMemory(GN_Vk.device, GN_Vk.cubeShadowImage, GN_Vk.cubeShadowMemory, 0);
+
+    // CUBE 视图（采样）
+    {
+        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        vi.image = GN_Vk.cubeShadowImage;
+        vi.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        vi.format = VK_FORMAT_D32_SFLOAT;
+        vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        vi.subresourceRange.levelCount = 1;
+        vi.subresourceRange.layerCount = 6;
+        vkCreateImageView(GN_Vk.device, &vi, 0, &GN_Vk.cubeShadowView);
+    }
+    // 每面的 2D 视图（渲染目标）
+    for(uint32_t face = 0; face < 6; ++face) {
+        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        vi.image = GN_Vk.cubeShadowImage;
+        vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vi.format = VK_FORMAT_D32_SFLOAT;
+        vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        vi.subresourceRange.levelCount = 1;
+        vi.subresourceRange.baseArrayLayer = face;
+        vi.subresourceRange.layerCount = 1;
+        vkCreateImageView(GN_Vk.device, &vi, 0, &GN_Vk.cubeShadowFaceView[face]);
+    }
+
+    // 采样器：手动比较（与 CSM 一致，PCSS 需要原始深度），border=白 = 图外算"无遮挡"
+    {
+        VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        sci.magFilter = VK_FILTER_LINEAR;
+        sci.minFilter = VK_FILTER_LINEAR;
+        sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sci.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+        sci.compareEnable = VK_FALSE;
+        vkCreateSampler(GN_Vk.device, &sci, 0, &GN_Vk.cubeShadowSampler);
+    }
+
+    // depth-only render pass（与 CSM 同格式，但两者仍各自建一份：将来要给 cube 加
+    // 不同的 loadOp/清屏色时不用改 CSM）
+    {
+        VkAttachmentDescription ad = {};
+        ad.format = VK_FORMAT_D32_SFLOAT;
+        ad.samples = VK_SAMPLE_COUNT_1_BIT;
+        ad.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        ad.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        ad.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        ad.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        VkAttachmentReference dr = {0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+        VkSubpassDescription sp = {};
+        sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        sp.pDepthStencilAttachment = &dr;
+        VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        rpi.attachmentCount = 1;
+        rpi.pAttachments = &ad;
+        rpi.subpassCount = 1;
+        rpi.pSubpasses = &sp;
+        vkCreateRenderPass(GN_Vk.device, &rpi, 0, &GN_Vk.cubeShadowRenderPass);
+    }
+
+    // 6 个 framebuffer
+    for(uint32_t face = 0; face < 6; ++face) {
+        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        fci.renderPass = GN_Vk.cubeShadowRenderPass;
+        fci.attachmentCount = 1;
+        fci.pAttachments = &GN_Vk.cubeShadowFaceView[face];
+        fci.width = size;
+        fci.height = size;
+        fci.layers = 1;
+        vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.cubeShadowFramebuffer[face]);
+    }
+    GN_Vk.cubeShadowSize = size;
+    GN_Vk.cubeShadowPipeline = VK_NULL_HANDLE;
+    fprintf(stderr, "[GN_Vk] cube shadow 就绪: %u x %u x 6\n", size, size);
+}
+
+void destroy3DCubeShadow() {
+    if(GN_Vk.device == VK_NULL_HANDLE) return;
+    for(uint32_t face = 0; face < 6; ++face) {
+        if(GN_Vk.cubeShadowFramebuffer[face]) {
+            vkDestroyFramebuffer(GN_Vk.device, GN_Vk.cubeShadowFramebuffer[face], 0);
+            GN_Vk.cubeShadowFramebuffer[face] = VK_NULL_HANDLE;
+        }
+        if(GN_Vk.cubeShadowFaceView[face]) {
+            vkDestroyImageView(GN_Vk.device, GN_Vk.cubeShadowFaceView[face], 0);
+            GN_Vk.cubeShadowFaceView[face] = VK_NULL_HANDLE;
+        }
+    }
+    if(GN_Vk.cubeShadowRenderPass) {
+        vkDestroyRenderPass(GN_Vk.device, GN_Vk.cubeShadowRenderPass, 0);
+        GN_Vk.cubeShadowRenderPass = VK_NULL_HANDLE;
+    }
+    if(GN_Vk.cubeShadowSampler) {
+        vkDestroySampler(GN_Vk.device, GN_Vk.cubeShadowSampler, 0);
+        GN_Vk.cubeShadowSampler = VK_NULL_HANDLE;
+    }
+    if(GN_Vk.cubeShadowView) {
+        vkDestroyImageView(GN_Vk.device, GN_Vk.cubeShadowView, 0);
+        GN_Vk.cubeShadowView = VK_NULL_HANDLE;
+    }
+    if(GN_Vk.cubeShadowMemory) {
+        vkFreeMemory(GN_Vk.device, GN_Vk.cubeShadowMemory, 0);
+        GN_Vk.cubeShadowMemory = VK_NULL_HANDLE;
+    }
+    if(GN_Vk.cubeShadowImage) {
+        vkDestroyImage(GN_Vk.device, GN_Vk.cubeShadowImage, 0);
+        GN_Vk.cubeShadowImage = VK_NULL_HANDLE;
+    }
+    GN_Vk.cubeShadowSize = 0;
 }
 
 // HDR 离屏目标 + 合成管线：HDR 图像/视图/采样器、HDR render pass 与 framebuffer、

@@ -135,6 +135,7 @@ int main() {
     GpuCheck::RunLodChecks();
     GpuCheck::RunFogChecks();
     GpuCheck::RunLightChecks(); // 光照系统端到端：改光源 → 像素跟着变
+    GpuCheck::RunCubeShadowChecks(); // B2：点光/聚光 cube shadow
     GpuCheck::RunPrecipitationChecks();
     GpuCheck::RunDecalChecks();
 

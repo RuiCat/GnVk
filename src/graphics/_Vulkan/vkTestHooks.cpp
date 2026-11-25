@@ -64,6 +64,9 @@ void GN_VkGetTestHooks(sTEST_HOOKS *out) {
 
 #ifdef GN_USING_3D
     out->shadowImage = GN_Vk.shadowImage;
+    out->cubeShadowImage = GN_Vk.cubeShadowImage;
+    out->cubeShadowView = GN_Vk.cubeShadowView;
+    out->cubeShadowSize = GN_Vk.cubeShadowSize;
     out->shadowMapSize = GN_Vk.shadowMapSize;
     out->hdrImage = GN_Vk.hdrImage;
     out->gAlbedoMetalImage = GN_Vk.gAlbedoMetalImage;

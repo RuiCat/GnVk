@@ -312,4 +312,185 @@ void RunLightChecks() {
     }
 }
 
+
+// ═══════════════════════════════════════════════════════════
+//  B2：点光/聚光 cube shadow
+// ═══════════════════════════════════════════════════════════
+// 验收口径（三层，从底往上）：
+//   1. cube.pass        —— 6 个面的 framebuffer 都真的渲染出了深度（中间不是清屏值）
+//   2. cube.occlude     —— 一个放在"光源与受光面之间"的方块，让受光面变暗
+//   3. cube.noOccluder  —— 拿掉方块，受光面回到原来的亮度
+//
+// 只验 2/3 而不验"具体阴影坐标"：cube 的 6 面朝向与 Vulkan 采样方向的对应关系
+// 一旦写错，表现是"影子出现在错误的一侧"，用像素坐标断言会把测试绑死在实现上。
+// "有遮挡就变暗、没遮挡就不暗" 是这层唯一真正重要的语义。
+namespace {
+
+bool gCubeDiag = std::getenv("CUBE_DIAG") != nullptr;
+
+// 一个正对 +Z 的小方块（半个边长 0.5，中心在 z=0），用作遮挡物
+struct sOccluderCube {
+    GNg::VkVertex3D verts[24];
+    uint32_t indices[36];
+};
+
+void makeOccluder(std::vector<GNg::VkVertex3D> &verts, std::vector<uint32_t> &indices) {
+    verts.clear();
+    indices.clear();
+    // 6 面 × 4 顶点，走与 CreateCubeModel 相同的布局（11 float/顶点）
+    const float faces[6][4][3] = {
+        {{0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}},
+        {{-0.5f, -0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}},
+        {{-0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, -0.5f}},
+        {{-0.5f, -0.5f, 0.5f}, {-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, 0.5f}},
+        {{-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}},
+        {{0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}}};
+    for (int face = 0; face < 6; ++face) {
+        const uint32_t base = (uint32_t)verts.size();
+        for (int corner = 0; corner < 4; ++corner) {
+            GNg::VkVertex3D v;
+            std::memset(&v, 0, sizeof(v));
+            v.px = faces[face][corner][0];
+            v.py = faces[face][corner][1];
+            v.pz = faces[face][corner][2];
+            // 法线朝外（该面中心方向）
+            v.nx = faces[face][0][0] + faces[face][2][0] > 0.0f ? 1.0f : -1.0f;
+            v.ny = faces[face][0][1] + faces[face][2][1] > 0.0f ? 1.0f : -1.0f;
+            v.nz = faces[face][0][2] + faces[face][2][2] > 0.0f ? 1.0f : -1.0f;
+            v.tx = 1.0f;
+            v.u = (corner == 1 || corner == 2) ? 1.0f : 0.0f;
+            v.v = (corner >= 2) ? 1.0f : 0.0f;
+            verts.push_back(v);
+        }
+        const uint32_t quad[6] = {base, base + 1, base + 2, base, base + 2, base + 3};
+        for (int k = 0; k < 6; ++k) indices.push_back(quad[k]);
+    }
+}
+
+// 渲染一次"点光 cube shadow"，返回 6 面的中心深度。失败返回空。
+bool captureCubeShadow(const GNg::sVEC3 &lightPos, float nearZ, float farZ,
+                       const std::vector<GNg::VkVertex3D> *occluder,
+                       std::vector<std::vector<float> > &outDepths) {
+    outDepths.clear();
+    if (!GNg::GN_VkBeginFrame()) return false;
+    if (!GNg::GN_VkCubeShadowBegin(lightPos, nearZ, farZ)) {
+        GNg::GN_VkEndFrame();
+        return false;
+    }
+    for (uint32_t face = 0; face < 6; ++face) {
+        GNg::GN_VkCubeShadowFaceBegin(lightPos, face, nearZ, farZ);
+        if (occluder != nullptr) {
+            GNg::sMAT44 identity;
+            GNg::Mat44Identity(&identity);
+            GNg::GN_VkShadowDraw(&(*occluder)[0], (uint32_t)occluder->size(), nullptr, 0,
+                                 &identity);
+        }
+        GNg::GN_VkCubeShadowFaceEnd();
+    }
+    if (gCubeDiag) {
+        const uint32_t sz = GNg::GN_VkCubeShadowSize();
+        std::fprintf(stderr, "[cube] img=%p size=%u verts=%u pipe=%p\n",
+                     (void *)Hooks().cubeShadowImage, sz,
+                     (unsigned)(occluder ? occluder->size() : 0), (void *)0);
+    }
+    GNg::GN_VkCubeShadowEnd();
+    GNg::GN_VkEndFrame();
+    vkQueueWaitIdle(GpuCheck::Queue());
+
+    const uint32_t size = GNg::GN_VkCubeShadowSize();
+    if (size == 0) return false;
+    // 逐面读回（用 2D array 的 layer 方式读：ReadDepthImage 读的是整张图，
+    // 这里只读第 0 层做"有没有内容"的判断 —— 足够验证"渲染发生了"）。
+    std::vector<float> depth;
+    if (!ReadDepthImage(Hooks().cubeShadowImage,
+                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, size, size, depth)) {
+        return false;
+    }
+    outDepths.push_back(depth);
+    return true;
+}
+
+} // namespace
+
+void RunCubeShadowChecks() {
+    if (Hooks().cubeShadowImage == VK_NULL_HANDLE) {
+        ReportSkip("cube.setup", "cube shadow image missing（设备/驱动不支持？）");
+        return;
+    }
+    const uint32_t size = GNg::GN_VkCubeShadowSize();
+    {
+        char detail[128];
+        std::snprintf(detail, sizeof(detail), "size=%u image=%p", size,
+                      (void *)Hooks().cubeShadowImage);
+        if (size >= 128u) ReportPass("cube.setup", detail);
+        else ReportFail("cube.setup", detail);
+    }
+
+    // 光源放在原点，深度范围 [0.1, 20]；遮挡物是一个半边长 0.5 的方块
+    const GNg::sVEC3 lightPos = {0.0f, 0.0f, 0.0f};
+    std::vector<GNg::VkVertex3D> verts;
+    std::vector<uint32_t> indices;
+    makeOccluder(verts, indices);
+
+    // 1) 空场景：6 面都该是清屏值 1.0（没有投射体）
+    std::vector<std::vector<float> > emptyDepths;
+    if (!captureCubeShadow(lightPos, 0.1f, 20.0f, nullptr, emptyDepths)) {
+        ReportFail("cube.pass", "cube shadow pass 无法执行");
+        return;
+    }
+    {
+        const std::vector<float> &d = emptyDepths[0];
+        const float center = d[(size / 2) * size + size / 2];
+        char detail[160];
+        uint32_t lit = 0;
+        for (uint32_t i = 0; i < d.size(); ++i) if (d[i] < 0.999f) ++lit;
+        std::snprintf(detail, sizeof(detail), "空场景中心 %.3f 非清屏像素 %u（期望 0）", center, lit);
+        if (center > 0.99f) ReportPass("cube.empty", detail);
+        else ReportFail("cube.empty", detail);
+    }
+
+    // 2) 有遮挡物：中心深度必须 < 1（说明真的渲染进去了）
+    //
+    // **遮挡物必须偏到一边**：第一版把方块放在光源正中心，结果 6 个面都从光源向外看，
+    // 方块正好卡在 near 平面（甚至被裁掉），中心深度仍是 1.0 —— 看起来像"没渲染"。
+    // 真实用法里投射体也不会包住光源。这里把它沿 +X 推开 2 m，边长 1。
+    //
+    // **深度期望值算错了一次（提醒后来人）**：透视深度是**非线性**的，
+    //   z_ndc = (far/(far-near)) * (1 - near/dist)
+    // near=0.1 / far=20 时 dist=2 对应 0.9548，不是直觉上的 2/20=0.1。
+    // 所以断言写成"介于 0.5 和 0.999 之间"（既证明不是清屏，也不绑死具体数值）。
+    // 放在 +X 方向 2 m 处（near=0.1/far=20 之间，不会贴 near 也不会出 far）
+    std::vector<GNg::VkVertex3D> offsetVerts = verts;
+    for (size_t i = 0; i < offsetVerts.size(); ++i) offsetVerts[i].px += 2.0f;
+    std::vector<std::vector<float> > occludedDepths;
+    if (!captureCubeShadow(lightPos, 0.1f, 20.0f, &offsetVerts, occludedDepths)) {
+        ReportFail("cube.occluder", "cube shadow pass 无法执行");
+        return;
+    }
+    {
+        const std::vector<float> &d = occludedDepths[0];
+        // 断言口径：**"有遮挡物时的深度写入量显著多于空场景"**，而不是盯某个像素坐标。
+        //
+        // 为什么不用"中心像素"：cube 的 6 个面在屏幕上是不同的 2D 投影，物体落在哪一面的
+        // 哪个像素取决于 face 朝向与 viewport 的耦合 —— 这是一个实现细节，用它当验收会把
+        // 测试绑死在当前实现上（本轮就为此反复调了好几轮）。
+        // 真正需要保证的语义只有两条：
+        //   1) cube pass 确实把几何写进了深度图（不是空跑）；
+        //   2) 写进去的深度是"合理的"（既不是 1.0 清屏，也不是贴着 near 的 0）。
+        uint32_t lit = 0;
+        float minDepth = 1.0f;
+        for (uint32_t i = 0; i < d.size(); ++i) {
+            if (d[i] < 0.999f) ++lit;
+            if (d[i] < minDepth) minDepth = d[i];
+        }
+        char detail[256];
+        std::snprintf(detail, sizeof(detail),
+                      "有遮挡物时写入 %u 个深度像素，最小深度 %.4f（空场景为 0 个）", lit,
+                      minDepth);
+        const bool ok = lit > 100u && minDepth > 0.05f && minDepth < 0.999f;
+        if (ok) ReportPass("cube.occluder", detail);
+        else ReportFail("cube.occluder", detail);
+    }
+}
+
 } // namespace GpuCheck

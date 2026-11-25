@@ -62,7 +62,7 @@ int cLIGHT::AddDirectional(const sVEC3 &dir, const sVEC3 &color, float intensity
 }
 
 int cLIGHT::AddPoint(const sVEC3 &pos, float range,
-                     const sVEC3 &color, float intensity) {
+                     const sVEC3 &color, float intensity, bool enableShadow) {
     if(aCount >= GN_MAX_LIGHTS) return -1;
     int idx = aCount++;
 
@@ -75,8 +75,10 @@ int cLIGHT::AddPoint(const sVEC3 &pos, float range,
     L.position[1] = pos.y;
     L.position[2] = pos.z;
     L.position[3] = (float)eLIGHT_POINT;
-    L.direction[0] = L.direction[1] = L.direction[2] = L.direction[3] = 0.0f;
-    // direction.w = 0.0: no shadow (cube shadow map reserved for future)
+    // direction.w = shadowType：0=无影，2=cube shadow（B2）。
+    // 点光没有方向，所以 xyz 留 0，只用 w 当"有没有 cube 阴影"的开关。
+    L.direction[0] = L.direction[1] = L.direction[2] = 0.0f;
+    L.direction[3] = enableShadow ? 2.0f : 0.0f;
     // 默认衰减系数 (基于 range)
     L.attenuation[0] = 1.0f;
     L.attenuation[1] = 2.0f / (range > 0.001f ? range : 10.0f);
@@ -109,7 +111,9 @@ int cLIGHT::AddSpot(const sVEC3 &pos, const sVEC3 &dir,
     L.direction[0] = d.x;
     L.direction[1] = d.y;
     L.direction[2] = d.z;
-    L.direction[3] = enableShadow ? 1.0f : 0.0f; // shadowType: 1=2D shadow, 0=none
+    // shadowType: 2 = cube shadow（B2）。聚光与点光共用同一张 cube map。
+    // **不要用 1**：1 是"方向光的 2D 级联"，聚光走那条会去采样 CSM 的级联矩阵，画面全黑。
+    L.direction[3] = enableShadow ? 2.0f : 0.0f;
     L.attenuation[0] = 1.0f;
     L.attenuation[1] = 2.0f / (range > 0.001f ? range : 10.0f);
     L.attenuation[2] = 1.0f / ((range > 0.001f ? range : 10.0f) * (range > 0.001f ? range : 10.0f));

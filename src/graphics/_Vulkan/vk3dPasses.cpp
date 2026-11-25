@@ -79,6 +79,143 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
     s_inRenderPass = true; // 阴影渲染通道活跃
 }
 
+
+// ═══════════════════════════════════════════════════════════
+//  B2：点光/聚光 cube shadow（6 面）
+// ═══════════════════════════════════════════════════════════
+//
+// 6 个面的朝向按 Vulkan cube 约定（与 OpenGL/D3D 一致的右手系）：
+//   +X, -X, +Y, -Y, +Z, -Z
+// 每面用 90° 视场 + look-at 构造 view，正交/透视都用透视（点光源是透视的）。
+//
+// 注意：Vulkan 的 cube 采样方向与"渲染时的 face 索引"必须一致，
+// 否则阴影会出现在错误的一侧。这里刻意用与规范一致的 up 向量：
+//   ±Y 面不能用 (0,1,0) 当 up（与视线平行，叉积退化），换 (0,0,±1)。
+namespace {
+bool s_inCubeShadowPass = false;
+sVEC3 s_cubeShadowLightPos = {0.0f, 0.0f, 0.0f};
+
+const sVEC3 kCubeFaceDir[6] = {{1.0f, 0.0f, 0.0f},  {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+                               {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},  {0.0f, 0.0f, -1.0f}};
+const sVEC3 kCubeFaceUp[6] = {{0.0f, -1.0f, 0.0f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},
+                              {0.0f, 0.0f, -1.0f}, {0.0f, -1.0f, 0.0f}, {0.0f, -1.0f, 0.0f}};
+} // namespace
+
+uint32_t GN_VkCubeShadowSize() { return GN_Vk.cubeShadowSize; }
+
+bool GN_VkCubeShadowBegin(const sVEC3 &lightPos, float nearZ, float farZ) {
+    if(!GN_Vk.initialized) return false;
+    if(GN_Vk.cubeShadowImage == VK_NULL_HANDLE || GN_Vk.cubeShadowRenderPass == VK_NULL_HANDLE) {
+        return false;
+    }
+    if(s_in3DPass || s_inShadowPass || s_inCubeShadowPass) return false;
+    if(!(farZ > nearZ + 1.0e-4f)) return false;
+    s_cubeShadowLightPos = lightPos;
+
+    // 与 CSM 的 ShadowPassBegin 同理：先把挂起的 2D 批次刷掉、结束当前 render pass，
+    // 否则在 render pass 内再 BeginRenderPass 是非法的。
+    if(gVCnt > 0) {
+        void *d;
+        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, gVCnt * sizeof(VkVertex), 0, &d);
+        memcpy(d, gVBuf, gVCnt * sizeof(VkVertex));
+        vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory);
+        uint32_t prevEnd = 0;
+        for(uint32_t i = 0; i < s_batchCount; i++) {
+            uint32_t count = s_batchEnd[i] - prevEnd;
+            if(count > 0) {
+                vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame],
+                                        VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0,
+                                        1, &s_batchDS[i], 0, 0);
+                VkDeviceSize offs[] = {prevEnd * sizeof(VkVertex)};
+                vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1,
+                                       &GN_Vk.vertexBuffer, offs);
+                vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], count, 1, 0, 0);
+            }
+            prevEnd = s_batchEnd[i];
+        }
+        gVCnt = 0;
+        s_batchCount = 0;
+        s_lastDS = VK_NULL_HANDLE;
+    }
+    if(s_inRenderPass) {
+        vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
+        s_inRenderPass = false;
+    }
+    s_inCubeShadowPass = true;
+    return true;
+}
+
+void GN_VkCubeShadowFaceBegin(const sVEC3 &lightPos, uint32_t face, float nearZ, float farZ) {
+    if(!s_inCubeShadowPass || face >= 6) return;
+    if(GN_Vk.cubeShadowFramebuffer[face] == VK_NULL_HANDLE) {
+        fprintf(stderr, "[cube] face %u framebuffer NULL\n", face);
+        return;
+    }
+    if(GN_Vk.cubeShadowPipeline == VK_NULL_HANDLE) {
+        static bool warned = false;
+        if(!warned) { warned = true; fprintf(stderr, "[cube] cubeShadowPipeline NULL\n"); }
+        return;
+    }
+
+    // 构造该面的 view-proj：90° 透视 + 朝面方向看
+    const sVEC3 target = {lightPos.x + kCubeFaceDir[face].x, lightPos.y + kCubeFaceDir[face].y,
+                          lightPos.z + kCubeFaceDir[face].z};
+    sMAT44 view;
+    Mat44LookAtRH(&view, &lightPos, &target, &kCubeFaceUp[face]);
+    sMAT44 proj;
+    Mat44PerspectiveVK(&proj, 1.5707963f, 1.0f, nearZ, farZ); // 90°, 正方形
+    sMAT44 viewProj;
+    Mat44Mul(&viewProj, &proj, &view);
+    // 阴影 pass 的 push constant 就是模型矩阵（与 CSM 一致），light VP 走 UBO 槽 0。
+    // cube 与 CSM 共用 shadowPipelineLayout / shadowPipeline（同一个 depth-only 管线），
+    // 所以这里同样写到槽 0 —— 但**不能**和 CSM 同帧交叉使用：CSM 在帧首一次录完 4 级，
+    // cube 在其后录 6 面，两者各自读自己那一次写入的值（命令缓冲顺序保证）。
+    // 每面写自己的槽（4..9）。写同一个槽会让 6 个面都用最后一次的矩阵。
+    writeCubeShadowLightVP(face, viewProj.m);
+
+    VkClearValue cv;
+    cv.depthStencil = {1.0f, 0};
+    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rpi.renderPass = GN_Vk.cubeShadowRenderPass;
+    rpi.framebuffer = GN_Vk.cubeShadowFramebuffer[face];
+    rpi.renderArea = {{0, 0}, {GN_Vk.cubeShadowSize, GN_Vk.cubeShadowSize}};
+    rpi.clearValueCount = 1;
+    rpi.pClearValues = &cv;
+    vkCmdBeginRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame], &rpi,
+                         VK_SUBPASS_CONTENTS_INLINE);
+    // **必须用 cube 专用管线**：CSM 那条的 viewport 写死 2048，用它渲染 1024 的
+    // framebuffer 会把内容缩到右下角（实测 bbox x[686,1023] y[683,767]）。
+    vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame],
+                      VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.cubeShadowPipeline);
+    // 动态 viewport/scissor：覆盖整张面
+    VkViewport vp = {0.0f, 0.0f, (float)GN_Vk.cubeShadowSize, (float)GN_Vk.cubeShadowSize, 0.0f,
+                     1.0f};
+    VkRect2D sc = {{0, 0}, {GN_Vk.cubeShadowSize, GN_Vk.cubeShadowSize}};
+    vkCmdSetViewport(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &vp);
+    vkCmdSetScissor(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &sc);
+    VkDescriptorSet set = cubeShadowFaceDescriptorSet(face);
+    if(set != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame],
+                                VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.shadowPipelineLayout, 0, 1,
+                                &set, 0, 0);
+    }
+    s_inShadowPass = true; // 让 GN_VkShadowDraw 认这个 pass
+    s_inRenderPass = true;
+}
+
+void GN_VkCubeShadowFaceEnd() {
+    if(!s_inCubeShadowPass || !s_inShadowPass) return;
+    vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
+    s_inShadowPass = false;
+    s_inRenderPass = false;
+}
+
+void GN_VkCubeShadowEnd() {
+    if(!s_inCubeShadowPass) return;
+    if(s_inShadowPass) GN_VkCubeShadowFaceEnd();
+    s_inCubeShadowPass = false;
+}
+
 void GN_VkShadowPassEnd() {
     if(!GN_Vk.initialized || !s_inShadowPass) return;
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);

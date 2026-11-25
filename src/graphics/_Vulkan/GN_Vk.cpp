@@ -1300,7 +1300,15 @@ void GN_VkInit3D() {
     auto svSpv = LoadSPIRVFile("assets/shaders/gn3d_shadow.vert.spv");
     if(svSpv.empty()) svSpv.assign(assets_shaders_gn3d_shadow_vert_spv,
                                    assets_shaders_gn3d_shadow_vert_spv + assets_shaders_gn3d_shadow_vert_spv_len);
-    init3DShadow(svSpv);
+    // B2：cube shadow 的资源（image/view/sampler/pass/framebuffer）必须先建，
+    // 因为 init3DShadow 里会用 cubeShadowRenderPass 建 cube 专用管线。
+    init3DCubeShadow(1024);
+    init3DShadow(svSpv); // 内部创建 shadowPipelineLayout + shadowPipeline + cubeShadowPipeline
+    // cube shadow 的 image/pass/framebuffer 要早于上面的管线创建，
+    // 但管线依赖 pass ⇒ 顺序是：先 init3DCubeShadow 的"资源"，再建管线。
+    // 为避免拆分函数，这里把 init3DCubeShadow 放在 init3DShadow 之前：
+    // 它只建 image/view/sampler/pass/framebuffer，不碰管线。
+
 
     // ── 创建 PBR 描述符集 (必须在 Shadow Map 创建之后) ──
     {
@@ -1319,7 +1327,11 @@ void GN_VkInit3D() {
         VkDescriptorImageInfo diiShadow = {GN_Vk.shadowSampler, GN_Vk.shadowView,
                                            VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
 
-        VkWriteDescriptorSet w[6] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+        // B2：binding 12 = cube shadow（点光/聚光）
+        VkDescriptorImageInfo diiCubeShadow = {GN_Vk.cubeShadowSampler, GN_Vk.cubeShadowView,
+                                               VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet w[7] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
@@ -1357,7 +1369,12 @@ void GN_VkInit3D() {
         w[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         w[5].descriptorCount = 1;
         w[5].pBufferInfo = &dbiFog;
-        vkUpdateDescriptorSets(GN_Vk.device, 6, w, 0, 0);
+        w[6].dstSet = GN_Vk.descriptorSetPBR;
+        w[6].dstBinding = 12;
+        w[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[6].descriptorCount = 1;
+        w[6].pImageInfo = &diiCubeShadow;
+        vkUpdateDescriptorSets(GN_Vk.device, 7, w, 0, 0);
         // Binding 5 (skybox cubemap) 将在天空盒初始化后更新
     }
 

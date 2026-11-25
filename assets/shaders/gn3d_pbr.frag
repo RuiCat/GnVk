@@ -27,6 +27,9 @@ layout(binding = 1, set = 0) uniform sampler2D texSampler;
 layout(binding = 3, set = 0) uniform sampler2D normalSampler;  // 法线贴图
 // L3c：阴影图改为 2D 数组（0..3 层 = CSM 级，契约 §4）；PCSS 仍手动比较原始深度。
 layout(binding = 4, set = 0) uniform sampler2DArray shadowSampler;
+// B2：点光/聚光的 cube shadow（单光源，6 面 D32）。与上面的 2D array 是两套资源：
+// 4 是方向光的 CSM 级联，12 是点光/聚光的位置无关立方图。
+layout(binding = 12, set = 0) uniform samplerCube cubeShadowSampler;
 layout(binding = 5, set = 0) uniform samplerCube skyboxCubemap;     // 天空盒 IBL
 
 // P11-S3：雾（独立 Weather UBO，绑定 6；density == 0 时无效果）
@@ -246,7 +249,17 @@ vec3 CalcPBRLight(Light L, vec3 N, vec3 V, vec3 albedo, float roughness, float m
             shadow = ShadowCalculation(fragPosLight, float(cascade), N, Ldir);
         }
     }
-    // shadowType >= 1.5: cube shadow map (预留, 需要额外采样器)
+    // B2：点光/聚光走 cube shadow。shadowType == 2 表示"这盏灯有 cube shadow"。
+    // softness 按光源尺寸给：点光用固定小值（真实点光源无面积），聚光按锥角略放大。
+    else if (shadowType > 1.5 && shadowType < 2.5) {
+        float softness = 0.03;
+        if (L.position.w > 1.5) {
+            // 聚光：锥角越大，半影越宽（与真实聚光灯的物理一致）
+            softness = 0.02 + 0.06 * clamp(1.0 - L.coneAngles.x, 0.0, 1.0);
+            // 锥体外直接无光（attenuation 已经在外面算过，这里只保证不采到别的面）
+        }
+        shadow = cubeShadowFactor(fragWorldPos, L.position.xyz, N, softness);
+    }
     
     vec3 H = normalize(V + Ldir);
     vec3 radiance = lightColor * attenuation * shadow;
