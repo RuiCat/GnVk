@@ -37,6 +37,7 @@ GN3d::cMODEL *gModel = nullptr;
 // 只作用于身体/衣服（Mesh_Body*），装饰仍归 1–4 键管。空 = 不启用。
 std::vector<unsigned char> gForceHidden;
 std::vector<std::string> gHiddenNames;
+int32_t gDefaultHair = -1; // JSON 里可选的 "hair": N，作为默认发型下标
 
 // 从 JSON 里取出 "hidden": [ "..." ] 名单（文件很简单，按引号切分足够）。
 bool loadOutfitDefault(const char *path) {
@@ -76,6 +77,14 @@ bool loadOutfitDefault(const char *path) {
         }
         gHiddenNames.push_back(text.substr(quote + 1, close - quote - 1));
         cursor = close + 1;
+    }
+    // 可选的默认发型下标："hair": N
+    const size_t hairKey = text.find("\"hair\"");
+    if (hairKey != std::string::npos) {
+        const size_t colon = text.find(':', hairKey);
+        if (colon != std::string::npos) {
+            gDefaultHair = static_cast<int32_t>(std::atoi(text.c_str() + colon + 1));
+        }
     }
     return !gHiddenNames.empty();
 }
@@ -205,9 +214,6 @@ void outfitInit(GN3d::cMODEL &model) {
         size_t hiddenBody = 0;
         for (uint32_t meshIndex = 0; meshIndex < gModel->aMeshCount; ++meshIndex) {
             const std::string name = gModel->aMeshes[meshIndex].aName;
-            if (name.compare(0, 9, "Mesh_Body") != 0) {
-                continue;
-            }
             // 网格名可能带 "#prim" 后缀；按去掉后缀的节点名精确比较（否则 Mesh_Body 会命中所有 Mesh_Body.*）。
             const size_t hash = name.find('#');
             const std::string base = (hash == std::string::npos) ? name : name.substr(0, hash);
@@ -219,7 +225,7 @@ void outfitInit(GN3d::cMODEL &model) {
                 }
             }
         }
-        std::printf("[imoScene] 默认服装组合: 隐藏身体网格 %zu 个（.local/imoScene/outfitDefault.json）\n",
+        std::printf("[imoScene] 默认服装组合: 隐藏网格 %zu 个（.local/imoScene/outfitDefault.json）\n",
                     hiddenBody);
     }
     // 默认显示集合可用环境变量固定（便于挑好之后固化）；-1 = 全部。
@@ -237,6 +243,10 @@ void outfitInit(GN3d::cMODEL &model) {
             kFamilies[1].aSelected = -1;
         }
     }
+    if (hairEnv == 0 && gDefaultHair >= 0 &&
+        gDefaultHair < static_cast<int32_t>(kFamilies[0].aMeshes.size())) {
+        kFamilies[0].aSelected = gDefaultHair;
+    }
     std::printf("[imoScene] 换装: 发型 %zu 套 / 身体 %zu 套（5/6 循环切换，0 恢复全部；"
                 "默认 hair=%d body=%d）\n",
                 kFamilies[0].aMeshes.size(), kFamilies[1].aMeshes.size(),
@@ -252,6 +262,13 @@ void outfitUpdate() {
     for (uint32_t groupIndex = 0; groupIndex < kGroupCount; ++groupIndex) {
         if (gInput.Pressed(kGroups[groupIndex].aAction)) {
             kGroups[groupIndex].aVisible = !kGroups[groupIndex].aVisible;
+            // 默认组合里被隐藏的装饰，一旦用户按 1–4 就交回手动控制（清掉默认隐藏标记）。
+            for (uint32_t meshIndex = 0; meshIndex < gModel->aMeshCount; ++meshIndex) {
+                if (meshIndex < gForceHidden.size() &&
+                    matchesGroup(kGroups[groupIndex], gModel->aMeshes[meshIndex].aName)) {
+                    gForceHidden[meshIndex] = 0;
+                }
+            }
             changed = true;
         }
     }
@@ -269,6 +286,9 @@ void outfitUpdate() {
         }
         for (uint32_t family = 0; family < kFamilyCount; ++family) {
             kFamilies[family].aSelected = -1;
+        }
+        for (size_t index = 0; index < gForceHidden.size(); ++index) {
+            gForceHidden[index] = 0;
         }
         changed = true;
     }
