@@ -4,7 +4,12 @@
 //   * 输入网格按 VkVertex3D 布局（每顶点 11 floats），只取前 3 个 float 作为位置；网格必须已是世界坐标。
 //   * 三角形用 BVH（`cBVH`）按包围盒宽相筛选，再逐个做窄相。
 //   * 球：球心到三角形最近点；胶囊：线段上到三角形最近点（距离函数沿线段凸，三分法求全局最小）。
-//   * 盒对三角网 v1 未实现（直接跳过）；三角网接触不参与 warm start（每次冷启动求解）。
+//   * 盒：**只处理"盒角穿透三角形正面"这一类接触**（落地/贴墙/上坡），
+//     这是盒对地形最常用的形态。不处理"三角形尖刺扎进盒内"（三角网顶点陷入盒体），
+//     那种情况一个三角形顶点在盒内、没有任何盒角在三角形下方，本实现会漏掉。
+//     也不处理边-边接触（盒棱搁在三角形棱上）—— 那种姿态交给相邻三角形各自的
+//     角接触来支撑，通常够用；确实需要精确时可以调小网格三角形尺寸。
+//   * 三角网接触不参与 warm start（每次冷启动求解）。
 //   * 接触的 A 端是一个不在 aBodies 里的静态代理刚体（invMass/invInertia 全 0），因此求解器无需改。
 #include <GN.h>
 #include "GN_Physics.h"
@@ -20,6 +25,10 @@ namespace {
 
 const float kMeshSlop = 1e-6f;
 const float kMeshEpsilon = 1e-12f;
+// "点的投影是否落在三角形 footprint 内"的容差（1e-3 米）。
+// 用绝对值的理由见 cloth 里的同名常量：布料/刚体的特征尺寸通常在毫米~米量级，
+// 1e-3 已经小到不会把"真在内部"误判成"在边上"。
+const float kFootprintToleranceSq = 1.0e-6f;
 const int kCapsuleSegmentIterations = 40;
 
 GNg::sVEC3 makeVec3(float x, float y, float z) {
@@ -146,6 +155,70 @@ bool capsuleTriangleContact(const GNg::sVEC3 &e0, const GNg::sVEC3 &e1, float ra
     return sphereTriangleContact(segmentPoint, radius, a, b, c, out);
 }
 
+// ── 盒对三角网 ────────────────────────────────────────────
+
+// 盒的 8 个世界坐标角点。位索引：bit0 = x 方向，bit1 = y，bit2 = z。
+void boxWorldCorners(const sRIGID_BODY &box, GNg::sVEC3 out[8]) {
+    GNg::sVEC3 axis[3];
+    const GNg::sVEC3 unit[3] = {makeVec3(1.0f, 0.0f, 0.0f), makeVec3(0.0f, 1.0f, 0.0f),
+                                makeVec3(0.0f, 0.0f, 1.0f)};
+    for(int i = 0; i < 3; ++i) {
+        GNg::QuatRotateVec3(&axis[i], &unit[i], &box.aRot);
+    }
+    const float half[3] = {box.aHalfExtent.x, box.aHalfExtent.y, box.aHalfExtent.z};
+    for(int corner = 0; corner < 8; ++corner) {
+        GNg::sVEC3 point = box.aPos;
+        for(int k = 0; k < 3; ++k) {
+            const float sign = ((corner >> k) & 1) ? 1.0f : -1.0f;
+            point = addVec(point, scaleVec(axis[k], sign * half[k]));
+        }
+        out[corner] = point;
+    }
+}
+
+// 点的"投影"是否落在三角形内部。
+// 判据：把点沿法线投影到三角形平面，若投影与"最近点"重合，说明最近点在面内；
+// 若最近点在边/顶点上，说明投影落在 footprint 之外。
+bool projectionInsideTriangle(const GNg::sVEC3 &point, const GNg::sVEC3 &a, const GNg::sVEC3 &b,
+                             const GNg::sVEC3 &c, const GNg::sVEC3 &normal) {
+    const GNg::sVEC3 closest = closestPointOnTriangle(point, a, b, c);
+    const float offset = dotVec(subVec(point, a), normal);
+    const GNg::sVEC3 projected = subVec(point, scaleVec(normal, offset));
+    return lengthSqVec(subVec(projected, closest)) <= kFootprintToleranceSq;
+}
+
+// 盒（有朝向）与三角形接触：法线取**三角形平面法线**，方向由"三角网指向盒"决定。
+// 只收集"盒角穿透三角形正面且投影落在三角形内"的接触，最多 4 个。
+//
+// 为什么法线只用三角形法线：一个流形只能有一个法线（求解器按单法线累加冲量）。
+// 盒贴墙、落地、上坡都是"三角网平面顶住盒"，用平面法线是对的。
+// 代价：盒棱搁在三角形棱上的边-边姿态、以及三角形尖刺扎进盒内的情形都不精确，
+// 详见文件头。
+bool boxTriangleContact(const sRIGID_BODY &box, const GNg::sVEC3 &a, const GNg::sVEC3 &b,
+                        const GNg::sVEC3 &c, sCONTACT_MANIFOLD &out) {
+    GNg::sVEC3 normal;
+    if(!triangleNormal(a, b, c, normal)) return false; // 退化三角形
+    GNg::sVEC3 corners[8];
+    boxWorldCorners(box, corners);
+    // 盒心在平面哪一侧：法线永远"从三角网指向盒"，这样求解器不必关心谁在上面。
+    const float centerDistance = dotVec(subVec(box.aPos, a), normal);
+    const float side = (centerDistance >= 0.0f) ? 1.0f : -1.0f;
+    out.aNormal = scaleVec(normal, side);
+    out.aCount = 0;
+    for(int corner = 0; corner < 8 && out.aCount < 4; ++corner) {
+        const float offset = dotVec(subVec(corners[corner], a), normal);
+        const float alongOutward = offset * side; // <0 表示这个角已经穿到三角网的另一侧
+        if(alongOutward >= kMeshSlop) continue;
+        if(!projectionInsideTriangle(corners[corner], a, b, c, normal)) continue;
+        const float penetration = -alongOutward;
+        if(penetration < 0.0f) continue;
+        out.aPoints[out.aCount].aPoint = subVec(corners[corner], scaleVec(normal, offset));
+        out.aPoints[out.aCount].aPenetration = penetration;
+        ++out.aCount;
+    }
+    return out.aCount > 0;
+}
+
 // 静态代理刚体：不在 aBodies 中，只作为三角网接触的 A 端（无限质量）。
 void initMeshProxy(sRIGID_BODY &body) {
     body = sRIGID_BODY();
@@ -220,7 +293,10 @@ void cPHYSICS_WORLD::buildMeshContacts() {
         if(!aUsed[i]) continue;
         sRIGID_BODY &body = aBodies[i];
         if(body.aType != eBODY_DYNAMIC || body.aSleeping) continue;
-        if(body.aShape != eSHAPE_SPHERE && body.aShape != eSHAPE_CAPSULE) continue; // v1
+        if(body.aShape != eSHAPE_SPHERE && body.aShape != eSHAPE_CAPSULE &&
+           body.aShape != eSHAPE_BOX) {
+            continue; // 未实现的形状（当前枚举里只有这三种）
+        }
         candidates.clear();
         aMeshBvh.QueryAABB(body.aWorldAABB, candidates);
         for(size_t candidate = 0; candidate < candidates.size(); ++candidate) {
@@ -233,6 +309,8 @@ void cPHYSICS_WORLD::buildMeshContacts() {
             bool hit = false;
             if(body.aShape == eSHAPE_SPHERE) {
                 hit = sphereTriangleContact(body.aPos, body.aRadius, a, b, c, manifold);
+            } else if(body.aShape == eSHAPE_BOX) {
+                hit = boxTriangleContact(body, a, b, c, manifold);
             } else {
                 GNg::sVEC3 up = makeVec3(0.0f, 1.0f, 0.0f);
                 GNg::sVEC3 axis;
@@ -267,6 +345,19 @@ bool queryCapsuleTriangle(const GNg::sVEC3 &e0, const GNg::sVEC3 &e1, float radi
                           const GNg::sVEC3 &a, const GNg::sVEC3 &b, const GNg::sVEC3 &c,
                           sCONTACT_MANIFOLD &out) {
     return capsuleTriangleContact(e0, e1, radius, a, b, c, out);
+}
+
+bool queryBoxTriangle(const sRIGID_BODY &box, const GNg::sVEC3 &a, const GNg::sVEC3 &b,
+                      const GNg::sVEC3 &c, sCONTACT_MANIFOLD &out) {
+    return boxTriangleContact(box, a, b, c, out);
+}
+
+bool queryPointTriangle(const GNg::sVEC3 &point, const GNg::sVEC3 &a, const GNg::sVEC3 &b,
+                        const GNg::sVEC3 &c, GNg::sVEC3 *outClosest, GNg::sVEC3 *outNormal) {
+    if(outClosest == 0 || outNormal == 0) return false;
+    if(!triangleNormal(a, b, c, *outNormal)) return false; // 退化三角形：没有法线
+    *outClosest = closestPointOnTriangle(point, a, b, c);
+    return true;
 }
 
 } // namespace GN3d

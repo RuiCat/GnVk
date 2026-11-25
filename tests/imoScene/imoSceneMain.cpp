@@ -10,6 +10,8 @@
 #include "imoSceneBlobShadow.h"
 #include "imoSceneCamera.h"
 #include "imoSceneOutfit.h"
+
+#include "GN_Locomotion.h"
 #include "imoScenePlayer.h"
 #include "imoSceneRoom.h"
 #include "imoSceneShadow.h"
@@ -118,13 +120,10 @@ void updateAnimation(float delta) {
     if (gSkinClips.empty()) {
         return;
     }
+    // 选段与播放速率的阈值/折算统一在 GN_Locomotion.h，不再和各处硬编码的数字打架。
     const float speed = imoScene::playerSpeed();
-    int wanted = 0;
-    if (speed > 4.2f) {
-        wanted = 2;
-    } else if (speed > 0.4f) {
-        wanted = 1;
-    }
+    const GN3d::sLOCOMOTION_DESC kLocomotion;
+    int wanted = static_cast<int>(GN3d::selectLocomotionClip(speed, kLocomotion));
     if (wanted >= static_cast<int>(gSkinClips.size())) {
         wanted = static_cast<int>(gSkinClips.size()) - 1;
     }
@@ -132,19 +131,9 @@ void updateAnimation(float delta) {
         gSkinClipIndex = wanted;
         gSkinClipTime = 0.0f;
     }
-    // 播放速率跟着实际速度走，避免"脚步打滑"：walk 对应 3.0 m/s、run 对应 5.5 m/s。
-    float playbackRate = 1.0f;
-    if (wanted == 1) {
-        playbackRate = speed / 3.0f;
-    } else if (wanted == 2) {
-        playbackRate = speed / 5.5f;
-    }
-    if (playbackRate < 0.55f) {
-        playbackRate = 0.55f;
-    }
-    if (playbackRate > 1.8f) {
-        playbackRate = 1.8f;
-    }
+    // 播放速率跟着实际速度走，避免"脚步打滑"（参考速度与钳制都在 GN_Locomotion.h）。
+    float playbackRate =
+        GN3d::locomotionPlayRate(speed, static_cast<GN3d::eLOCOMOTION_CLIP>(wanted), kLocomotion);
     gSkinClipTime += delta * playbackRate;
     std::vector<GNg::sMAT44> palette;
     if (!imoScene::buildSkinPalette(gSkinRig, gSkinClips[static_cast<size_t>(gSkinClipIndex)],

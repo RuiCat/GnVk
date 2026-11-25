@@ -4,6 +4,8 @@
 // 角色走 "wishDir + sprint + jump" 的意图接口，不直接读键位（键位只在 imoSceneActions）。
 #include "imoScenePlayer.h"
 
+#include "GN_Locomotion.h"
+
 #include "GN_Character.h"
 #include "GN_GameClock.h"
 #include "imoSceneActions.h"
@@ -37,25 +39,18 @@ const uint32_t kMaxSubSteps = 4;
 GN3d::cCHARACTER gCharacter;
 GN::cGAME_CLOCK gClock;
 float gCharacterHeight = 1.7f;
-// 朝向：模型 yaw（0 = 面朝 -Z，与 W 的移动方向一致），按移动意图平滑转向。
-float gFacingYaw = 0.0f;
-// 转向速度（rad/s）：太快像贴图转向，太慢后退时会有明显"滑步"。
-const float kTurnRate = 14.0f;
+// 朝向：模型 yaw（0 = 面朝 +Z），按移动意图平滑转向。
+// 逻辑在 GN3d::updateFacing（GN_Locomotion.h）：速度优先、输入意图兜底，
+// 指数衰减所以帧率无关且永不越过目标。
+GN3d::sFACING_STATE gFacing;
+// 选段/转向的全部参数（阈值 0.4 / 4.2、参考速度 3.0 / 5.5、转向 14 rad/s）。
+// 与 imoSceneMain 的动画选段共用同一份，避免两处阈值不一致。
+const GN3d::sLOCOMOTION_DESC kLocomotion;
 GNg::sVEC3 gSmoothedFoot;
 bool gSmoothedValid = false;
 bool gReady = false;
 
-// 角差折到 (-pi, pi]，避免绕远路转圈。
-float wrapRadians(float angle) {
-    const float twoPi = 6.28318530718f;
-    while (angle > 3.14159265359f) {
-        angle -= twoPi;
-    }
-    while (angle < -3.14159265359f) {
-        angle += twoPi;
-    }
-    return angle;
-}
+// 角度折算改用 GN3d::wrapRadians（GN_Locomotion.h），不再本地实现一份。
 
 GNg::sVEC3 makeVec(float x, float y, float z) {
     GNg::sVEC3 v;
@@ -140,21 +135,9 @@ void playerUpdate(float deltaSeconds) {
         gCharacter.Move(wish, sprint, jumpRequested && step == 0, gClock.FixedStepSize());
     }
 
-    // 朝向：按实际速度方向转；刚起步（速度为 0）时用输入意图，保证一按键就转身。
+    // 朝向：速度优先、输入意图兜底（否则被墙挡住时会朝着墙转身）。
     const GNg::sVEC3 velocity = gCharacter.Velocity();
-    const float planarSpeed = std::sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
-    float targetYaw = gFacingYaw;
-    // 模型正前方 = +Z（由绑定姿势的脚趾朝向确认），yaw 绕 Y 旋转：forward = (sin yaw, 0, cos yaw)。
-    if (planarSpeed > 0.25f) {
-        targetYaw = std::atan2(velocity.x, velocity.z);
-    } else if (length > 0.01f) {
-        targetYaw = std::atan2(wish.x, wish.z);
-    }
-    const float yawDelta = wrapRadians(targetYaw - gFacingYaw);
-    if (yawDelta != 0.0f) {
-        const float blend = 1.0f - std::exp(-kTurnRate * deltaSeconds);
-        gFacingYaw = wrapRadians(gFacingYaw + yawDelta * blend);
-    }
+    GN3d::updateFacing(gFacing, velocity, wish, deltaSeconds, kLocomotion);
 
     // 渲染位置做指数平滑：cCHARACTER 每步"重力下沉 → 地面吸附"会让 y 抖 ~8 mm
     // （实测 centerY 在 0.8137–0.8218 之间逐帧交替）。模型和相机都用平滑后的脚底，
@@ -163,7 +146,7 @@ void playerUpdate(float deltaSeconds) {
         static unsigned int debugFrames = 0;
         if ((debugFrames++ % 20u) == 0u) {
             std::fprintf(stderr, "[testMove] wish=%s speed=%.2f yaw=%.2f rad\n", testMove,
-                         std::sqrt(velocity.x * velocity.x + velocity.z * velocity.z), gFacingYaw);
+                         std::sqrt(velocity.x * velocity.x + velocity.z * velocity.z), gFacing.aYaw);
         }
     }
     const GNg::sVEC3 rawFoot = gCharacter.FootPosition();
@@ -201,7 +184,7 @@ GNg::sVEC3 playerFootPosition() {
     return gSmoothedValid ? gSmoothedFoot : gCharacter.FootPosition();
 }
 
-float playerFacingYaw() { return gFacingYaw; }
+float playerFacingYaw() { return gFacing.aYaw; }
 
 float playerSpeed() {
     if (!gReady) {

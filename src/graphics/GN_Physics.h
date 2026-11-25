@@ -217,6 +217,20 @@ bool queryCapsuleTriangle(const GNg::sVEC3 &e0, const GNg::sVEC3 &e1, float radi
                           const GNg::sVEC3 &a, const GNg::sVEC3 &b, const GNg::sVEC3 &c,
                           sCONTACT_MANIFOLD &out);
 
+// **点**对三角形：返回最近点与三角形几何法线（世界坐标，由绕序决定，CCW 为正面）。
+// 与上面两个函数的区别：那两个是"形状 vs 三角形"的接触查询，会按半径做提前返回；
+// 这个只回答几何问题——"最近点在哪、法线朝哪"，**不做任何半径/容差判断**。
+// 用途：布料碰撞需要的是"点在三角形哪一侧、穿了多深"，用半径 0 去套接触查询
+// 会因为它内部的容差提前返回而永远测不到穿透。
+//
+// 返回 false 表示三角形退化（三点共线/重合），此时没有法线可言。
+// 盒对三角形：法线取三角形平面法线（三角网 → 盒），最多 4 个接触点。
+// 只报告"盒角穿透三角形正面"的接触；三角形顶点扎进盒内的情形不报告（见 .cpp 文件头）。
+bool queryBoxTriangle(const sRIGID_BODY &box, const GNg::sVEC3 &a, const GNg::sVEC3 &b,
+                      const GNg::sVEC3 &c, sCONTACT_MANIFOLD &out);
+bool queryPointTriangle(const GNg::sVEC3 &point, const GNg::sVEC3 &a, const GNg::sVEC3 &b,
+                        const GNg::sVEC3 &c, GNg::sVEC3 *outClosest, GNg::sVEC3 *outNormal);
+
 // ═══════════════════════════════════════════════════════════
 //  cPHYSICS_WORLD — 物理世界
 // ═══════════════════════════════════════════════════════════
@@ -280,7 +294,8 @@ class cPHYSICS_WORLD {
     uint32_t GetJointCount() const { return aJointCount; }
 
     // 静态三角网：追加网格三角形到世界碰撞（世界坐标）；空网格/越界索引/退化三角形被忽略。
-    // v1 只实现球/胶囊对三角网的接触（盒未实现，直接跳过）；三角网接触不参与 warm start。
+    // 球 / 胶囊 / 盒对三角网都生效；三角网接触不参与 warm start（每次冷启动求解）。
+        // 盒对三角网同样生效（只处理"盒角穿透三角形正面"这一类接触，边界见 GN_PhysicsMesh.cpp 文件头）。
     void AddStaticMesh(const sMESH &mesh);
     uint32_t GetStaticTriangleCount() const { return (uint32_t)aMeshTriangleBounds.size(); }
 

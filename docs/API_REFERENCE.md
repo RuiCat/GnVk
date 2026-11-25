@@ -529,6 +529,7 @@ class cBGM_MUSIC {
 | LOD | `GN_3Dlod.h` | `sLOD_POLICY`：像素误差 + 屏幕占比，只会更精细 |
 | 遮挡 / overdraw | `GN_HiZ.h` | 深度金字塔 + 遮挡测试 + overdraw 倍数测量 |
 | 网格工具 | `GN_MeshTools.h` | 导入期网格修整：法线焊接（按位置+夹角阈值+面积加权）、顶点质心、最近点、逆绑定取关节位置、alpha 覆盖率判定、名称过滤 |
+| 移动表现 | `GN_Locomotion.h` | 选段（idle/walk/run 阈值）+ 播放速率折算 + 平滑转向（帧率无关、不越目标） |
 | 显隐规则 | `GN_Visibility.h` | `cVISIBILITY_SET`：换装/部件开关/变体切换的规则集。三类名字匹配（EXACT_BASE/PREFIX/SUBSTRING，统一大小写不敏感）、三来源 AND 合成、mask 与变体的对称清空；可多实例并存 |
 
 **效果（多数是 CPU 基座，GPU 后端另在 `_Vulkan/`）**
