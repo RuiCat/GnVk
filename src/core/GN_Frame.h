@@ -1,6 +1,16 @@
 #pragma once
 #ifndef _GN_FRAME_H_
 #define _GN_FRAME_H_
+// GN_Frame.h — 2D 图筐动画：纹理格序列 + 关键帧事件 + 可选子筐。
+//
+// 两个类是一对：cFRAME_RC 不能旋转、处理快（多数情况够用）；cFRAME 继承它并支持旋转。
+// 一个图筐能同时驱动四类东西：纹理换格（支持多格/平铺纹理）、位置/缩放/颜色的插值事件、
+// 音效触发、以及挂在它下面的子筐（**父子类型必须一致**，见 InitSubFrame 的注释）。
+//
+// 易错点：事件时间是**绝对时间轴**，中途改事件时间会让动画错乱 —— 要改请重新 Init；
+// CopyData 复制数据不共享指针，zCopyFields 逐字段复制；**新增成员必须同步加进 zCopyFields**，
+// tests/unit/testFrameCopy.cpp 会逐字段校验。
+
 namespace GNg {
 
 enum eEVENT_TYPE { //动画事件常量

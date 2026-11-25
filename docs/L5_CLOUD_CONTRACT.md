@@ -1,6 +1,8 @@
 # L5 体积云（多层 raymarch）实现契约（2026-10-31 冻结）
 
-> ⚠️ **已被取代（2026-11-01）**：用户拍板把云改成「世界固定的一组独立立方体云块 + 每块云一个降水发射器」，
+> **状态**：📦 历史 — **已被取代**（2026-11-01）：体积云整层实现已删除，改为独立云块（`sCLOUD_CUBE_*`）。
+
+> **删除范围（2026-11-01）**：用户拍板把云改成「世界固定的一组独立立方体云块 + 每块云一个降水发射器」，
 > 体积云整层实现（`vkVolumetricCloud.cpp`、`gn3d_cloud_vol.*`、`cloudNoise.*`、208 B `sCLOUD_UBO`）
 > 及对应 gpuCheck/单测已**删除**。现行契约 = `GN_Vk.h` 的 `sCLOUD_CUBE_PARAMS` / `sCLOUD_CUBE_INSTANCE`
 > 与 `assets/shaders/gn3d_cloud_cube.vert|frag`。以下正文仅作历史记录。

@@ -2,6 +2,12 @@
 #ifndef _GN_FONT_H_
 #define _GN_FONT_H_
 
+// GN_Font.h — 2D 文字输出：绘制排列器 + 艺术字输出器（位图字库路径）。
+//
+// 字模来自 sIMAGE（预生成位图字库），这里负责排版（对齐/换行/描边/多行矩形）与输出；
+// **FreeType 实时字形在 GN_FontFT.h**，两条路径最终都落到 sTEXT_SET 这一层描述。
+// 平台差异：WINCE 下文字颜色只能由字库自带颜色决定，不能动态着色（见 cTEXT_ART 注释）。
+
 namespace GNg {
 struct sTEXT_SET : public sDRAW_AREA //文本输出描述
 {

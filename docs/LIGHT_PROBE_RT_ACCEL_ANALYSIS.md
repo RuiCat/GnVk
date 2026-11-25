@@ -1,5 +1,7 @@
 # 光照探针能否加速 Cornell Box 光追预览 — 可行性分析
 
+> **状态**：📊 快照 — 光追探针加速结构的分析；结论是「当前场景不值得」而非已实现。
+
 > 日期：2026-11-20
 > 基线：`HEAD = ffdf0bb` + 工作区未提交修改（着色器审计修复）
 > 场景：`tests/cornellBox` 的 T/Y/U 光追预览（CPU / GPU compute / HW ray query）

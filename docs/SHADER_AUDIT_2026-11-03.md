@@ -1,5 +1,7 @@
 # GnVk 着色器缺陷审计与优化方案
 
+> **状态**：📊 快照 — 2026-11-03 的着色器审计；Phase 0/1 与低风险 P2 已落地，Phase 3 ray-query 未做。
+
 > 日期：2026-11-03  
 > 基线：`HEAD = ffdf0bb`  
 > 范围：`assets/shaders/` 全部 45 个 GLSL 源文件（`.vert/.frag/.comp`，共 3689 行）+ 对应 C++ 管线/描述符/UBO 契约  

@@ -1,5 +1,7 @@
 # 引擎 GI 的硬件光追（Ray Query）落地规划
 
+> **状态**：🚧 规划 — 把屏幕空间 GI 升级为 ray query；目前只在 `tests/cornellBox` 侧验证，引擎内未接。
+
 > 状态：规划（2026-11-03）。前置条件已具备：引擎实例升 Vulkan 1.1，设备在支持时已启用
 > `VK_KHR_acceleration_structure` + `VK_KHR_ray_query`（`GN_VkRayQuerySupported()` 实测 on），
 > `tests/cornellBox` 已验证 ray query 管线与对拍（MAE 0.015）。

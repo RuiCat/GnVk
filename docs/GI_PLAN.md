@@ -1,5 +1,7 @@
 # 全局光照（GI）实现分析
 
+> **状态**：📋 已完成 — G0–G5（G-Buffer 补齐 / IBL / SSAO / SSGI / 探针）；正文含当时的现状审计。
+
 > 性质：**源码实现分析 + 落地方案**，本文不改任何源码。
 > 基线：当前工作区（`src/graphics/_Vulkan` + `assets/shaders`），C++11、Vulkan、`make` 单一构建入口；
 > 天空/天气按 [SKY_WEATHER_PLAN.md](SKY_WEATHER_PLAN.md) 的 S1/S2a 已落地。

@@ -2,6 +2,12 @@
 #ifndef _GN_RUNINFO_H_
 #define _GN_RUNINFO_H_
 
+// GN_RunRec.h — 运行信息记录器：退出诊断、内存使用、绘制区域记录。
+//
+// 面向"程序跑完了但看起来不对"的排查：GN_ExitInfoPrint 列出退出时仍未释放/未处理的对象，
+// GN_ShowMemoryUsingState 给出内存池占用，GT_cRUN_REC 记录这一帧画过的矩形（查漏画/重画）。
+// 只在调试与诊断路径使用，正常渲染流程不依赖它。
+
 GN_API void GN_ExitInfoPrint(); //打印一些退出时还未作处理的信息
 GN_API void GN_ShowMemoryUsingState(); //显示内存使用状态
 

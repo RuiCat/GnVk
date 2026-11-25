@@ -1,5 +1,7 @@
 # 统一坐标系规划（按主流引擎 / glTF 惯例修订）
 
+> **状态**：📋 已完成 — 坐标统一迁移 U0–U5；残余项仅「真机视觉复验」。现行约定见 `AXIS_CONVENTIONS.md`。
+
 > 状态：**仅规划，未改任何源码**（2026-10-29，v2 修订）。
 > 依据：[docs/AXIS_CONVENTIONS.md](</home/ruicat/下载/GnVk/GnVk/docs/AXIS_CONVENTIONS.md>) 的现状盘点与 §8 漂移清单。
 > 基线：`a73b572`；工作区有未提交改动（PBR 视口已在工作区改为正高度）。

@@ -616,7 +616,7 @@ smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene 
 # 与 check 的区别：check 只跑纯逻辑单测（不需要 GPU）；ci 额外验真实渲染。
 .PHONY: ci
 ci: check smoke doc-check spv-check
-	@echo "$(GREEN)✅ ci 通过: 构建 + 单测 + 物理场景 + 无窗口渲染 + 示例冒烟 + 文档数字 + 内嵌 SPIR-V 一致$(RESET)"
+	@echo "$(GREEN)✅ ci 通过: 构建 + 单测 + 物理场景 + 无窗口渲染 + 示例冒烟 + 文档（数字 + 索引） + 内嵌 SPIR-V 一致$(RESET)"
 
 # ── 分层依赖检查（只报告；架构重组完成后改 --strict 进 make ci）──
 .PHONY: lint
@@ -642,6 +642,10 @@ stats: $(TARGET) build/gpuCheck
 doc-check:
 	@echo "$(YELLOW)🔍 校验文档统计数字是否过时...$(RESET)"
 	@bash tests/tools/gen_stats.sh
+	@echo "$(YELLOW)🗂  校验文档索引与状态行...$(RESET)"
+	@python3 tests/tools/check_docs_index.py
+	@echo "$(YELLOW)💬 校验头文件注释覆盖...$(RESET)"
+	@bash tests/tools/check_comments.sh
 
 # ── 交叉平台编译检查（只编译不链接）──
 # 用 MinGW-w64 把 src/ 全量按 Windows 目标编一遍，确保 Vulkan 后端不只"在 Linux 上能编"。

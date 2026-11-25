@@ -1,6 +1,12 @@
 #ifndef _GN_INPUTACT_H_
 #define _GN_INPUTACT_H_
 
+// GN_InputAct.h — 输入"动作"基类：把「按住不动」「按住摇晃」这类手势封装成可轮询对象。
+//
+// 派生自 sOBJ，调用方逐帧喂鼠标状态、再问它是否成立；用于 UI 的拖动/连点判定。
+// 这不是事件系统本身：原始按键/鼠标状态见 GN_Input.h，键位到语义动作的映射见 GN_InputMap.h
+// （P0 起，引擎层只准走动作映射，tests/lint/input.sh 会拦直接读按键的代码）。
+
 namespace GN {
 namespace IA {
 struct GN_INIT_API sOBJ //输入动作基本对象

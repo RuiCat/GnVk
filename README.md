@@ -35,10 +35,23 @@
 | gpuCheck 实跑 | `pass=126 fail=0 skip=0` |
 | 单测实跑 | `815 cases, 0 failed, 0 assertions failed` |
 | src 源文件 | 182 个 .cpp |
-| src 总行数 | 104902 |
+| src 总行数 | 105013 |
 | 编译产物着色器 | 47 个 .spv |
 
 <!-- AUTO-STATS:END -->
+
+## 文档
+
+完整索引见 [`docs/README.md`](docs/README.md) —— 每份文档开头都标了状态（✅ 现行 / 📋 已完成 / 🚧 进行中 / 📦 历史 / 📊 快照），
+由 `make doc-check` 双向校验，不会出现「文档说未实现、代码已实现」。
+
+| 想做什么 | 读这个 |
+|---|---|
+| 编译、跑第一个应用 | [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) |
+| 查 API（含 3D 实体层导航） | [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) |
+| 写代码前看注释约定 | [`docs/COMMENT_STYLE.md`](docs/COMMENT_STYLE.md) |
+| 看还剩什么没做 | [`docs/REMAINING_GAPS.md`](docs/REMAINING_GAPS.md) |
+| 查某个改动为什么这么写 | [`docs/CHANGELOG.md`](docs/CHANGELOG.md) |
 
 ## 编译
 

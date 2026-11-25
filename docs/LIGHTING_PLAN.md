@@ -1,5 +1,7 @@
 # 光照与效果实现规划（论文算法落地）
 
+> **状态**：📋 已完成 — L0–L8 光照路线图；已落地部分见 `CHANGELOG.md`，未做项见 `REMAINING_GAPS.md`。
+
 > 性质：**规划文档**。本轮只落这份文档，不改任何源码；实现按阶段另起任务。
 > 基线：`git HEAD = 8c77d7d` + 工作区未提交改动（P12 GI G0–G5 代码级）。文档记录
 > `make unit` = 369 cases / 0 failed（[3D_FEATURE_PLAN.md](3D_FEATURE_PLAN.md) §0）。

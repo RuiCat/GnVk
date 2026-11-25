@@ -1,5 +1,7 @@
 # GN_mini API 参考手册
 
+> **状态**：✅ 现行 — 2D/UI/音频/网络的 API 手册（§1–§9）+ 3D 实体层导航（§10）；签名以头文件为准。
+
 > 按命名空间分类，标注实用性等级：★ = 常用  ★★ = 很常用  ★★★ = 核心必备
 
 ---
@@ -432,3 +434,178 @@ class cBGM_MUSIC {
 ---
 
 *此文档基于 GN_mini 头文件注释提取，完整 API 细节请参阅源码头文件*
+
+## 10. `GN3d::` — 3D 实体层导航
+
+> **这一章不是逐函数参考。** 3D 层有 50 多个头文件，接口每轮都在长；
+> 把签名抄进文档，下一次改动就会让它变成错的 —— 错的参考手册比没有更糟。
+> 所以这里只给四样东西：**分层、模块入口、最小骨架、实测踩过的坑**。
+> **签名一律以头文件为准**：每个头文件顶部都写了它「解决什么问题、边界在哪、为什么这么设计」。
+
+### 10.1 分层
+
+```
+游戏逻辑（输入 / 相机 / 玩法）
+   │
+   ├─ 场景层   cSCENE ───────── 这一帧画谁：剔除 → LOD → 排序
+   │      │
+   │      └─ 实体层  cENTITY ─── 四套控制器的接线盒
+   │             ├─ cMESH_CONTROLLER     网格 + 世界 AABB + 视锥剔除
+   │             ├─ cANIM_CONTROLLER     采样 → 混合 → 状态机 → IK → 调色板
+   │             ├─ cPHYSICS_CONTROLLER  固定步长 + 快照插值 + 接触事件
+   │             └─ cCHARACTER          胶囊移动（重力/坡/台阶/贴墙）
+   │
+   ├─ 数据与算法  cMODEL · sSKELETON · cANIM_PLAYER · cPHYSICS_WORLD · IK · 布娃娃 …
+   └─ 契约与数学  GN_3Dmath · GN_Space · GN_Spatial · GN_3Dcamera
+                 ↑ 以上全部纯 CPU，不含 Vulkan
+渲染后端 GN_Vk*（仅 src/graphics/_Vulkan/，唯一与 GPU 打交道的层）
+```
+
+**这条分界是仓库最重要的约束**：除 `_Vulkan/` 外，3D 层不 `#include <vulkan/vulkan.h>`。
+所以 `make unit` 能在没有 GPU 的机器上跑完全部逻辑测试（当前 815 例），
+`make gpuCheck` 只验证「描述符/管线/UBO 布局」这类真正的 GPU 契约。
+写新代码时如果发现自己在 CPU 层里摸 Vulkan 句柄，说明分层错了。
+
+### 10.2 模块入口
+
+**数学 / 空间 / 约定**
+
+| 模块 | 头文件 | 一句话 |
+|---|---|---|
+| 数学 | `GN_3Dmath.h` | 向量/矩阵/四元数；矩阵**列主序**（直接喂 Vulkan） |
+| 空间划分 | `GN_Spatial.h` | AABB / BVH / 动态 AABB 树 / `sFRUSTUM` / 射线 |
+| 坐标约定 | `GN_Space.h` | +Y 上 / -Z 相机前向 / +Z 资产正面 / CCW 为正面；转换收口点 |
+| 相机 | `GN_3Dcamera.h` | 镜头参数 + `SelfMove/SelfRot` 原语 + 自由/轨道/跟随 + 自动取景 |
+| 级联阴影 | `GN_ShadowCascade.h` | CSM 分割、视锥角点、光源空间正交拟合、texel snapping |
+
+**资产 / 网格 / 骨骼**
+
+| 模块 | 头文件 | 一句话 |
+|---|---|---|
+| 模型 | `GN_3Dmodel.h` | `cMODEL`：OBJ 加载 + GPU 上传 + 绘制 + **世界 AABB（带缓存）** |
+| glTF 导入 | `GN_3Dasset.h` | glTF 2.0 节点/网格/皮肤/动画；PMX 走 `src/mmd/` |
+| 纹理 | `GN_3Dtexture.h` | glTF 纹理图片解码（PNG/JPEG）+ 采样参数 |
+| 骨骼 | `GN_3Dskeleton.h` | 关节层级 + 绑定姿势 + 逆绑定矩阵 |
+| 场景装配 | `GN_3Dscene.h` | 由节点树算世界矩阵、局部姿势、蒙皮调色板 |
+| 蒙皮 | `GN_3DSkin.h` | 蒙皮顶点布局 + CPU 线性混合蒙皮（GPU 路径的对拍基准） |
+
+**动画**
+
+| 模块 | 头文件 | 一句话 |
+|---|---|---|
+| 采样与播放 | `GN_3Danim.h` | clip 采样（STEP / LINEAR）× 混合 × `cANIM_PLAYER` |
+| 混合树 / 遮罩 | `GN_AnimBlend.h` | 1D 混合空间 + 相位同步 + 关节遮罩层栈 |
+| 状态机 | `GN_AnimStateMachine.h` | 参数 → 状态转换 + 事件；并列时取先注册者（确定性） |
+| IK | `GN_IK.h` | 两骨解析解（余弦定理 + 极向量），不可达时钳制并拉向目标 |
+| Root Motion | `GN_RootMotion.h` | 从根关节位移提取移动/转角，交给 `cCHARACTER` |
+
+**物理 / 角色**
+
+| 模块 | 头文件 | 一句话 |
+|---|---|---|
+| 刚体 | `GN_Physics.h` | 球/盒/胶囊 + 静态三角网；顺序冲量 + 位置修正；**盒对三角网未实现** |
+| 角色 | `GN_Character.h` | 胶囊移动：重力 → 水平 → 解穿透 → 斜坡 → 台阶 → 贴墙下滑 |
+| 扫掠 | `GN_CapsuleSweep.h` | 胶囊对三角网 TOI（保守推进 + 二分），台阶抬升用它 |
+| 布娃娃 | `GN_Ragdoll.h` | 骨架 → 球链 + distance 关节；**无关节角限制**（膝盖能反向弯） |
+
+**实体 / 场景 / 编辑**
+
+| 模块 | 头文件 | 一句话 |
+|---|---|---|
+| 实体 | `GN_Entity.h` | `cENTITY`：四控制器接线、`PrepareRender/Draw`、相机跟随目标 |
+| 场景 | `GN_Scene.h` | `cSCENE`：剔除 → LOD → 排序 + 选择集 + 撤销钩子 |
+| 编辑器控件 | `GN_Gizmo.h` | 网格/坐标轴/移动旋转缩放/包围盒/线框/样条 + 射线拖拽 + 吸附 |
+| 编辑命令 | `GN_EditCommand.h` | 变换快照命令 + 撤销/重做栈 |
+
+**渲染数据与管线**（仍是 CPU 侧；真正的 Vulkan 调用在 `_Vulkan/`）
+
+| 模块 | 头文件 | 一句话 |
+|---|---|---|
+| 管线缓存 | `GN_Pipeline.h` | 图形/计算管线描述 + 内容哈希复用 |
+| 着色器 | `GN_Shader.h` / `GN_Spirv.h` | SPIR-V 加载与缓存 / 模块结构校验 |
+| 材质 | `GN_3Dmaterial.h` / `GN_Material.h` | CPU 光照属性 / GPU 材质实例（描述、校验、去重键） |
+| 光源 | `GN_3Dlight.h` | 方向/点/聚光 + UBO 布局 + **层号按注册顺序分配**（与相机无关） |
+| 多层渲染 | `GN_RenderPipeline.h` / `GN_RenderQueue.h` | 层枚举、程序、渲染项、掩码解析、层内排序、层队列 |
+| LOD | `GN_3Dlod.h` | `sLOD_POLICY`：像素误差 + 屏幕占比，只会更精细 |
+| 遮挡 / overdraw | `GN_HiZ.h` | 深度金字塔 + 遮挡测试 + overdraw 倍数测量 |
+
+**效果（多数是 CPU 基座，GPU 后端另在 `_Vulkan/`）**
+
+| 模块 | 头文件 | 一句话 |
+|---|---|---|
+| 粒子 | `GN_3Dparticle.h` / `GN_3DparticleGPU.h` | CPU 池与发射器 / SSBO 契约 + CPU 回退对拍 |
+| 布料 | `GN_3Dcloth.h` / `GN_3DclothGPU.h` | XPBD CPU 模拟 / GPU compute 与 CPU 逐位等价（容差 1e-3） |
+| 贴花 | `GN_3Ddecal.h` | 地面贴花池 |
+| 探针 | `GN_3Dprobe.h` + `Relocation` + `Update` | SH9 网格 / relocation 偏移 / DDGI 异步更新调度 |
+| 参数基座 | `giParams.h` · `postParams.h` · `atmosphereParams.h` · `weather.h` | UBO 默认值/校验/打包；纯函数，可单测 |
+| 环境预设 | `GN_Environment.h` | 室内均匀 SH9 vs 天空 IBL 的选择 |
+
+### 10.3 最小骨架
+
+```cpp
+#include <GN.h>
+#include "GN_3Dcamera.h"
+#include "GN_Entity.h"
+#include "GN_Scene.h"
+
+static GN3d::cSCENE  g_scene;
+static GN3d::cENTITY g_ent;
+static GN3d::cCAMERA g_cam;
+
+extern "C" GN_CALL void AppInit() {
+    g_ent.SetModel(myModel);            // 非拥有：myModel 必须活到实体析构
+    g_scene.Add(&g_ent);
+}
+
+extern "C" GN_CALL void AppRun(unsigned int nTime) {
+    // 固定步长 + 渲染插值：alpha 是「距离下一步还有多远」，不是帧时间。
+    g_scene.Update(1.0f / 60.0f, 0.0f);
+}
+
+extern "C" GN_CALL void AppDisplay3D(unsigned int nTime) {
+    GNg::sMAT44 view, proj, viewProj;
+    g_cam.BuildViewProj(aspectRatio, &view, &proj, &viewProj);
+
+    // ⚠ FromViewProj 是 static：写成 `f.FromViewProj(vp)` 会丢掉返回值，得到空视锥。
+    GN3d::sFRUSTUM frustum = GN3d::sFRUSTUM::FromViewProj(viewProj);
+
+    GN3d::sLOD_VIEW lodView;
+    lodView.aScreenHeight = (float)screenHeight;
+    lodView.aFovYRad      = g_cam.aFovY * GN3d::CAMERA_DEG_TO_RAD; // cCAMERA 里 aFovY 是**度**
+    lodView.aViewProj     = viewProj;
+    lodView.aCamPos       = g_cam.GetCoordV();
+
+    g_scene.PrepareRender(lodView, &frustum);   // 剔除 + 选级 + 排序
+    g_scene.Draw(g_cam.GetCoordV());
+}
+```
+
+输入一律走 P0 的动作映射（`GN::IA::`），不要在引擎层直接读 `GN_IsKeyDown`：
+`tests/lint/input.sh` 会拦。
+
+### 10.4 实测踩过的坑
+
+这些都不是理论风险，是本仓库调通过程中真实炸过的：
+
+| 现象 | 原因 | 正确做法 |
+|---|---|---|
+| LOD 选级离谱（全部选最粗/最细） | `cCAMERA::aFovY` 是**度**，`sLOD_VIEW::aFovYRad` 要**弧度** | 乘 `CAMERA_DEG_TO_RAD` |
+| 剔除一个都没剔 | `sFRUSTUM::FromViewProj` 是 **static**，调完没接返回值 | `sFRUSTUM f = sFRUSTUM::FromViewProj(vp);` |
+| 模型动了几帧，AABB 不跟着变 | 世界 AABB 有缓存，粘贴顶点后没失效 | 改顶点调 `InvalidateLocalBounds()` |
+| 布娃娃穿地 100 m | 球半径 < 单帧位移 | `aBoneRadius` 取略大于单帧位移（默认 0.09） |
+| 落地瞬间动能爆到 2000+ | 胶囊绕长轴惯量太小 / 忘了 `BodyUpdateInertia` | 用球体模式；`AddBody` 后手动算一次惯量 |
+| 影子随视角闪进闪出 | 把「选灯排名」当层号用 | 层号只走 `assignCubeShadowLayers`（按注册顺序） |
+| 薄台阶「上台阶抖一下」 | 离散点查询漏掉「中途扫过」 | 用 `sweepCapsuleAgainstTriangles` |
+| 角色推不动箱子 | 物理盒对胶囊无效（盒未实现接触） | 角色侧走 `cCHARACTER::SetPhysicsWorld` 的位置分离 |
+| `sMESH` 析构崩 `invalid pointer` | 它用 `delete[]` 释放，不是 `free` | 传堆数组，别传栈数组 |
+| demo 姿态「腿反了 / 左右摆」 | 位置偏移与旋转方向不同源 | 用 `tests/common/demoPoseCheck.h` 自查（含摆动平面判据） |
+
+### 10.5 找不到接口时
+
+1. 先看对应头文件的**顶部注释**：本仓库的文件头固定回答三件事 ——
+   为什么需要它 / 边界在哪（什么没做）/ 关键取舍的理由；
+2. 再看 `tests/unit/test*.cpp`：每个模块都有正反用例，**用例就是最准的用法说明**；
+3. 最后看 `docs/CHANGELOG.md` 对应日期的条目：那里记了为什么这么定、量化数据、
+   以及「哪些看着该做但实测后判定不做」。
+
+---

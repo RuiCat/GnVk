@@ -1,6 +1,16 @@
 #ifndef _GN_AUDIO_H_
 #define _GN_AUDIO_H_
 
+// GN_Audio.h — GNa 命名空间的音频入口：一次性音效 + 流式 BGM。
+//
+// 分工：
+//   * sSOUND      —— 短音效，整段读入内存，可定位（3D）播放；全局默认实例是 GNa::Sound。
+//   * cBGM_MUSIC  —— 长音乐，流式解码，**只支持采样率 > 22050 的音频流**（见类注释）。
+//
+// 播放模式是**全局状态**：GN_SoundPlayBegin2D / GN_SoundPlayBegin3D 设定后，
+// 后续播放按该模式解释坐标。设备生命周期由 GN_InitSound / GN_UnInitSound 管理，
+// 必须与引擎初始化/退出配对，否则析构顺序错误会导致退出时崩溃。
+
 namespace GNa {
 struct sSOUND;
 

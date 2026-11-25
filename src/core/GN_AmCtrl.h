@@ -2,6 +2,12 @@
 #ifndef _GN_AMCTRL_H_
 #define _GN_AMCTRL_H_
 
+// GN_AmCtrl.h — 2D 动画的时间轴基座，被 GN_Frame.h 的图筐继承。
+//
+// 这里只有"时间怎么走"的语义：播放模式（eAM_MODE）、时间重设策略（eAM_TIME_RESET_OP）、
+// TRS 运行段处理（eAM_TRS_OP）、时间特殊常量（eAM_TCR_TYPE），以及段落节点 sAM_NODE /
+// 控制器 sAM_CTRL。不含纹理、不含绘制 —— 那些在 GN_Frame.h。
+
 namespace GNg {
 extern GN_API const char *AmModeNames[]; //动画播放模式名 -- 对应下面的每一个举枚
 

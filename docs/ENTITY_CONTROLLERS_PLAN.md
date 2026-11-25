@@ -1,5 +1,7 @@
 # 控制器实现规划：引擎侧接线 + 游戏侧底层控制
 
+> **状态**：✅ 现行 — 实体层（四控制器 + 固定步长时钟 + 场景层）的设计依据，P0–P6 已全部完成；现行 API 见 `API_REFERENCE.md` §10。
+
 > 状态：**P0–P6 全部完成（2026-11-24）**。规划本身写于 2026-11-24。
 > 前置阅读：`ENGINE_ARCHITECTURE.md`、`GI_PLAN.md` §5、`MULTILAYER_RENDER_PIPELINE_PLAN.md`。
 

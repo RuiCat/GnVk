@@ -1,5 +1,7 @@
 # DEFECT_ANALYSIS 残余条目复核（B5e，2026-11-21）
 
+> **状态**：📊 快照 — 2026-11-21 对 `DEFECT_ANALYSIS.md` 的逐条复核，行号固定于当日。
+
 > 复核对象：`docs/DEFECT_ANALYSIS.md`（61 行，最后提交 `fdd4af3` 2026-07-04 16:51:58 +0800）
 > 复核口径：只读（rg / sed / cat / wc / git log / 读代码）。本任务**禁跑** `make`、`make shaders`、`make unit`
 > （`build/`、`assets/shaders/*.spv` 归并发子任务 B5d），故凡需重编才能核的数字一律标注「不可在当前树复算」。

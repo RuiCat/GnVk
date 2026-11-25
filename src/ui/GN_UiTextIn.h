@@ -1,6 +1,12 @@
 #ifndef _GN_UITEXTIN_H_
 #define _GN_UITEXTIN_H_
 
+// GN_UiTextIn.h — 文本输入框：编辑缓冲、撤销记录与国际化的 UI 包装。
+//
+// cTEXT_INPUT 是编辑器内核（光标、选区、编辑操作与 GT_sINPUT_SAVE 撤销栈），
+// cUI_TEXT_INPUT 是它在 GNu 控件体系里的包装（靠边布局 + 焦点 + 中文输入法对接）。
+// 输入法的平台差异集中在 _Sys 层，本文件不直接调平台 API。
+
 struct GT_sINPUT_SAVE //文本输入操作记录
 {
     char *str; //更改内容

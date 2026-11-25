@@ -1,6 +1,13 @@
 #ifndef _GN_UIPOPDLG_H_
 #define _GN_UIPOPDLG_H_
 
+// GN_UiPopDlg.h — 弹出对话框与简单选单：变量设置工具 + 层叠子项。
+//
+// GT_sSP_CHILD / GT_sVALUE_SET_TOOL 把"一组可调参数"映射成可编辑的子项（带范围与步进），
+// sSIM_MENU 是轻量选单（比完整的弹出对话框少很多状态，适合调试面板）。
+// cSIM_DIALOG（简单对话筐）/ cSIM_DIALOGEX（带扩展子项）/ cUI_SIM_DIALOG（靠边包装）
+// 负责实际的模态层级与焦点归还，实现拆在 GN_UiPopDlg*.cpp 五个文件里。
+
 struct GT_sSP_CHILD //修改值子项
 {
     char *name; //名称

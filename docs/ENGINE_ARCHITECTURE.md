@@ -1,6 +1,6 @@
 # GN_mini 引擎架构文档
 
-> ⚠️ **历史文档** — 部分内容描述 OpenGL 架构，Vulkan 后端架构见 `VULKAN_MIGRATION.md`
+> **状态**：📦 历史 — 部分内容描述 OpenGL 时代的模块分层；Vulkan 后端以代码与 `API_REFERENCE.md` 为准。
 
 > **版本**: 以 `src/core/GN.h` 的 `GN_INTERFACE_VERSION` / `GN_VERSION` 为准（当前 Interface 2.2.0）  
 > **平台**: Linux (Vulkan+GLFW) | macOS | Android (可扩展)

@@ -1,6 +1,13 @@
 #ifndef _GN_UI_H_
 #define _GN_UI_H_
 
+// GN_UI.h — GNu 命名空间根：UI 组件类型、交互动作类型、共享数据集与 UI 对象基类声明。
+//
+// eUI_TYPE 决定控件在编辑器里的分类与序列化方式；eUI_ACTION_TYPE 是控件对外的语义动作
+// （不是按键），输入到动作的映射在 GN_InputMap.h。
+// cSHARE_DATA 用于保存/加载时统一收集共享对象（纹理、字库等），避免各控件重复读写。
+// 控件基类 iUI_OBJECT 的定义在本文件，各类具体控件的实现分散在 GN_Ui*.h。
+
 namespace GNu {
 enum eUI_TYPE { //UI组件类型
     eUI_BACK_FRAME = GNg::eOBJ_FRAME_LAUNCHER_FONT + 1, //底筐

@@ -1,6 +1,12 @@
 #ifndef _GN_UIBASE_H_
 #define _GN_UIBASE_H_
 
+// GN_UiBase.h — 2D UI 控件的基础件：滚动、选择列表、按钮、分页、滑动条、调色板、触屏摇杆。
+//
+// 这一层是引擎自带 UI 库的实现主体；成品控件（文本输入框、对话框、文件浏览器）在各自的
+// GN_Ui*.h 里，都继承 GN_UI.h 的 iUI_OBJECT。
+// 范式是**即时模式绘制 + 保留模式对象**：对象持久存在，但每帧要由调用方驱动绘制与事件。
+
 void GT_ScrollListGuiDrawCall(int, int, int, int, unsigned int, unsigned int, unsigned int, bool, void *);
 void GT_SelectListIconDrawCall(int, int, int, int, unsigned int, unsigned int, unsigned int, bool, void *);
 void GT_SelectListTextDrawCall(int, int, int, int, unsigned int, unsigned int, unsigned int, bool, void *);

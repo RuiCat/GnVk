@@ -1,5 +1,12 @@
 #ifndef _GN_INIT_H
 #define _GN_INIT_H
+// GN_Init.h — 引擎启动、帧循环回调与全局默认值的入口。
+//
+// 应用只提供 5 个回调（AppInit / AppUnInit / AppDisplay2D / AppDisplay3D / AppRun），
+// 用 GN_InitLoadCallBackFunc + GN_InitLoopCallBackFunc 注册，再由 GN_StartRun 进入循环。
+// GF_FrameCycle* 是平台层的帧循环驱动，由 _Main/_Sys 调用，**业务代码不要直接调**。
+// 默认值（字体式样、颜色、扩展模块、下载目录）都是全局变量，改一处影响全局面板。
+
 #ifndef _GN_H_
 #ifndef GN_INIT_API
 #define GN_INIT_API GN_API

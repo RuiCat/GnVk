@@ -1,5 +1,7 @@
 # Cornell Box 独立测试程序规划（自由相机 + 全局光照）
 
+> **状态**：📋 已完成 — 独立 Cornell Box 测试程序（`tests/cornellBox`），含 CPU/GPU 两路光追与对拍。
+
 > 性质：**规划文档**，本轮不写源码。基线 `HEAD = aaf73ef`；本机 `make unit` = 396 cases / 0 failed。
 > 关联：[GI_RT_TYNDALL_PLAN.md](GI_RT_TYNDALL_PLAN.md) §3.7（验证基准）/§5（路线图）、
 > [GI_PLAN.md](GI_PLAN.md)（G-Buffer/SSAO/SSGI/探针契约）、[CAMERA_PLAN.md](CAMERA_PLAN.md)（cCAMERA C0–C5）、

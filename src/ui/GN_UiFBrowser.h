@@ -1,6 +1,11 @@
 #ifndef _GN_UIFBROWSER_H_
 #define _GN_UIFBROWSER_H_
 
+// GN_UiFBrowser.h — 文件浏览器控件：目录树 + 文件列表 + 异步查找。
+//
+// 目录扫描在后台线程完成，三个 GT_FILE_BROWSER_Find* 回调分别处理"查找/取目录/拷贝"的
+// 线程体；扫描期间 UI 仍可交互，结果回来后再刷新列表。
+
 void GT_FILE_BROWSER_FindProc(P<GN_sTHREAD>, void *, void *);
 void GT_FILE_BROWSER_FindDir(P<GN_sTHREAD>, void *, void *);
 void GT_FILE_BROWSER_FindCopy(P<GN_sTHREAD>, void *, void *);

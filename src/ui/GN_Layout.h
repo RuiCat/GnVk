@@ -1,5 +1,10 @@
 #ifndef _GN_LAYOUT_H_
 #define _GN_LAYOUT_H_
+// GN_Layout.h — UI 布局：靠边方式、自动换行、排列格式与绘制区描述。
+//
+// 这一层只算位置，不画东西：给定父区域 + 靠边类型（eNEAR_*）+ 排列格式（sARRANGE_FMT），
+// 算出子控件应落在哪。控件自己的绘制在 GN_UiBase.h 等文件里。
+
 namespace GNu {
 
 enum eNEAR_TYPE { //靠边类型

@@ -8,6 +8,12 @@
 #ifndef _GN_NETBASE_H_
 #define _GN_NETBASE_H_
 
+// GN_NetBase.h — 网络基础设施：URL/IP 字符串解析与环境句柄。
+//
+// 只有纯字符串与地址处理，不含套接字实现（TCP/UDP/HTTP 在 _Net/ 下）。
+// DA-M2 批 4 起，套接字地址长度不再用 ad-hoc extern，统一走 sNetAddrContext 的访问器
+// （定义在 GN_NetBase.cpp），这样跨 TU 不再依赖全局符号顺序。
+
 extern NET_API const char GNn_DefWebFileName[]; //默认Web的首页文件名
 
 NET_API bool GNn_FuntionIsOK(); //检测网络功能是否准备好了

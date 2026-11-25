@@ -1,5 +1,7 @@
 # GN_mini 工程化重构方案（候选 v0.1）
 
+> **状态**：🚧 进行中 — `GN_Vk.cpp` 拆分等工程化重构；阶段 2 尚未收口，本文是候选方案而非已冻结契约。
+
 > **状态：候选，未冻结。** 本文是 G0–G3 草案：三个裁决点见第 10 节，独立红队复核留到执行启动前。
 > **进度**：阶段 0 完成；阶段 1 部分完成（67 用例 + `make check` + ASan/UBSan；headless 受环境阻塞）；阶段 2 进行中（`vkDevice.cpp` / `vkImageIo.cpp` / `vkImage.cpp` / `vkDraw2d.cpp` / `vkFrame2d.cpp` / `vk3dMesh.cpp` / `vk3dPasses.cpp` / `vk3dForward.cpp` / `vk3dInit.cpp` / `vk3dShutdown.cpp` 已抽出，`GN_Vk.cpp` 3690→1054 行，有效代码 <1000）。
 > **依据**：2026-10-26 本仓库实测——干净构建 0 error / 10,083 warnings；工作区 `libGN_mini.so` 链接 FFmpeg 8 已无法加载；

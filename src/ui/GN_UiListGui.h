@@ -1,5 +1,11 @@
 #ifndef _GN_UILISTGUI_H_
 #define _GN_UILISTGUI_H_
+// GN_UiListGui.h — 在滚动列表里嵌子 UI：cSCROLL_LIST_GUI + 数值提取/保存。
+//
+// 用途是把"一组同构的小 UI 行"（设置项、属性面板）塞进可滚动列表，
+// 每行由 eSUBUI_FUNC 指定该行自己的加载/保存/待操作行为，
+// eLAYOUT_VALUE_TYPE 决定这一行绑定的数值类型（float/int/bool/字符串路径等）。
+
 namespace GNu {
 enum eSUBUI_FUNC { //子区块UI执行功能名
     eSUBUI_LOAD = 1, //加载数值
