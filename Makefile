@@ -467,6 +467,26 @@ $(UNDO_DEMO_BIN): $(UNDO_DEMO_SRC) $(TARGET)
 	@mkdir -p build
 	$(CXX) $(UNDO_DEMO_FLAGS) $(UNDO_DEMO_SRC) $(TEST_LIBS) -o $(UNDO_DEMO_BIN)
 
+# ── Root Motion 演示（C3）──
+ROOTMOTION_SRC   := $(wildcard tests/rootMotion/*.cpp)
+ROOTMOTION_BIN   := build/rootMotion
+ROOTMOTION_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+
+.PHONY: rootMotion
+rootMotion: $(ROOTMOTION_BIN)
+	@echo "$(YELLOW)🦶 渲染 Root Motion 演示...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(ROOTMOTION_BIN) --out $(GIZMO_VIDEO_OUT)/root-frames \
+		--frames 360 --size $(GIZMO_VIDEO_SIZE)
+	@$(FFMPEG) -y -loglevel error -framerate 30 -i $(GIZMO_VIDEO_OUT)/root-frames/frame_%05d.png \
+		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart \
+		$(GIZMO_VIDEO_OUT)/root-motion.mp4
+	@ls -lh $(GIZMO_VIDEO_OUT)/root-motion.mp4
+
+$(ROOTMOTION_BIN): $(ROOTMOTION_SRC) $(TARGET)
+	@echo "$(YELLOW)🦶 编译 Root Motion 演示...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(ROOTMOTION_FLAGS) $(ROOTMOTION_SRC) $(TEST_LIBS) -o $(ROOTMOTION_BIN)
+
 # ── 混合树 / 动画层演示（D3）──
 ANIMBLEND_SRC   := $(wildcard tests/animBlend/*.cpp)
 ANIMBLEND_BIN   := build/animBlend
@@ -537,7 +557,10 @@ lint:
 
 # ── 文档数字：唯一来源是实测。改数字不要手改，跑 make stats ──
 .PHONY: stats doc-check
-stats:
+# **stats 必须先构建**：gen_stats.sh 会**实际运行** unit 与 gpuCheck 来取数字。
+# 用旧二进制跑出来的数字与源码不符，doc-check 就会失败，而"失败原因"看起来
+# 像是文档没更新 —— 实际上是构建产物过期。这里显式依赖，把这个坑堵掉。
+stats: $(TARGET) build/gpuCheck
 	@echo "$(YELLOW)📊 生成文档统计数字...$(RESET)"
 	@bash tests/tools/gen_stats.sh --write
 

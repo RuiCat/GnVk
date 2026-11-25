@@ -134,8 +134,32 @@ class cCHARACTER {
     float SlopeDeg() const; // 无地面 = 0
     bool IsStuck() const; // 上一帧解穿透没解干净（被夹住）
 
+    // ── Root Motion（C3）──
+    // "位移由动画决定"的模式。启用后 `Move` **忽略 wishDir 的速度分量**，
+    // 改用最近一次 `ApplyRootMotion` 给的位移作为本步的水平目标。
+    //
+    // 为什么不用 wishDir 覆盖：root motion 的全部意义是"动画里的步幅就是实际步幅"。
+    // 若两者同时生效，脚照样会滑 —— 只是换了个地方滑。
+    //
+    // 用法（每帧，在动画 Update 之后、Move 之前）：
+    //   sROOT_MOTION m;
+    //   if (extractor.Extract(rootTransform, &m)) character.ApplyRootMotion(m.aDeltaPosition, dt);
+    //   character.Move(wishDirIgnored, sprintIgnored, jump, dt);
+    void SetRootMotionEnabled(bool enabled);
+    bool RootMotionEnabled() const;
+    // 注入"本帧动画产生的位移"（**世界空间**）。内部换算成速度后供 Move 使用。
+    // 只累积本帧一次：连续调用会覆盖（不是叠加 —— 叠加会让掉帧时的位移翻倍）。
+    void ApplyRootMotion(const GNg::sVEC3 &deltaPosition, float dt);
+    // 本帧待消费的 root motion 位移（诊断/验收）。
+    const GNg::sVEC3 &PendingRootMotion() const;
+    // 绕 Y 旋转角色朝向（root motion 的转角用）。只影响**后续** ApplyRootMotion 的
+    // 世界旋转，不改角色位置。
+    void AddFacingYaw(float deltaYaw);
+    float FacingYaw() const;
+
     // ── 每步 ──
     // wishDir：**水平**期望方向（内部会归一化；零向量 = 不主动移动，只受重力）。
+    // 启用 root motion 时 wishDir 的水平分量被忽略（见 SetRootMotionEnabled）。
     // sprint：用 aSprintSpeed 而不是 aWalkSpeed。
     // jump：本步是否请求起跳（只在着地时生效）。
     // 返回本步的详细结果。
@@ -182,6 +206,10 @@ class cCHARACTER {
     bool aInited; // Init() 是否调用过
     // C2：推动态刚体
     cPHYSICS_WORLD *aPhysicsWorld; // 非拥有，默认 nullptr = 关闭
+    // C3：root motion
+    bool aRootMotionEnabled;
+    GNg::sVEC3 aPendingRootMotion; // 本帧待消费的位移（世界空间）
+    float aFacingYaw; // 朝向（弧度）
     float aPushStrength; // 0..4
     uint32_t aLastPushedCount; // 上一步推开几个
     bool aGrounded;

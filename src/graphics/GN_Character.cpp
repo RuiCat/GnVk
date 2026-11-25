@@ -89,7 +89,8 @@ cCHARACTER::sINTENT::sINTENT()
 cCHARACTER::cCHARACTER()
     : aPosition{0.0f, 0.0f, 0.0f}, aFootPosition{0.0f, 0.0f, 0.0f}, aVelocity{0.0f, 0.0f, 0.0f},
       aGravity{0.0f, -9.81f, 0.0f}, aInited(false), aPhysicsWorld(nullptr),
-      aPushStrength(1.0f), aLastPushedCount(0), aGrounded(false), aStuck(false),
+      aPushStrength(1.0f), aLastPushedCount(0), aRootMotionEnabled(false),
+      aPendingRootMotion{0.0f, 0.0f, 0.0f}, aFacingYaw(0.0f), aGrounded(false), aStuck(false),
       aGroundNormalY(0.0f), aSlopeDeg(0.0f) {
     aFootPosition.y = -aDesc.aHeight * 0.5f;
 }
@@ -258,6 +259,41 @@ void cCHARACTER::SetPushStrength(float strength) {
 }
 
 float cCHARACTER::PushStrength() const { return aPushStrength; }
+
+// ═══════════════════════════════════════════════════════════
+//  Root Motion（C3）
+// ═══════════════════════════════════════════════════════════
+void cCHARACTER::SetRootMotionEnabled(bool enabled) {
+    aRootMotionEnabled = enabled;
+    if(!enabled) aPendingRootMotion = GNg::sVEC3{0.0f, 0.0f, 0.0f};
+}
+
+bool cCHARACTER::RootMotionEnabled() const { return aRootMotionEnabled; }
+
+void cCHARACTER::ApplyRootMotion(const GNg::sVEC3 &deltaPosition, float dt) {
+    (void)dt;
+    if(!aRootMotionEnabled) return;
+    if(!std::isfinite(deltaPosition.x) || !std::isfinite(deltaPosition.y) ||
+       !std::isfinite(deltaPosition.z)) {
+        return;
+    }
+    // **覆盖而不是叠加**：一帧内多处调用（例如混合树 + 层栈都算了一次）应当只有
+    // 最后一次生效。叠加会让掉帧时位移翻倍 —— 这正是 root motion 最典型的 bug。
+    aPendingRootMotion = deltaPosition;
+}
+
+const GNg::sVEC3 &cCHARACTER::PendingRootMotion() const { return aPendingRootMotion; }
+
+void cCHARACTER::AddFacingYaw(float deltaYaw) {
+    if(!std::isfinite(deltaYaw)) return;
+    aFacingYaw += deltaYaw;
+    // 归一化到 [-pi, pi] 防止长时间累积成巨大值（精度与可读性）
+    const float kPi = 3.14159265358979323846f;
+    while(aFacingYaw > kPi) aFacingYaw -= 2.0f * kPi;
+    while(aFacingYaw < -kPi) aFacingYaw += 2.0f * kPi;
+}
+
+float cCHARACTER::FacingYaw() const { return aFacingYaw; }
 
 uint32_t cCHARACTER::pushDynamicBodies(const GNg::sVEC3 &center) {
     aLastPushedCount = 0;
@@ -462,7 +498,25 @@ sCHARACTER_STEP cCHARACTER::Move(const GNg::sVEC3 &wishDir, bool sprint, bool ju
 
     // 1) 重力
     aVelocity = add(aVelocity, mul(aGravity, aDesc.aGravityScale * dt));
-    if (!hasInput) {
+
+    if (aRootMotionEnabled) {
+        // ── Root Motion：水平速度**完全由动画位移决定** ──
+        // 不用 wishDir 的速度分量 —— 那会让脚继续滑（见 SetRootMotionEnabled 的注释）。
+        //
+        // 换成"等效速度"而不是直接改位置：这样后续的解穿透 / 台阶抬升 / 推体
+        // 全都照常工作，不需要在 Move 里开第二条移动路径。
+        if (!(dt > 0.0f)) {
+            aVelocity.x = 0.0f;
+            aVelocity.z = 0.0f;
+        } else {
+            aVelocity.x = aPendingRootMotion.x / dt;
+            aVelocity.z = aPendingRootMotion.z / dt;
+        }
+        // 位移已经消费掉：不清会让"某一帧动画没更新"时角色继续按上次的速度滑行
+        aPendingRootMotion = GNg::sVEC3{0.0f, 0.0f, 0.0f};
+        // 竖直方向仍由重力和地面判定控制（root motion 的 y 通常只是动画内的起伏，
+        // 不该把角色抬离地面）
+    } else if (!hasInput) {
         // 无输入：水平速度也衰减（否则松手会一直滑）
         const float damp = std::exp(-12.0f * dt);
         aVelocity.x *= damp;
