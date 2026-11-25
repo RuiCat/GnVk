@@ -2,20 +2,20 @@
 //
 // 职责：读入 GN3d::sASSET，把蒙皮顶点按导入姿势烘焙进世界坐标，
 //       按贴图 alpha 分布重判材质 alpha 模式，并统一重定心（脚底 y=0、xz 居中）。
+// 依赖：网格级算法（法线焊接 / 质心 / 最近关节 / alpha 判定 / 名称过滤）已抽到
+//       src/graphics/GN_MeshTools.h，本文件只负责"把资产喂进去、把结果装进 sModelData"。
 // 不做：GPU 上传、贴图解码成 sIMAGE、任何绘制（分别见 imoSceneUpload / imoSceneMain）。
 
 #include "imoSceneConvert.h"
 
 #include "GN_3Dasset.h"
+#include "GN_MeshTools.h"
 #include "GN_3Dscene.h"
 #include "GN_3Dtexture.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <map>
-#include <tuple>
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -54,53 +54,12 @@ bool isFiniteVec(const GNg::sVEC3 &v) {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
-// 逗号分隔的子串匹配（大小写不敏感）：空列表返回 true。
-bool matchesNameFilter(const std::string &name, const std::string &filter) {
-    if (filter.empty()) {
-        return true;
-    }
-    std::string lowerName = name;
-    for (size_t i = 0; i < lowerName.size(); ++i) {
-        lowerName[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(lowerName[i])));
-    }
-    size_t start = 0;
-    while (start <= filter.size()) {
-        const size_t comma = filter.find(',', start);
-        const size_t end = (comma == std::string::npos) ? filter.size() : comma;
-        std::string token = filter.substr(start, end - start);
-        for (size_t i = 0; i < token.size(); ++i) {
-            token[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[i])));
-        }
-        if (!token.empty() && lowerName.find(token) != std::string::npos) {
-            return true;
-        }
-        if (comma == std::string::npos) {
-            break;
-        }
-        start = comma + 1;
-    }
-    return false;
-}
-
-// 贴图 alpha 分布 → 引擎 alpha 模式：
-//   * 无 alpha 像素 → 源模式（本资产为 OPAQUE）；
-//   * 半透明像素占比 > 30%（Toumei 这类玻璃/薄纱）→ BLEND；
-//   * 其余是二值镂空（衣料外侧 alpha=0、本体 1）→ MASK（Blender CLIP 渲染与 BLEND 结果一致，
-//     比 BLEND 少一次透明排序、且能写深度）。
+// 贴图 alpha 分布 → 引擎 alpha 模式。判定口径（为什么这么判、为什么"没 alpha 必须降级成
+// OPAQUE"）全部在 GN3d::resolveAlphaModeByCoverage 的头注释里，这里只负责把
+// sTextureData 的统计字段喂进去。
 GN3d::eALPHA_MODE resolveAlphaMode(const sTextureData &texture, GN3d::eALPHA_MODE source) {
-    if (source == GN3d::eALPHA_OPAQUE) {
-        return source;
-    }
-    // 贴图没有 alpha 通道/全不透明：内容本来就是实心的，必须按 OPAQUE 画。
-    // 否则 glTF 的 BLEND 会让这些网格走“深度写关”的混合管线——远侧表面会盖住近侧
-    // （帽子压住头发、衣料互相穿透），表现就是“远处遮挡近处”。
-    if (!texture.aHasAlpha) {
-        return GN3d::eALPHA_OPAQUE;
-    }
-    if (texture.aPartialAlphaRatio > PARTIAL_ALPHA_BLEND_THRESHOLD) {
-        return GN3d::eALPHA_BLEND;
-    }
-    return GN3d::eALPHA_MASK;
+    return GN3d::resolveAlphaModeByCoverage(texture.aHasAlpha, texture.aPartialAlphaRatio, source,
+                                            PARTIAL_ALPHA_BLEND_THRESHOLD);
 }
 
 // 解出贴图的 alpha 统计；无法解码时按无 alpha 处理（仍然把原始字节留给上传层）。
@@ -148,26 +107,22 @@ int32_t nearestSkinJoint(const GN3d::sASSET &asset, uint32_t skinIndex, int32_t 
     return -1;
 }
 
-// 逆绑定矩阵 → 关节的绑定世界位置（刚性矩阵：p = -R^T t）。
-GNg::sVEC3 inverseBindPosition(const GNg::sMAT44 &inverseBind) {
-    const float tx = inverseBind.m[12];
-    const float ty = inverseBind.m[13];
-    const float tz = inverseBind.m[14];
-    GNg::sVEC3 out;
-    out.x = -(inverseBind.m[0] * tx + inverseBind.m[1] * ty + inverseBind.m[2] * tz);
-    out.y = -(inverseBind.m[4] * tx + inverseBind.m[5] * ty + inverseBind.m[6] * tz);
-    out.z = -(inverseBind.m[8] * tx + inverseBind.m[9] * ty + inverseBind.m[10] * tz);
-    return out;
-}
-
 // 没有骨骼父级的物件（项圈、发饰等挂在 Armature 下、顶点已烘进世界坐标）：
 // 按顶点质心选最近的关节，让它们至少跟着身体动，而不是留在原地。
+//
+// 三步各自都是模块函数（GN_MeshTools.h）：质心 → 关节位置 → 最近点。
+// 不直接吃 sASSET，是为了让"哪一步坏了"能被单测分开钉住。
 int32_t nearestJointToCentroid(const GN3d::sASSET &asset, uint32_t skinIndex,
                                const std::vector<sBindVertex> &vertices) {
     if (skinIndex >= asset.aSkins.size() || vertices.empty()) {
         return -1;
     }
     const GN3d::sASSET_SKIN &skin = asset.aSkins[skinIndex];
+    if (skin.aInverseBinds.empty()) {
+        return -1;
+    }
+    // sBindVertex 是 AoS（位置是 sVEC3），不是 11 float 的扁平数组：
+    // 单独算质心，避免为了复用布局而把数据转一遍。
     GNg::sVEC3 centroid = {0.0f, 0.0f, 0.0f};
     for (size_t index = 0; index < vertices.size(); ++index) {
         centroid.x += vertices[index].aPosition.x;
@@ -178,126 +133,44 @@ int32_t nearestJointToCentroid(const GN3d::sASSET &asset, uint32_t skinIndex,
     centroid.x *= inverseCount;
     centroid.y *= inverseCount;
     centroid.z *= inverseCount;
-    int32_t best = -1;
-    float bestDistance = 1.0e30f;
-    for (size_t joint = 0; joint < skin.aJoints.size(); ++joint) {
-        const GNg::sVEC3 position = inverseBindPosition(skin.aInverseBinds[joint]);
-        const float dx = position.x - centroid.x;
-        const float dy = position.y - centroid.y;
-        const float dz = position.z - centroid.z;
-        const float distance = dx * dx + dy * dy + dz * dz;
-        if (distance < bestDistance) {
-            bestDistance = distance;
-            best = static_cast<int32_t>(joint);
+    if (!std::isfinite(centroid.x) || !std::isfinite(centroid.y) || !std::isfinite(centroid.z)) {
+        return -1;
+    }
+
+    std::vector<GNg::sVEC3> jointPositions(skin.aInverseBinds.size());
+    uint32_t usable = 0;
+    for (size_t joint = 0; joint < skin.aInverseBinds.size(); ++joint) {
+        if (GN3d::jointPositionFromInverseBind(skin.aInverseBinds[joint], &jointPositions[joint])) {
+            ++usable;
+        } else {
+            // 坏矩阵给一个明确"很远"的位置，避免它靠 NaN 比较意外胜出。
+            jointPositions[joint] = GNg::sVEC3{1.0e30f, 1.0e30f, 1.0e30f};
         }
     }
-    return best;
+    if (usable == 0) {
+        return -1;
+    }
+    return GN3d::nearestPointIndex(centroid, jointPositions.data(),
+                                   static_cast<uint32_t>(jointPositions.size()));
 }
 
-// 法线平滑：FBX 导出的身体网格在同位置上有多份顶点、每份带不同面法线（实测 1024 个重复顶点、
-// 951 处法线不同），画出来就是硬边的多边形手指。这里按「同位置」合并，夹角不超过
-// 阈值（默认 60°）就取面积加权平均法线；超过阈值（真硬边，如领口/鞋底）保持原样。
-// 统计：跨网格累加，便于确认平滑真的生效（IMO_SCENE_SMOOTH_DEBUG=1 时打印）。
-size_t gSmoothedGroups = 0;
+// 法线焊接的统计跨网格累加（诊断用：IMO_SCENE_SMOOTH_DEBUG=1 时打印一行）。
+// 模块本身不持有任何全局状态，累加放在调用方 —— 这样同一份代码可以被多个
+// 场景同时使用而互不影响。
+GN3d::sNORMAL_WELD_STATS gWeldStats;
 
 bool smoothMeshNormals(sMeshData &mesh, float thresholdCos) {
-    const size_t vertexCount = mesh.aVertices.size() / 11u;
-    if (vertexCount == 0 || mesh.aIndices.size() < 3) {
-        return false;
-    }
-    const size_t triangleCount = mesh.aIndices.size() / 3u;
-    std::vector<GNg::sVEC3> faceNormal(triangleCount);
-    std::vector<float> faceArea(triangleCount);
-    for (size_t triangle = 0; triangle < triangleCount; ++triangle) {
-        const uint32_t i0 = mesh.aIndices[triangle * 3 + 0];
-        const uint32_t i1 = mesh.aIndices[triangle * 3 + 1];
-        const uint32_t i2 = mesh.aIndices[triangle * 3 + 2];
-        if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount) {
-            return false;
-        }
-        const float *p0 = &mesh.aVertices[i0 * 11u];
-        const float *p1 = &mesh.aVertices[i1 * 11u];
-        const float *p2 = &mesh.aVertices[i2 * 11u];
-        const float ax = p1[0] - p0[0], ay = p1[1] - p0[1], az = p1[2] - p0[2];
-        const float bx = p2[0] - p0[0], by = p2[1] - p0[1], bz = p2[2] - p0[2];
-        const float nx = ay * bz - az * by;
-        const float ny = az * bx - ax * bz;
-        const float nz = ax * by - ay * bx;
-        const float length = std::sqrt(nx * nx + ny * ny + nz * nz);
-        faceArea[triangle] = length;
-        if (length > 1.0e-12f) {
-            faceNormal[triangle] = {nx / length, ny / length, nz / length};
-        } else {
-            faceNormal[triangle] = {0.0f, 0.0f, 0.0f};
-        }
-    }
-    std::vector<std::vector<uint32_t>> incident(vertexCount);
-    for (size_t triangle = 0; triangle < triangleCount; ++triangle) {
-        for (int corner = 0; corner < 3; ++corner) {
-            incident[mesh.aIndices[triangle * 3 + corner]].push_back(static_cast<uint32_t>(triangle));
-        }
-    }
-    // 同位置分组（量化到 0.1 mm）。
-    std::map<std::tuple<int, int, int>, std::vector<uint32_t>> groups;
-    for (size_t index = 0; index < vertexCount; ++index) {
-        const float *vertex = &mesh.aVertices[index * 11u];
-        const std::tuple<int, int, int> key(
-            static_cast<int>(std::lround(vertex[0] * 10000.0f)),
-            static_cast<int>(std::lround(vertex[1] * 10000.0f)),
-            static_cast<int>(std::lround(vertex[2] * 10000.0f)));
-        groups[key].push_back(static_cast<uint32_t>(index));
-    }
-    size_t smoothed = 0;
-    for (auto &entry : groups) {
-        std::vector<uint32_t> &members = entry.second;
-        if (members.size() < 2) {
-            continue;
-        }
-        // 面积加权平均 + 最大偏差检查。
-        GNg::sVEC3 sum = {0.0f, 0.0f, 0.0f};
-        std::vector<uint32_t> faces;
-        for (size_t member = 0; member < members.size(); ++member) {
-            const std::vector<uint32_t> &list = incident[members[member]];
-            for (size_t f = 0; f < list.size(); ++f) {
-                faces.push_back(list[f]);
-            }
-        }
-        std::sort(faces.begin(), faces.end());
-        faces.erase(std::unique(faces.begin(), faces.end()), faces.end());
-        for (size_t f = 0; f < faces.size(); ++f) {
-            const uint32_t triangle = faces[f];
-            const float weight = faceArea[triangle];
-            sum.x += faceNormal[triangle].x * weight;
-            sum.y += faceNormal[triangle].y * weight;
-            sum.z += faceNormal[triangle].z * weight;
-        }
-        const float length = std::sqrt(sum.x * sum.x + sum.y * sum.y + sum.z * sum.z);
-        if (length <= 1.0e-12f) {
-            continue;
-        }
-        const GNg::sVEC3 average = {sum.x / length, sum.y / length, sum.z / length};
-        bool hardEdge = false;
-        for (size_t f = 0; f < faces.size(); ++f) {
-            const GNg::sVEC3 &normal = faceNormal[faces[f]];
-            const float dot = normal.x * average.x + normal.y * average.y + normal.z * average.z;
-            if (dot < thresholdCos) {
-                hardEdge = true;
-                break;
-            }
-        }
-        if (hardEdge) {
-            continue;
-        }
-        for (size_t member = 0; member < members.size(); ++member) {
-            const uint32_t index = members[member];
-            mesh.aVertices[index * 11u + 3] = average.x;
-            mesh.aVertices[index * 11u + 4] = average.y;
-            mesh.aVertices[index * 11u + 5] = average.z;
-        }
-        ++smoothed;
-    }
-    gSmoothedGroups += smoothed;
-    return smoothed > 0;
+    GN3d::sNORMAL_WELD_STATS stats;
+    const bool changed = GN3d::weldNormalsByPosition(
+        mesh.aVertices.data(), static_cast<uint32_t>(mesh.aVertices.size() / VERTEX_FLOATS),
+        mesh.aIndices.data(), static_cast<uint32_t>(mesh.aIndices.size()), thresholdCos,
+        GN3d::sVERTEX_FLOATS::Standard(), &stats);
+    gWeldStats.aWeldedGroups += stats.aWeldedGroups;
+    gWeldStats.aSmoothedGroups += stats.aSmoothedGroups;
+    gWeldStats.aHardEdgeGroups += stats.aHardEdgeGroups;
+    gWeldStats.aDegenerateGroups += stats.aDegenerateGroups;
+    gWeldStats.aAffectedVertices += stats.aAffectedVertices;
+    return changed;
 }
 
 // 烘焙一个 primitive 的顶点/索引；返回 false 表示该 primitive 不可用（已计入 skipped）。
@@ -491,9 +364,9 @@ void bakeNodes(const GN3d::sASSET &asset, const std::vector<GNg::sMAT44> &world,
                 meshName += suffix;
             }
             const bool shown = options.aShowFilter.empty() ||
-                               matchesNameFilter(meshName, options.aShowFilter);
+                               GN3d::matchNameFilter(meshName.c_str(), options.aShowFilter.c_str());
             const bool hidden = !options.aHideFilter.empty() &&
-                                matchesNameFilter(meshName, options.aHideFilter);
+                                GN3d::matchNameFilter(meshName.c_str(), options.aHideFilter.c_str());
             if (!shown || hidden) {
                 ++out.aFilteredMeshes;
                 continue;
@@ -763,7 +636,10 @@ bool buildModelFromGltf(const char *path, sModelData &out, std::string &error,
         }
     }
     if (std::getenv("IMO_SCENE_SMOOTH_DEBUG") != 0) {
-        std::printf("[imoScene] 法线平滑: %zu 组（同位置顶点合并）\n", gSmoothedGroups);
+        std::printf("[imoScene] 法线焊接: 重合组 %u / 平滑 %u / 硬边 %u / 退化 %u（改写顶点 %u）\n",
+                    gWeldStats.aWeldedGroups, gWeldStats.aSmoothedGroups,
+                    gWeldStats.aHardEdgeGroups, gWeldStats.aDegenerateGroups,
+                    gWeldStats.aAffectedVertices);
     }
     if (options.aRecenter) {
         recenterModel(out);

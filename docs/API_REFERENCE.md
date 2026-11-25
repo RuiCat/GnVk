@@ -528,6 +528,7 @@ class cBGM_MUSIC {
 | 多层渲染 | `GN_RenderPipeline.h` / `GN_RenderQueue.h` | 层枚举、程序、渲染项、掩码解析、层内排序、层队列 |
 | LOD | `GN_3Dlod.h` | `sLOD_POLICY`：像素误差 + 屏幕占比，只会更精细 |
 | 遮挡 / overdraw | `GN_HiZ.h` | 深度金字塔 + 遮挡测试 + overdraw 倍数测量 |
+| 网格工具 | `GN_MeshTools.h` | 导入期网格修整：法线焊接（按位置+夹角阈值+面积加权）、顶点质心、最近点、逆绑定取关节位置、alpha 覆盖率判定、名称过滤 |
 
 **效果（多数是 CPU 基座，GPU 后端另在 `_Vulkan/`）**
 
