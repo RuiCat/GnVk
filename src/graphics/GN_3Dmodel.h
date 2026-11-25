@@ -91,12 +91,36 @@ class cMODEL {
     GNg::sVEC3 aScale; // 默认 1,1,1
     bool aVisible;
     sAABB aWorldAABB; // 由 computeWorldAABB() 刷新（世界坐标包围盒）
+    // 局部空间包围盒缓存（见 computeWorldAABB 的注释）
+    GNg::sMAT44 aAABBTransform; // 算出 aWorldAABB 时用的 aTransform（逐位比较用）
+    bool aWorldAABBValid; // 复用判定：变换与网格都没变时可跳过重算
+    uint32_t aAABBMeshCount; // 换网格检测
 
     cMODEL();
     ~cMODEL();
 
     // 用网格顶点 × aTransform 计算世界 AABB；无网格/无顶点返回 false（aWorldAABB 保持为空盒）。
+    //
+    // ── 性能（B3 前置测量后的优化）──
+    // 逐顶点变换在 1 万实体时单帧要 7 ms（占 16.6 ms 预算的 42%），5 万实体 46 ms
+    // （超预算 2.8 倍）—— 而且**被剔除的实体也先付了这个代价**。
+    //
+    // 优化只做一件事：**变换与网格都没变时直接复用上次结果**（16 个 float 逐位比较）。
+    // 语义零变化 —— 该重算的时候仍然逐顶点算，结果与优化前逐位相同。
+    //
+    // ═══ 为什么不用"8 个局部角点变换"（我先写了，然后撤回）═══
+    // 当时的推理是"顶点都在局部 AABB 内、变换线性 ⇒ 极值必在角点取得"。
+    // **这个推理是错的**：角点给出的是"整个局部包围盒变换后的盒"，是**保守上界**；
+    // 实际网格只是盒内的子集（球面顶点就不在角点上）。对立方体两者恰好相等，
+    // 所以最初的立方体用例全绿，直到球体用例才暴露 —— 8 角点法会让 AABB 变大，
+    // 进而改变剔除数量、LOD 选级、排序与阴影拟合，是**静默的行为变更**。
+    // 缓存复用没有这个问题：要么算得一模一样，要么不省。
+    //
+    // 失效条件：换网格（aMeshes/aMeshCount 变了）必须调 InvalidateLocalBounds()。
+    // 只改变换（SetPosition/SetRotation/SetScale）不用管 —— 内部逐位比较矩阵自动失效。
     bool computeWorldAABB();
+    // 换网格后调用：丢弃缓存的局部 AABB（下次 computeWorldAABB 会重算）。
+    void InvalidateLocalBounds();
     // 保守视锥剔除：aVisible && 世界 AABB 与视锥相交（空盒/未计算时为 false）。
     bool isVisibleIn(const sFRUSTUM &frustum) const;
 

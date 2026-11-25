@@ -13,9 +13,35 @@
 
 namespace GN3d {
 
+namespace {
+
+// 逐位比较两个变换矩阵（不用容差：容差会让"几乎没动"的模型一直不失效，
+// 反而在它真的动了之后拿旧 AABB —— 这是 A3 的 transformEquals 同一条口径）。
+bool matrixBitEqual(const GNg::sMAT44 &a, const GNg::sMAT44 &b) {
+    for(int i = 0; i < 16; ++i) {
+        if(a.m[i] != b.m[i]) return false;
+    }
+    return true;
+}
+
+} // namespace
+
+void cMODEL::InvalidateLocalBounds() { aWorldAABBValid = false; }
+
 bool cMODEL::computeWorldAABB() {
+    // ── 快速路径：变换与网格都没变 ⇒ 上次的 aWorldAABB 仍然成立 ──
+    //
+    // 这是本轮的**唯一**优化，语义零变化：该算的时候仍然逐顶点算。
+    // 收益来源：物理静止的实体、以及本帧会被剔除的实体，只要没动过就一次顶点都不碰。
+    if(aWorldAABBValid && aAABBMeshCount == aMeshCount &&
+       matrixBitEqual(aAABBTransform, aTransform)) {
+        return aWorldAABB.aMin.x <= aWorldAABB.aMax.x;
+    }
+
+    // ── 慢路径：逐顶点变换（与原实现完全相同）──
     if(aMeshes == 0 || aMeshCount == 0) {
         aWorldAABB = sAABB();
+        aWorldAABBValid = false;
         return false;
     }
     float minX = FLT_MAX;
@@ -44,6 +70,7 @@ bool cMODEL::computeWorldAABB() {
     }
     if(!any) {
         aWorldAABB = sAABB();
+        aWorldAABBValid = false;
         return false;
     }
     aWorldAABB.aMin.x = minX;
@@ -52,6 +79,9 @@ bool cMODEL::computeWorldAABB() {
     aWorldAABB.aMax.x = maxX;
     aWorldAABB.aMax.y = maxY;
     aWorldAABB.aMax.z = maxZ;
+    aAABBTransform = aTransform;
+    aAABBMeshCount = aMeshCount;
+    aWorldAABBValid = true;
     return true;
 }
 

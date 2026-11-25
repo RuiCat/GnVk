@@ -233,9 +233,12 @@ bool meshWorldCenter(const sMESH &mesh, const sMAT44 &transform, sVEC3 &out) {
 // ═══════════════════════════════════════════════════════════
 //  cMODEL 实现
 // ═══════════════════════════════════════════════════════════
-cMODEL::cMODEL() : aMeshes(0), aMeshCount(0), aMaterials(0), aMaterialCount(0), aVisible(true) {
+cMODEL::cMODEL()
+    : aMeshes(0), aMeshCount(0), aMaterials(0), aMaterialCount(0), aVisible(true),
+      aWorldAABBValid(false), aAABBMeshCount(0) {
     aName[0] = 0;
     Mat44Identity(&aTransform);
+    Mat44Identity(&aAABBTransform);
     aPosition.x = aPosition.y = aPosition.z = 0.0f;
     QuatIdentity(&aRotation);
     aScale.x = aScale.y = aScale.z = 1.0f;

@@ -165,12 +165,12 @@ VK_ICD_FILENAMES="$PWD/.local/probes/lvp_icd.json" make gpuCheck
 
 | 项 | 数值 |
 |----|------|
-| 单元测试用例 | **790**（76 个文件）|
+| 单元测试用例 | **801**（78 个文件）|
 | gpuCheck 文件 | 18 |
 | gpuCheck 实跑 | `pass=126 fail=0 skip=0` |
-| 单测实跑 | `790 cases, 0 failed, 0 assertions failed` |
+| 单测实跑 | `801 cases, 0 failed, 0 assertions failed` |
 | src 源文件 | 181 个 .cpp |
-| src 总行数 | 104467 |
+| src 总行数 | 104524 |
 | 编译产物着色器 | 47 个 .spv |
 
 <!-- AUTO-STATS:END -->

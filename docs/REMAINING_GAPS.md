@@ -26,7 +26,7 @@
 |---|---|---|---|---|
 | B1 | ~~IBL 强度不可连续调节~~ | ✅ 2026-11-25 完成：`GN_VkSetGIIntensity(scale, specularRatio)`，复用 `indirect[0]/[1]` | — | 已完成 |
 | B2 | ~~点光/聚光无阴影~~ | ✅ 2026-11-25 完成：cube shadow map（单光源 6 面）+ `samplerCube` binding 12 + `GN_VkCubeShadow{Begin,FaceBegin,FaceEnd,End}` | — | 已完成 |
-| B3 | 无 GPU 侧剔除 | CPU 逐实体剔除（`cSCENE`） | 实体数上万时 CPU 侧成为瓶颈 | [大改] compute culling |
+| B3 | ~~CPU 剔除是瓶颈~~ | ✅ 2026-11-25 **实测后判定不需要 GPU 剔除**：瓶颈是 `computeWorldAABB` 每帧全量顶点变换，加缓存复用后端到端快 8x（1 万实体 7.1→0.88 ms，占预算 42.5%→5.3%） | 5 万实体仍需 10 ms，但瓶颈已转到排序 + LOD 选级 | [已量化·不做] |
 | B4 | 无遮挡剔除 / 阴影剔除 | 只有视锥剔除 | overdraw 偏高 | [大改] |
 | B6 | ~~cube shadow 的 PCSS 软化~~ | ✅ 2026-11-25 完成：阻塞物搜索 + 半影估计 + PCF；光源物理半径走 `coneAngles.z` | — | 已完成 |
 | B7 | ~~多光源 cube shadow 轮转~~ | ✅ 2026-11-25 完成：`pickCubeShadowLight`（离相机近 + 强度高） | — | 已完成 |
