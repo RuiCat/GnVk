@@ -40,7 +40,7 @@
 | C2 | ~~角色不推动态刚体~~ | ✅ 2026-11-25 完成：`cCHARACTER::SetPhysicsWorld` + 位置分离 + 速度传递；`cPHYSICS_WORLD::QueryBodiesAABB` | — | 已完成 |
 | C3a | ~~root motion~~ | ✅ 2026-11-25 完成：`cROOT_MOTION_EXTRACTOR` + `cCHARACTER::ApplyRootMotion` + 循环回绕补偿 | — | 已完成 |
 | C3b-IK | ~~两骨 IK~~ | ✅ 2026-11-25 完成：`solveTwoBoneIK`（余弦定理 + 极向量）+ `cIK_SOLVER`（骨架取链）+ `GNg::QuatMul` 提升到数学库 | — | 已完成 |
-| C3b-布娃娃 | 布娃娃（约束求解） | 无 | 死亡/受击表现缺失 | [大改] |
+| C3b-布娃娃 | ~~布娃娃~~ | ✅ 2026-11-25 完成：`cRAGDOLL`（骨架→球体链 + distance 关节 + 不互撞组）+ `SyncPose`；13 例单测 + 演示 | 无可视骨架连线/关节角限制，见下 | [已交付·有边界] |
 | C4 | ~~台阶抬升是"抬-移-落"~~ | ✅ 2026-11-25 完成：`sweepCapsuleAgainstTriangles`（保守推进 + 二分）+ `cCHARACTER::stepUpSwept`（可开关，默认开） | — | 已完成 |
 
 ## D. 资产与验证

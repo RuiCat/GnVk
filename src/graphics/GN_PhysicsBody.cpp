@@ -73,6 +73,7 @@ sRIGID_BODY MakeSphereBody(eBODY_TYPE type, const GNg::sVEC3 &pos, float radius,
     body.aSleeping = false;
     body.aSleepTime = 0.0f;
     body.aWorldAABB = sAABB();
+    body.aNoCollideGroup = 0; // 默认不分组（与所有刚体碰撞）
     BodyUpdateInertia(body);
     BodyUpdateWorldState(body);
     return body;
@@ -99,6 +100,7 @@ sRIGID_BODY MakeBoxBody(eBODY_TYPE type, const GNg::sVEC3 &pos, const GNg::sVEC3
     body.aSleeping = false;
     body.aSleepTime = 0.0f;
     body.aWorldAABB = sAABB();
+    body.aNoCollideGroup = 0; // 默认不分组（与所有刚体碰撞）
     BodyUpdateInertia(body);
     BodyUpdateWorldState(body);
     return body;
@@ -126,6 +128,7 @@ sRIGID_BODY MakeCapsuleBody(eBODY_TYPE type, const GNg::sVEC3 &pos, float radius
     body.aSleeping = false;
     body.aSleepTime = 0.0f;
     body.aWorldAABB = sAABB();
+    body.aNoCollideGroup = 0; // 默认不分组（与所有刚体碰撞）
     BodyUpdateInertia(body);
     BodyUpdateWorldState(body);
     return body;

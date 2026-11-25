@@ -467,6 +467,26 @@ $(UNDO_DEMO_BIN): $(UNDO_DEMO_SRC) $(TARGET)
 	@mkdir -p build
 	$(CXX) $(UNDO_DEMO_FLAGS) $(UNDO_DEMO_SRC) $(TEST_LIBS) -o $(UNDO_DEMO_BIN)
 
+# ── 布娃娃演示（C3b）──
+RAGDOLL_SRC   := $(wildcard tests/ragdollDemo/*.cpp)
+RAGDOLL_BIN   := build/ragdollDemo
+RAGDOLL_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES) -Itests/common
+
+.PHONY: ragdollDemo
+ragdollDemo: $(RAGDOLL_BIN)
+	@echo "$(YELLOW)💀 渲染布娃娃演示...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(RAGDOLL_BIN) --out $(GIZMO_VIDEO_OUT)/ragdoll-frames \
+		--frames 360 --size $(GIZMO_VIDEO_SIZE)
+	@$(FFMPEG) -y -loglevel error -framerate 30 -i $(GIZMO_VIDEO_OUT)/ragdoll-frames/frame_%05d.png \
+		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart \
+		$(GIZMO_VIDEO_OUT)/ragdoll.mp4
+	@ls -lh $(GIZMO_VIDEO_OUT)/ragdoll.mp4
+
+$(RAGDOLL_BIN): $(RAGDOLL_SRC) $(wildcard tests/common/*.h) $(TARGET)
+	@echo "$(YELLOW)💀 编译布娃娃演示...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(RAGDOLL_FLAGS) $(RAGDOLL_SRC) $(TEST_LIBS) -o $(RAGDOLL_BIN)
+
 # ── 两骨 IK 演示（C3b）──
 IKDEMO_SRC   := $(wildcard tests/ikDemo/*.cpp)
 IKDEMO_BIN   := build/ikDemo
@@ -552,7 +572,7 @@ $(CHAR_PUSH_BIN): $(CHAR_PUSH_SRC) $(TARGET)
 # 否则它们会先以窗口模式跑一次（无显示时 SKIP → make 直接失败）。
 # 没有 Vulkan 设备时整体 SKIP（退出码 2）。
 .PHONY: smoke
-smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene physicsBoxes characterDemo $(ROOTMOTION_BIN) $(ANIMBLEND_BIN) $(IKDEMO_BIN)
+smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene physicsBoxes characterDemo $(ROOTMOTION_BIN) $(ANIMBLEND_BIN) $(IKDEMO_BIN) $(RAGDOLL_BIN)
 	@echo "$(YELLOW)🚦 示例无窗口冒烟...$(RESET)"
 	@GN_HEADLESS_FRAMES=$(if $(SMOKE_FRAMES),$(SMOKE_FRAMES),8) \
 		LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH bash tests/smoke/runSamples.sh

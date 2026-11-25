@@ -502,6 +502,9 @@ void cPHYSICS_WORLD::BuildContacts() {
         if(IsDynamicBody(A) && A.aSleeping) continue;
         if(IsDynamicBody(B) && B.aSleeping) continue;
 
+        // 同一个非零碰撞组的刚体互不接触（布娃娃的自身刚体不互相推挤）
+        if(A.aNoCollideGroup != 0 && A.aNoCollideGroup == B.aNoCollideGroup) continue;
+
         sCONTACT_MANIFOLD manifold;
         if(!CollideBodies(A, B, manifold) || manifold.aCount == 0) continue;
 
