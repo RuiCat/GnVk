@@ -37,6 +37,8 @@ void bindImoSceneActions(GN::cINPUT_MAP &map) {
     map.Bind(eIMO_ACT_OUTFIT_HAT, GK_2);
     map.Bind(eIMO_ACT_OUTFIT_MASK, GK_3);
     map.Bind(eIMO_ACT_OUTFIT_RIBBON, GK_4);
+    map.Bind(eIMO_ACT_OUTFIT_HAIR, GK_5);
+    map.Bind(eIMO_ACT_OUTFIT_BODY, GK_6);
     map.Bind(eIMO_ACT_OUTFIT_RESET, GK_0);
 }
 

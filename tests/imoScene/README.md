@@ -152,6 +152,7 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
 - 选段：水平速度 <0.4 m/s 播 idle、<4.2 m/s 播 walk、其余播 run；播放速率 = 速度 ÷ 3.0 或 5.5，脚不滑；
 - 转身：模型按移动方向平滑转向（模型正面 = +Z）。没有独立的倒退/侧移动画，倒退与侧移就是「转身走过去」；
 - 调试：`IMO_SCENE_TEST_MOVE=front|back|left|right` 强制移动意图（无键鼠时验证朝向/选段），`IMO_SCENE_ANIM_DIR` 换剪辑目录；
+- 换装/变体：资产里 `Mesh_Hair` 有 9 套发型、`Mesh_Body` 有 12 个身体/服装网格，默认全部渲染会叠在一起；现在默认只显示第一套发型，**键 5 循环切换发型、键 6 循环切换身体/服装、0 恢复全部**（`imoSceneOutfit` 按网格名前缀分族）；
 - 静态配件也跟随：项圈、发饰、Jirai 等网格在 glTF 里没有 skin（父节点是 Armature、顶点已烘进世界坐标），现在按顶点质心绑到最近关节做刚性跟随（项圈→铃铛骨、发饰→头发骨），跟随网格 43/43；
 - 髋部运动：Unity humanoid 的身体前倾/左右摆/上下起伏不在肌肉里，而在 `RootT`/`RootQ`；导出时已把它们施加到髋部（绕髋关节旋转 + 位移增量），上半身随之运动；水平位移仍由游戏逻辑驱动（原地循环）；
 - 摇摆幅度：`RootQ` 的 roll/yaw 默认收敛到原幅度的 30% / 45%（pitch 保留 100%），数值在 `exportClips.py` 的 `BODY_ROLL_SCALE/BODY_YAW_SCALE/BODY_PITCH_SCALE`，也可用同名环境变量重导出：`BODY_ROLL=0.15 BODY_YAW=0.3 python3 .local/anim/exportClips.py Standard_Idle Walking2 Slow_Run`，重启程序生效；

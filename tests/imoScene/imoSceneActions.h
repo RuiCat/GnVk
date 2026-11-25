@@ -23,6 +23,8 @@ enum eIMO_ACT : GN::eACTION {
     eIMO_ACT_OUTFIT_HAT, // 2：帽子（毛线帽/女巫帽）
     eIMO_ACT_OUTFIT_MASK, // 3：口罩
     eIMO_ACT_OUTFIT_RIBBON, // 4：丝带/领结/项圈
+    eIMO_ACT_OUTFIT_HAIR, // 5：循环切换发型变体（Mesh_Hair*）
+    eIMO_ACT_OUTFIT_BODY, // 6：循环切换身体/服装变体（Mesh_Body*）
     eIMO_ACT_OUTFIT_RESET, // 0：全部显示
     eIMO_ACT_COUNT
 };
