@@ -20,6 +20,17 @@ cLIGHT::cLIGHT() : aCount(0), aDirty(true) {
     // 默认阴影贴图大小 + CSM 默认 4 级（分割/texel 由查看器每帧写入）
     aData.shadowParams[0] = 2048.0f;
     aData.shadowParams[1] = 1.0f;
+
+    // 多光源 cube shadow 的默认值。
+    // **必须显式写 layer = -1**：memset 后全是 0，而 0 是**有效的**层号 ——
+    // 着色器会以为"这盏灯有 cube shadow、层号 0"，于是去采样一张从没渲染过的深度图，
+    // 结果是整片场景被错误遮挡（比没有阴影黑得多）。
+    for(uint32_t i = 0; i < 4; ++i) {
+        aData.cubeShadowRange[i][0] = 0.0f;
+        aData.cubeShadowRange[i][1] = 0.0f;
+        aData.cubeShadowRange[i][2] = -1.0f;
+        aData.cubeShadowRange[i][3] = 0.0f;
+    }
 }
 
 void cLIGHT::Clear() {
@@ -32,6 +43,8 @@ void cLIGHT::Clear() {
     aData.shadowParams[1] = 1.0f; // 单级阴影（回退路径）
     aCount = 0;
     aDirty = true;
+    // 清空光源后也要把 cube shadow 的层号置回 -1（见构造函数里的说明）
+    for(uint32_t i = 0; i < 4; ++i) aData.cubeShadowRange[i][2] = -1.0f;
 }
 
 int cLIGHT::AddDirectional(const sVEC3 &dir, const sVEC3 &color, float intensity, bool enableShadow) {
@@ -133,6 +146,8 @@ int cLIGHT::AddSpot(const sVEC3 &pos, const sVEC3 &dir,
 }
 
 void cLIGHT::SetCubeShadowRange(float nearZ, float farZ) {
+    // 旧接口：等价于"给 cube 层 0 设置范围"，写回 shadowParams.z/w 保持兼容
+    // （老着色器/老示例读的是这两个字段）。
     if(!(nearZ > 0.0f)) nearZ = 0.05f;
     if(!(farZ > nearZ)) farZ = nearZ + 1.0f;
     aData.shadowParams[2] = nearZ;
@@ -143,6 +158,31 @@ void cLIGHT::SetCubeShadowRange(float nearZ, float farZ) {
 float cLIGHT::CubeShadowNear() const { return aData.shadowParams[2]; }
 
 float cLIGHT::CubeShadowFar() const { return aData.shadowParams[3]; }
+
+// ═══════════════════════════════════════════════════════════
+//  多光源 cube shadow（B2 扩展）
+// ═══════════════════════════════════════════════════════════
+void cLIGHT::SetCubeShadowRangeForLight(uint32_t lightSlot, float nearZ, float farZ,
+                                        int32_t layer) {
+    if(lightSlot >= 4) return; // cubeShadowRange 只有 4 项
+    if(!(nearZ > 0.0f)) nearZ = 0.05f;
+    if(!(farZ > nearZ)) farZ = nearZ + 1.0f;
+    // layer < 0 表示"这盏灯没有 cube shadow"：把 near 写成 0，
+    // 着色器看到 near <= 0 就保守返回全亮（与旧行为一致）。
+    aData.cubeShadowRange[lightSlot][0] = (layer >= 0) ? nearZ : 0.0f;
+    aData.cubeShadowRange[lightSlot][1] = (layer >= 0) ? farZ : 0.0f;
+    aData.cubeShadowRange[lightSlot][2] = (layer >= 0) ? (float)layer : -1.0f;
+    aData.cubeShadowRange[lightSlot][3] = 0.0f;
+    aDirty = true;
+}
+
+void cLIGHT::ClearCubeShadowRanges() {
+    for(uint32_t i = 0; i < 4; ++i) {
+        for(uint32_t k = 0; k < 4; ++k) aData.cubeShadowRange[i][k] = 0.0f;
+        aData.cubeShadowRange[i][2] = -1.0f; // 层号 -1 = 无
+    }
+    aDirty = true;
+}
 
 float cLIGHT::GetLightRadius(int index) const {
     if(index < 0 || index >= (int)aCount) return 0.0f;
@@ -295,6 +335,68 @@ sCUBE_SHADOW_PICK pickCubeShadowLight(const sLIGHT_UBO &light, const GNg::sVEC3 
     pick.aLightIndex = bestIndex;
     pick.aScore = bestScore;
     return pick;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  多灯选择
+// ═══════════════════════════════════════════════════════════
+sCUBE_SHADOW_PICKS::sCUBE_SHADOW_PICKS() : aCount(0) {
+    for(uint32_t i = 0; i < GN_MAX_CUBE_SHADOW_PICKS; ++i) {
+        aLightIndex[i] = -1;
+        aScore[i] = 0.0f;
+    }
+}
+
+sCUBE_SHADOW_PICKS pickCubeShadowLights(const sLIGHT_UBO &light, const GNg::sVEC3 &cameraPos,
+                                        float maxDistance, uint32_t maxCount) {
+    sCUBE_SHADOW_PICKS picks;
+    if(!(maxDistance > 0.0f)) maxDistance = 40.0f;
+    if(maxCount > GN_MAX_CUBE_SHADOW_PICKS) maxCount = GN_MAX_CUBE_SHADOW_PICKS;
+    if(maxCount == 0) return picks;
+
+    const int count = (int)light.lightCount;
+    if(count <= 0 || count > GN_MAX_LIGHTS) return picks;
+
+    // 先算全部候选的分数，再取前 N 名。
+    // 用"插入排序进结果数组"而不是 sort 整个列表：N ≤ 4，插入更省且稳定
+    // （稳定 = 并列时先注册的在前，与单灯版一致）。
+    for(int i = 0; i < count; ++i) {
+        const sLIGHT_GPU &L = light.lights[i];
+        if(L.direction[3] < 1.5f || L.direction[3] > 2.5f) continue; // 只有 cube shadow 的灯
+        if(L.position[3] < 0.5f) continue; // 方向光没有位置
+
+        const float dx = L.position[0] - cameraPos.x;
+        const float dy = L.position[1] - cameraPos.y;
+        const float dz = L.position[2] - cameraPos.z;
+        const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if(distance > maxDistance) continue;
+
+        const float intensity = L.color[3] > 0.0f ? L.color[3] : 0.0f;
+        const float proximity = 1.0f / (1.0f + distance * 0.08f);
+        const float score = proximity * std::sqrt(intensity);
+        if(!(score > 0.0f)) continue;
+
+        // 找到插入位置：保持降序，**严格大于**才往后挪（并列时已有的在前）
+        uint32_t pos = picks.aCount;
+        for(uint32_t k = 0; k < picks.aCount; ++k) {
+            if(score > picks.aScore[k]) {
+                pos = k;
+                break;
+            }
+        }
+        if(pos >= maxCount) continue; // 进不了前 N 名
+
+        // 后移一位
+        const uint32_t last = (picks.aCount < maxCount) ? picks.aCount : (maxCount - 1);
+        for(uint32_t k = last; k > pos; --k) {
+            picks.aLightIndex[k] = picks.aLightIndex[k - 1];
+            picks.aScore[k] = picks.aScore[k - 1];
+        }
+        picks.aLightIndex[pos] = i;
+        picks.aScore[pos] = score;
+        if(picks.aCount < maxCount) ++picks.aCount;
+    }
+    return picks;
 }
 
 } // namespace GN3d

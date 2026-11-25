@@ -562,10 +562,16 @@ const uint32_t kShadowUBOSlotStride = 256;
 // **cube 的面必须各占一个槽**：只写槽 0 的话 6 面都会读到最后一次写入的矩阵 ——
 // 这与 CSM 早期"4 级共用一个槽"是同一个 bug（当时的表现是所有级联都用最后一级）。
 const uint32_t kCubeShadowSlotBase = 4;
-const uint32_t kShadowUBOSlotCount = 12;
+// **每"灯-面"一个槽**：24 个 face 各占一个（4 + 24 = 28）。
+//
+// 为什么必须 24 个而不是 6 个：命令缓冲是**延迟执行**的。若 4 盏灯复用 6 个槽，
+// 录制第 2 盏灯时会把槽改写，而第 1 盏灯的 6 个 render pass 还没执行 ——
+// 最终所有灯的 24 个面都会读到最后一盏灯的矩阵（阴影全错位）。
+// 这与 CSM 早期"4 级共用一个槽"是同一个 bug。
+const uint32_t kShadowUBOSlotCount = kCubeShadowSlotBase + GN_CUBE_SHADOW_TOTAL_LAYERS;
 VkDescriptorSet s_shadowCascadeSets[kShadowCascadeCount] = {};
 // B2：cube shadow 6 面各一份（绑槽 kCubeShadowSlotBase + face）
-VkDescriptorSet s_cubeShadowFaceSets[6] = {};
+VkDescriptorSet s_cubeShadowFaceSets[GN_CUBE_SHADOW_TOTAL_LAYERS] = {};
 // 常驻映射（初始化期 vkMapMemory 一次）：每级只写自己的槽，避免逐级 map/unmap。
 void *s_shadowUBOMapped = nullptr;
 } // namespace
@@ -597,15 +603,19 @@ void releaseShadowCascadeUbo() {
 
 uint32_t GN_VkShadowCascadeCount() { return kShadowCascadeCount; }
 
-VkDescriptorSet cubeShadowFaceDescriptorSet(uint32_t face) {
-    if(face >= 6u) return VK_NULL_HANDLE;
-    return s_cubeShadowFaceSets[face];
+VkDescriptorSet cubeShadowFaceDescriptorSet(uint32_t slot) {
+    // slot = lightIndex * 6 + face（不是 face 本身）
+    if(slot >= GN_CUBE_SHADOW_TOTAL_LAYERS) return VK_NULL_HANDLE;
+    return s_cubeShadowFaceSets[slot];
 }
 
-void writeCubeShadowLightVP(uint32_t face, const float *matrix16) {
-    if(!s_shadowUBOMapped || !matrix16 || face >= 6u) return;
-    // **每面一个槽**：写同一槽会让 6 个面读到最后一次写入的矩阵
-    memcpy((char *)s_shadowUBOMapped + (size_t)(kCubeShadowSlotBase + face) * kShadowUBOSlotStride,
+void writeCubeShadowLightVP(uint32_t slot, const float *matrix16) {
+    // slot = lightIndex * 6 + face（共 24 个）
+    if(!s_shadowUBOMapped || !matrix16) return;
+    if(slot >= GN_CUBE_SHADOW_TOTAL_LAYERS) return;
+    // **每 slot 一个 UBO 槽**：命令缓冲延迟执行，复用槽会让 24 个面读到最后一个矩阵
+    memcpy((char *)s_shadowUBOMapped +
+               (size_t)(kCubeShadowSlotBase + slot) * kShadowUBOSlotStride,
            matrix16, 64);
 }
 
@@ -803,19 +813,23 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
 
     // B2：cube shadow 的 6 面各一份描述符集（绑槽 4..9）。
     {
-        for(uint32_t f = 0; f < 6; ++f) s_cubeShadowFaceSets[f] = VK_NULL_HANDLE;
-        VkDescriptorSetLayout layouts[6];
-        for(uint32_t f = 0; f < 6; ++f) layouts[f] = GN_Vk.shadowDescriptorLayout;
+        for(uint32_t f = 0; f < GN_CUBE_SHADOW_TOTAL_LAYERS; ++f)
+            s_cubeShadowFaceSets[f] = VK_NULL_HANDLE;
+        // 24 个（4 灯 × 6 面）
+        VkDescriptorSetLayout layouts[GN_CUBE_SHADOW_TOTAL_LAYERS];
+        for(uint32_t f = 0; f < GN_CUBE_SHADOW_TOTAL_LAYERS; ++f)
+            layouts[f] = GN_Vk.shadowDescriptorLayout;
         VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         dai.descriptorPool = GN_Vk.descriptorPool;
-        dai.descriptorSetCount = 6;
+        dai.descriptorSetCount = GN_CUBE_SHADOW_TOTAL_LAYERS;
         dai.pSetLayouts = layouts;
         VkResult res = vkAllocateDescriptorSets(GN_Vk.device, &dai, s_cubeShadowFaceSets);
         if(res != VK_SUCCESS) {
             VkCheck(res, "vkAllocateDescriptorSets cube shadow");
-            for(uint32_t f = 0; f < 6; ++f) s_cubeShadowFaceSets[f] = VK_NULL_HANDLE;
+            for(uint32_t f = 0; f < GN_CUBE_SHADOW_TOTAL_LAYERS; ++f)
+                s_cubeShadowFaceSets[f] = VK_NULL_HANDLE;
         } else {
-            for(uint32_t f = 0; f < 6; ++f) {
+            for(uint32_t f = 0; f < GN_CUBE_SHADOW_TOTAL_LAYERS; ++f) {
                 VkDescriptorBufferInfo dbi = {
                     GN_Vk.shadowUBOBuffer,
                     (VkDeviceSize)(kCubeShadowSlotBase + f) * kShadowUBOSlotStride,
@@ -938,7 +952,9 @@ void init3DCubeShadow(uint32_t size) {
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.extent = {size, size, 1};
     ii.mipLevels = 1;
-    ii.arrayLayers = 6;
+    // **cube array**：每盏灯 6 层，共 6*N 层。
+    // 这样一帧内可以给多盏灯的 cube shadow 各存一份，而不是后渲染的覆盖前面的。
+    ii.arrayLayers = GN_CUBE_SHADOW_TOTAL_LAYERS;
     ii.format = VK_FORMAT_D32_SFLOAT;
     ii.tiling = VK_IMAGE_TILING_OPTIMAL;
     ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -965,28 +981,31 @@ void init3DCubeShadow(uint32_t size) {
     }
     vkBindImageMemory(GN_Vk.device, GN_Vk.cubeShadowImage, GN_Vk.cubeShadowMemory, 0);
 
-    // CUBE 视图（采样）
+    // CUBE_ARRAY 视图（采样）。layerCount 必须是**整个** 6*N：
+    // CUBE_ARRAY 的每个"层"是一个完整立方图，索引就是灯号。
     {
         VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         vi.image = GN_Vk.cubeShadowImage;
-        vi.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        vi.viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
         vi.format = VK_FORMAT_D32_SFLOAT;
         vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         vi.subresourceRange.levelCount = 1;
-        vi.subresourceRange.layerCount = 6;
+        vi.subresourceRange.layerCount = GN_CUBE_SHADOW_TOTAL_LAYERS;
         vkCreateImageView(GN_Vk.device, &vi, 0, &GN_Vk.cubeShadowView);
     }
-    // 每面的 2D 视图（渲染目标）
-    for(uint32_t face = 0; face < 6; ++face) {
+    // 每"灯-面"一个 2D 视图（渲染目标）。索引 = light * 6 + face。
+    // 注意：渲染到 cubearray 的某一层**必须**经 2D(1 层) 视图，
+    // 不能直接用 CUBE_ARRAY 视图当 attachment（那样 layerCount 对不上）。
+    for(uint32_t i = 0; i < GN_CUBE_SHADOW_TOTAL_LAYERS; ++i) {
         VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         vi.image = GN_Vk.cubeShadowImage;
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
         vi.format = VK_FORMAT_D32_SFLOAT;
         vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         vi.subresourceRange.levelCount = 1;
-        vi.subresourceRange.baseArrayLayer = face;
+        vi.subresourceRange.baseArrayLayer = i;
         vi.subresourceRange.layerCount = 1;
-        vkCreateImageView(GN_Vk.device, &vi, 0, &GN_Vk.cubeShadowFaceView[face]);
+        vkCreateImageView(GN_Vk.device, &vi, 0, &GN_Vk.cubeShadowFaceView[i]);
     }
 
     // 采样器：手动比较（与 CSM 一致，PCSS 需要原始深度），border=白 = 图外算"无遮挡"
@@ -1025,32 +1044,34 @@ void init3DCubeShadow(uint32_t size) {
         vkCreateRenderPass(GN_Vk.device, &rpi, 0, &GN_Vk.cubeShadowRenderPass);
     }
 
-    // 6 个 framebuffer
-    for(uint32_t face = 0; face < 6; ++face) {
+    // 每"灯-面"一个 framebuffer（共 6*N）
+    for(uint32_t i = 0; i < GN_CUBE_SHADOW_TOTAL_LAYERS; ++i) {
         VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
         fci.renderPass = GN_Vk.cubeShadowRenderPass;
         fci.attachmentCount = 1;
-        fci.pAttachments = &GN_Vk.cubeShadowFaceView[face];
+        fci.pAttachments = &GN_Vk.cubeShadowFaceView[i];
         fci.width = size;
         fci.height = size;
         fci.layers = 1;
-        vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.cubeShadowFramebuffer[face]);
+        vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.cubeShadowFramebuffer[i]);
     }
     GN_Vk.cubeShadowSize = size;
     GN_Vk.cubeShadowPipeline = VK_NULL_HANDLE;
-    fprintf(stderr, "[GN_Vk] cube shadow 就绪: %u x %u x 6\n", size, size);
+    fprintf(stderr, "[GN_Vk] cube shadow 就绪: %u x %u x %d (每灯 6 面 \u00d7 %d 盏)\n",
+            size, size, GN_CUBE_SHADOW_TOTAL_LAYERS, GN_MAX_CUBE_SHADOW_LIGHTS);
+    GN_Vk.cubeShadowLightCount = 0;
 }
 
 void destroy3DCubeShadow() {
     if(GN_Vk.device == VK_NULL_HANDLE) return;
-    for(uint32_t face = 0; face < 6; ++face) {
-        if(GN_Vk.cubeShadowFramebuffer[face]) {
-            vkDestroyFramebuffer(GN_Vk.device, GN_Vk.cubeShadowFramebuffer[face], 0);
-            GN_Vk.cubeShadowFramebuffer[face] = VK_NULL_HANDLE;
+    for(uint32_t i = 0; i < GN_CUBE_SHADOW_TOTAL_LAYERS; ++i) {
+        if(GN_Vk.cubeShadowFramebuffer[i]) {
+            vkDestroyFramebuffer(GN_Vk.device, GN_Vk.cubeShadowFramebuffer[i], 0);
+            GN_Vk.cubeShadowFramebuffer[i] = VK_NULL_HANDLE;
         }
-        if(GN_Vk.cubeShadowFaceView[face]) {
-            vkDestroyImageView(GN_Vk.device, GN_Vk.cubeShadowFaceView[face], 0);
-            GN_Vk.cubeShadowFaceView[face] = VK_NULL_HANDLE;
+        if(GN_Vk.cubeShadowFaceView[i]) {
+            vkDestroyImageView(GN_Vk.device, GN_Vk.cubeShadowFaceView[i], 0);
+            GN_Vk.cubeShadowFaceView[i] = VK_NULL_HANDLE;
         }
     }
     if(GN_Vk.cubeShadowRenderPass) {

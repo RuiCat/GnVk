@@ -55,8 +55,17 @@ struct alignas(16) sLIGHT_UBO {
     float shadowParams[4]; // x=Shadow Map 分辨率, y=级数(1..4), z/w=0
     float cascadeSplits[4]; // 各级视距分割 (米，升序；选级用包含测试，此处供日志/验收)
     float shadowTexelWorld[4]; // 各级 texel 世界尺寸 (米/texel，法线偏移用)
+
+    // ── 多光源 cube shadow（B2 扩展）──
+    // 每盏带 cube shadow 的灯占一项：.x = near, .y = far, .z = 层索引(0..3)，.w 保留。
+    //
+    // **在末尾追加**而不是改已有字段偏移：前面 976 B 的布局是既有的着色器契约
+    // （lao 的 CSM 字段偏移被文档固定为 672/1696/1712/1728），改动会让所有
+    // 引用它的着色器静默错位。追加只影响 sizeof，不破坏任何既有偏移。
+    float cubeShadowRange[4][4];
 };
-static_assert(sizeof(sLIGHT_UBO) == 976, "sLIGHT_UBO 必须为 976 字节");
+static_assert(sizeof(sLIGHT_UBO) == 1040,
+              "sLIGHT_UBO = 976（既有契约）+ 4×16（cube shadow 每灯 near/far/layer）");
 
 // ═══════════════════════════════════════════════════════════
 //  cLIGHT — 光源管理器
@@ -94,6 +103,11 @@ class cLIGHT {
     // **NDC 深度（0..1）**，而着色器里算出的是世界距离（米）—— 两者要比较就得先换算，
     // 换算需要 near/far。不设的话着色器没法把米转成 NDC，只能保守地返回"全亮"。
     // 写入 LIGHT_UBO 的 shadowParams.z/w（这两个位置此前未使用）。
+    // B2 扩展：**多盏灯**各自的 cube shadow 深度范围。
+    // lightSlot = 该灯在 UBO lights[] 里的下标；layer = 它在 cube array 里的层号。
+    // 旧接口 SetCubeShadowRange 保留（等价于对 layer 0 的灯设置）。
+    void SetCubeShadowRangeForLight(uint32_t lightSlot, float nearZ, float farZ, int32_t layer);
+    void ClearCubeShadowRanges();
     void SetCubeShadowRange(float nearZ, float farZ);
     float CubeShadowNear() const;
     float CubeShadowFar() const;
@@ -152,6 +166,31 @@ struct sCUBE_SHADOW_PICK {
 // 从 LIGHT_UBO 里挑一盏该渲 cube shadow 的灯。maxDistance <= 0 用默认 40 m。
 sCUBE_SHADOW_PICK pickCubeShadowLight(const sLIGHT_UBO &light, const GNg::sVEC3 &cameraPos,
                                       float maxDistance = 40.0f);
+
+// ═══════════════════════════════════════════════════════════
+//  多光源 cube shadow 的选灯（B2 扩展）
+// ═══════════════════════════════════════════════════════════
+#define GN_MAX_CUBE_SHADOW_PICKS 4
+
+struct sCUBE_SHADOW_PICKS {
+    int aLightIndex[GN_MAX_CUBE_SHADOW_PICKS]; // 按评分**从高到低**排；-1 表示空位
+    float aScore[GN_MAX_CUBE_SHADOW_PICKS];
+    uint32_t aCount; // 实际选中几盏（0..4）
+
+    sCUBE_SHADOW_PICKS();
+};
+
+// 挑出最多 maxCount 盏该渲 cube shadow 的灯，按评分降序。
+//
+// 与单灯版**共用同一套评分**（离相机近 + 强度高 + 距离上限），只是改成取前 N 名 ——
+// 这样"单灯时代挑中的那一盏"在多灯时代依然是第一名，行为可预测。
+// 并列时**先注册的在前**（与单灯版一致）。
+//
+// **返回的灯按评分排序后，cube 层号 = 它在返回数组里的下标**（0..3）。
+// 这样层号与"重要性"一致，且不会因为某些灯没开阴影而出现空洞。
+sCUBE_SHADOW_PICKS pickCubeShadowLights(const sLIGHT_UBO &light, const GNg::sVEC3 &cameraPos,
+                                        float maxDistance = 40.0f,
+                                        uint32_t maxCount = GN_MAX_CUBE_SHADOW_PICKS);
 
 } // namespace GN3d
 #endif // _GN_3DLIGHT_H_

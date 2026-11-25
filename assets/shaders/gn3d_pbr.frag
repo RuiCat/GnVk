@@ -27,9 +27,13 @@ layout(binding = 1, set = 0) uniform sampler2D texSampler;
 layout(binding = 3, set = 0) uniform sampler2D normalSampler;  // 法线贴图
 // L3c：阴影图改为 2D 数组（0..3 层 = CSM 级，契约 §4）；PCSS 仍手动比较原始深度。
 layout(binding = 4, set = 0) uniform sampler2DArray shadowSampler;
-// B2：点光/聚光的 cube shadow（单光源，6 面 D32）。与上面的 2D array 是两套资源：
-// 4 是方向光的 CSM 级联，12 是点光/聚光的位置无关立方图。
-layout(binding = 12, set = 0) uniform samplerCube cubeShadowSampler;
+// B2：点光/聚光的 cube shadow。与上面的 2D array 是两套资源：
+// 4 是方向光的 CSM 级联，12 是点光/聚光的立方图。
+//
+// **B2 扩展：改成 CUBE ARRAY**，每盏灯占一层（一个完整立方图）。
+// 之前是单张 samplerCube —— 一帧里只能给一盏灯投影，后渲染的会覆盖前面的，
+// 多灯场景里只有最后一盏有阴影。
+layout(binding = 12, set = 0) uniform samplerCubeArray cubeShadowSampler;
 layout(binding = 5, set = 0) uniform samplerCube skyboxCubemap;     // 天空盒 IBL
 
 // P11-S3：雾（独立 Weather UBO，绑定 6；density == 0 时无效果）
@@ -86,6 +90,9 @@ layout(binding = 2, set = 0) uniform LightUBO {
     vec4 shadowParams;      // x=阴影图分辨率, y=级数(1..4), z/w=0
     vec4 cascadeSplits;     // 各级视距分割（米，升序；选级用包含测试）
     vec4 shadowTexelWorld;  // 各级 texel 世界尺寸（米/texel，法线偏移用）
+    // B2 扩展：多光源 cube shadow。每项 .x=near, .y=far, .z=层索引(0..3，<0=无)，.w 保留。
+    // **顺序必须与 C++ 的 sLIGHT_UBO::cubeShadowRange 完全一致**（std140 下 vec4[4] 是 64 B）。
+    vec4 cubeShadowRange[4];
 } lightData;
 
 // PBR 模式下 push_constant 重映射:
@@ -97,6 +104,9 @@ layout(push_constant) uniform ModelPC {
     vec4 emissive;      // .rgb=自发光颜色（线性）, .a=强度倍率
 } pc;
 
+// 本文件用了 cube shadow（点光/聚光）⇒ 打开 sceneLighting.glsl 里的那段守卫。
+// 必须在 include **之前**定义（未定义的 shader 不编译 cubeShadowFactor）。
+#define GN_HAS_CUBE_SHADOW_ARRAY 1
 // 公共光照片段（B5d-S25）：本文件引用 SceneUBO/FogUBO/GIUBO/LightUBO 与
 // transmittanceLut/shadowSampler，必须在上述声明之后 include（纯数学见 brdfLighting.glsl）。
 #include "sceneLighting.glsl"
@@ -206,7 +216,8 @@ float ShadowCalculation(vec4 fragPosLightSpace, float layer, vec3 N, vec3 L) {
 //   0.0 = 无阴影 (点光源默认)
 //   1.0 = 2D shadow map (方向光/聚光灯)
 //   2.0 = cube shadow map (点光源 — 预留)
-vec3 CalcPBRLight(Light L, vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 F0) {
+vec3 CalcPBRLight(Light L, vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 F0,
+                  int lightSlot) {
     vec3 lightColor = L.color.rgb * L.color.a;
     vec3 Ldir;
     float attenuation = 1.0;
@@ -250,17 +261,18 @@ vec3 CalcPBRLight(Light L, vec3 N, vec3 V, vec3 albedo, float roughness, float m
         }
     }
     // B2：点光/聚光走 cube shadow。shadowType == 2 表示"这盏灯有 cube shadow"。
-    // softness 按光源尺寸给：点光用固定小值（真实点光源无面积），聚光按锥角略放大。
+    // B2 扩展：**每盏灯有自己的一层与自己的深度范围**（lightData.cubeShadowRange[slot]）。
+    // 之前是全局 shadowParams.z/w + 单张 cube map ⇒ 多灯里只有最后一盏对得上。
     else if (shadowType > 1.5 && shadowType < 2.5) {
         // B2b：PCSS。半影宽度由**光源物理半径**（L.coneAngles.z）与遮挡物-接收面距离决定，
         // 不再是一个写死的软度常数 —— 遮挡物贴近接收面时边缘自然变锐（接触硬化）。
         // 半径 0 表示调用方没设：给 0.1 m（约等于一个灯泡的灯丝尺度）。
         float lightRadius = L.coneAngles.z;
         if (lightRadius <= 0.0) lightRadius = 0.1;
-        // cube 的深度范围由调用方在渲染 cube shadow 时通过 SetCubeShadowRange 写进
-        // shadowParams.z/w（见 GN_3Dlight.h）。未设置时 cubShadowFactor 会保守返回全亮。
+        // .x = near, .y = far, .z = 层索引（<0 表示这盏灯没有可用的 cube shadow）
+        vec4 cubeInfo = lightData.cubeShadowRange[lightSlot];
         shadow = cubeShadowFactor(fragWorldPos, L.position.xyz, N, lightRadius,
-                                  lightData.shadowParams.z, lightData.shadowParams.w);
+                                  cubeInfo.x, cubeInfo.y, int(cubeInfo.z));
     }
     
     vec3 H = normalize(V + Ldir);
@@ -317,7 +329,7 @@ void main() {
     vec3 Lo = vec3(0.0);
     int count = int(lightData.lightCount);
     for (int i = 0; i < count && i < MAX_LIGHTS; i++) {
-        Lo += CalcPBRLight(lightData.lights[i], N, V, albedo, roughness, metallic, F0);
+        Lo += CalcPBRLight(lightData.lights[i], N, V, albedo, roughness, metallic, F0, i);
     }
     
     // ═══════════════════════════════════════════════════════

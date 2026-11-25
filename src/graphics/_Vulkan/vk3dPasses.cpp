@@ -104,6 +104,7 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
 namespace {
 bool s_inCubeShadowPass = false;
 sVEC3 s_cubeShadowLightPos = {0.0f, 0.0f, 0.0f};
+uint32_t s_cubeShadowLightIndex = 0; // 当前正在渲染哪盏灯（0..GN_MAX_CUBE_SHADOW_LIGHTS-1）
 
 const sVEC3 kCubeFaceDir[6] = {{1.0f, 0.0f, 0.0f},  {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
                                {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},  {0.0f, 0.0f, -1.0f}};
@@ -114,13 +115,21 @@ const sVEC3 kCubeFaceUp[6] = {{0.0f, -1.0f, 0.0f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0
 uint32_t GN_VkCubeShadowSize() { return GN_Vk.cubeShadowSize; }
 
 bool GN_VkCubeShadowBegin(const sVEC3 &lightPos, float nearZ, float farZ) {
+    // 旧签名：等价于"渲染第 0 盏灯"。保留是为了不破坏已有调用方。
+    return GN_VkCubeShadowBeginForLight(0, lightPos, nearZ, farZ);
+}
+
+bool GN_VkCubeShadowBeginForLight(uint32_t lightIndex, const sVEC3 &lightPos, float nearZ,
+                                 float farZ) {
     if(!GN_Vk.initialized) return false;
     if(GN_Vk.cubeShadowImage == VK_NULL_HANDLE || GN_Vk.cubeShadowRenderPass == VK_NULL_HANDLE) {
         return false;
     }
+    if(lightIndex >= GN_MAX_CUBE_SHADOW_LIGHTS) return false;
     if(s_in3DPass || s_inShadowPass || s_inCubeShadowPass) return false;
     if(!(farZ > nearZ + 1.0e-4f)) return false;
     s_cubeShadowLightPos = lightPos;
+    s_cubeShadowLightIndex = lightIndex;
 
     // 与 CSM 的 ShadowPassBegin 同理：先把挂起的 2D 批次刷掉、结束当前 render pass，
     // 否则在 render pass 内再 BeginRenderPass 是非法的。
@@ -157,8 +166,12 @@ bool GN_VkCubeShadowBegin(const sVEC3 &lightPos, float nearZ, float farZ) {
 
 void GN_VkCubeShadowFaceBegin(const sVEC3 &lightPos, uint32_t face, float nearZ, float farZ) {
     if(!s_inCubeShadowPass || face >= 6) return;
-    if(GN_Vk.cubeShadowFramebuffer[face] == VK_NULL_HANDLE) {
-        fprintf(stderr, "[cube] face %u framebuffer NULL\n", face);
+    // 帧缓冲索引 = 灯号 * 6 + 面号（见 GN_CUBE_SHADOW_TOTAL_LAYERS 的说明）
+    const uint32_t slot = s_cubeShadowLightIndex * 6u + face;
+    if(slot >= GN_CUBE_SHADOW_TOTAL_LAYERS) return;
+    if(GN_Vk.cubeShadowFramebuffer[slot] == VK_NULL_HANDLE) {
+        fprintf(stderr, "[cube] face %u (light %u) framebuffer NULL\n", face,
+                s_cubeShadowLightIndex);
         return;
     }
     if(GN_Vk.cubeShadowPipeline == VK_NULL_HANDLE) {
@@ -181,13 +194,13 @@ void GN_VkCubeShadowFaceBegin(const sVEC3 &lightPos, uint32_t face, float nearZ,
     // 所以这里同样写到槽 0 —— 但**不能**和 CSM 同帧交叉使用：CSM 在帧首一次录完 4 级，
     // cube 在其后录 6 面，两者各自读自己那一次写入的值（命令缓冲顺序保证）。
     // 每面写自己的槽（4..9）。写同一个槽会让 6 个面都用最后一次的矩阵。
-    writeCubeShadowLightVP(face, viewProj.m);
+    writeCubeShadowLightVP(slot, viewProj.m); // slot = light*6 + face
 
     VkClearValue cv;
     cv.depthStencil = {1.0f, 0};
     VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     rpi.renderPass = GN_Vk.cubeShadowRenderPass;
-    rpi.framebuffer = GN_Vk.cubeShadowFramebuffer[face];
+    rpi.framebuffer = GN_Vk.cubeShadowFramebuffer[slot];
     rpi.renderArea = {{0, 0}, {GN_Vk.cubeShadowSize, GN_Vk.cubeShadowSize}};
     rpi.clearValueCount = 1;
     rpi.pClearValues = &cv;
@@ -203,7 +216,7 @@ void GN_VkCubeShadowFaceBegin(const sVEC3 &lightPos, uint32_t face, float nearZ,
     VkRect2D sc = {{0, 0}, {GN_Vk.cubeShadowSize, GN_Vk.cubeShadowSize}};
     vkCmdSetViewport(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &vp);
     vkCmdSetScissor(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &sc);
-    VkDescriptorSet set = cubeShadowFaceDescriptorSet(face);
+    VkDescriptorSet set = cubeShadowFaceDescriptorSet(slot);
     if(set != VK_NULL_HANDLE) {
         vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame],
                                 VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.shadowPipelineLayout, 0, 1,
@@ -225,7 +238,16 @@ void GN_VkCubeShadowEnd() {
     if(!s_inCubeShadowPass) return;
     if(s_inShadowPass) GN_VkCubeShadowFaceEnd();
     s_inCubeShadowPass = false;
+    // 记录"本帧至少渲染到第几盏灯"。着色器侧看到某灯的 layer >= 0 才会去采样，
+    // 所以这里只是给诊断/验收用（GN_VkCubeShadowLightCount）。
+    if(GN_Vk.cubeShadowLightCount < s_cubeShadowLightIndex + 1) {
+        GN_Vk.cubeShadowLightCount = s_cubeShadowLightIndex + 1;
+    }
 }
+
+uint32_t GN_VkCubeShadowLightCount() { return GN_Vk.cubeShadowLightCount; }
+
+void GN_VkResetCubeShadowLightCount() { GN_Vk.cubeShadowLightCount = 0; }
 
 void GN_VkShadowPassEnd() {
     if(!GN_Vk.initialized || !s_inShadowPass) return;

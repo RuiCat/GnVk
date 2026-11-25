@@ -1,5 +1,19 @@
 #ifndef _GN_VK_H_
 #define _GN_VK_H_
+
+// ═══════════════════════════════════════════════════════════
+//  多光源 cube shadow（B2 扩展）
+// ═══════════════════════════════════════════════════════════
+// 一张 cube map 只能服务一盏灯（后渲染的会覆盖前面的），所以这里做成
+// **cube array**：每盏灯占 6 层（CUBE_ARRAY 的每一"层"是一个完整立方图）。
+// 采样用 `texture(samplerCubeArray, vec4(dir, lightIndex), 0.0)`。
+//
+// 上限取 4：每盏灯 6 × 1024² × 4 B ≈ 25 MB，4 盏 = 100 MB，已经不小。
+// 超过 4 盏灯需要阴影时，超出的按"无阴影"处理（而不是静默复用别人的层 ——
+// 那会让阴影出现在错误的灯上，比没有阴影更糟）。
+#define GN_MAX_CUBE_SHADOW_LIGHTS 4
+// 总层数 = 灯数 × 6
+#define GN_CUBE_SHADOW_TOTAL_LAYERS (GN_MAX_CUBE_SHADOW_LIGHTS * 6)
 // ╔══════════════════════════════════════════════════════════╗
 // ║  GN_mini — Vulkan 后端 (替代 OpenGL/_Graphics)          ║
 // ╚══════════════════════════════════════════════════════════╝
@@ -303,16 +317,18 @@ struct GN_VkContext {
         // 共用一张图会让两者的渲染时机互相踩（CSM 在帧首渲染，cube 需要知道点光位置）。
         VkImage cubeShadowImage;
         VkDeviceMemory cubeShadowMemory;
-        VkImageView cubeShadowView;      // CUBE 视图（采样用）
-        VkImageView cubeShadowFaceView[6]; // 每面 2D 视图（渲染目标用）
+        VkImageView cubeShadowView; // CUBE_ARRAY 视图（采样用；layerCount = 6*N）
+        // 每"灯-面"一个 2D 视图。索引 = lightIndex * 6 + face。
+        VkImageView cubeShadowFaceView[GN_CUBE_SHADOW_TOTAL_LAYERS];
         VkSampler cubeShadowSampler;
         VkRenderPass cubeShadowRenderPass;
-        VkFramebuffer cubeShadowFramebuffer[6];
+        VkFramebuffer cubeShadowFramebuffer[GN_CUBE_SHADOW_TOTAL_LAYERS];
         // cube 专用的 depth-only 管线：**动态 viewport**。
         // 不能复用 CSM 的 shadowPipeline —— 它的 viewport 写死 smSize(2048)，
         // 而 cube 是 1024，渲染结果会被缩放到图幅的右下角（实测 bbox x[686,1023]）。
         VkPipeline cubeShadowPipeline;
-        uint32_t cubeShadowSize; // 默认 1024（6 面 × 1024² ≈ 25 MB @ D32）
+        uint32_t cubeShadowSize; // 默认 1024（单灯 6 面 × 1024² ≈ 25 MB @ D32）
+        uint32_t cubeShadowLightCount; // 本帧实际渲染了几盏灯的 cube shadow（0..4）
         VkBuffer shadowUBOBuffer;
         VkDeviceMemory shadowUBOMemory;
         uint32_t shadowMapSize;                                                // 默认 2048
@@ -458,7 +474,7 @@ struct GN_VkContext {
                      vertexCount(0), indexCount(0)
 #ifdef GN_USING_3D
                      ,
-                     msaaSamples(VK_SAMPLE_COUNT_4_BIT), depthImage(VK_NULL_HANDLE), depthMemory(VK_NULL_HANDLE), depthView(VK_NULL_HANDLE), depthFormat(VK_FORMAT_D32_SFLOAT), msaaColorImage(VK_NULL_HANDLE), msaaColorMemory(VK_NULL_HANDLE), msaaColorView(VK_NULL_HANDLE), renderPass3D(VK_NULL_HANDLE), pipelineLayout3D(VK_NULL_HANDLE), pipeline3D(VK_NULL_HANDLE), descriptorLayout3D(VK_NULL_HANDLE), descriptorSet3D(VK_NULL_HANDLE), uniformBuffer3D(VK_NULL_HANDLE), uniformMemory3D(VK_NULL_HANDLE), lightBuffer3D(VK_NULL_HANDLE), lightMemory3D(VK_NULL_HANDLE), pipelineLayoutPBR(VK_NULL_HANDLE), pipelinePBR(VK_NULL_HANDLE), pipelinePBRBlend(VK_NULL_HANDLE), descriptorLayoutPBR(VK_NULL_HANDLE), descriptorSetPBR(VK_NULL_HANDLE), shadowImage(VK_NULL_HANDLE), shadowMemory(VK_NULL_HANDLE), shadowView(VK_NULL_HANDLE), shadowSampler(VK_NULL_HANDLE), shadowRenderPass(VK_NULL_HANDLE), shadowFramebuffer(VK_NULL_HANDLE), shadowPipelineLayout(VK_NULL_HANDLE), shadowPipeline(VK_NULL_HANDLE), shadowDescriptorLayout(VK_NULL_HANDLE), shadowDescriptorSet(VK_NULL_HANDLE), cubeShadowImage(VK_NULL_HANDLE), cubeShadowMemory(VK_NULL_HANDLE), cubeShadowView(VK_NULL_HANDLE), cubeShadowSampler(VK_NULL_HANDLE), cubeShadowRenderPass(VK_NULL_HANDLE), cubeShadowPipeline(VK_NULL_HANDLE), cubeShadowSize(0), shadowUBOBuffer(VK_NULL_HANDLE), shadowUBOMemory(VK_NULL_HANDLE), shadowMapSize(2048), vertexBuffer3D(VK_NULL_HANDLE), vertexMemory3D(VK_NULL_HANDLE), indexBuffer3D(VK_NULL_HANDLE), indexMemory3D(VK_NULL_HANDLE), hdrImage(VK_NULL_HANDLE), hdrMemory(VK_NULL_HANDLE), hdrView(VK_NULL_HANDLE), hdrSampler(VK_NULL_HANDLE), hdrRenderPass(VK_NULL_HANDLE), hdrFramebuffers(nullptr), compositePipelineLayout(VK_NULL_HANDLE), compositePipeline(VK_NULL_HANDLE), compositeDescriptorLayout(VK_NULL_HANDLE), compositeDescriptorSet(VK_NULL_HANDLE), compositeRenderPass(VK_NULL_HANDLE), compositeFramebuffers(nullptr), skyboxImage(VK_NULL_HANDLE), skyboxMemory(VK_NULL_HANDLE), skyboxView(VK_NULL_HANDLE), skyboxSampler(VK_NULL_HANDLE), skyboxPipelineLayout(VK_NULL_HANDLE), skyboxPipeline(VK_NULL_HANDLE), skyboxDescriptorLayout(VK_NULL_HANDLE), skyboxDescriptorSet(VK_NULL_HANDLE), skyboxUBOBuffer(VK_NULL_HANDLE), skyboxUBOMemory(VK_NULL_HANDLE), envBakeImage(VK_NULL_HANDLE), envBakeMemory(VK_NULL_HANDLE), envBakeRenderPass(VK_NULL_HANDLE), envBakeFramebuffers(nullptr), envBakePipelineLayout(VK_NULL_HANDLE), envBakePipeline(VK_NULL_HANDLE), envBakeDescriptorLayout(VK_NULL_HANDLE), envBakeUBOBuffer(VK_NULL_HANDLE), envBakeUBOMemory(VK_NULL_HANDLE), envBakeSize(0), envPrefilteredImage(VK_NULL_HANDLE), envPrefilteredMemory(VK_NULL_HANDLE), envPrefilteredView(VK_NULL_HANDLE), envPrefilteredSampler(VK_NULL_HANDLE), envPrefilteredMipCount(0), brdfLutImage(VK_NULL_HANDLE), brdfLutMemory(VK_NULL_HANDLE), brdfLutView(VK_NULL_HANDLE), brdfLutSampler(VK_NULL_HANDLE), giUBOBuffer(VK_NULL_HANDLE), giUBOMemory(VK_NULL_HANDLE), ssaoRawImage(VK_NULL_HANDLE), ssaoRawMemory(VK_NULL_HANDLE), ssaoRawView(VK_NULL_HANDLE), ssaoBlurImage(VK_NULL_HANDLE), ssaoBlurMemory(VK_NULL_HANDLE), ssaoBlurView(VK_NULL_HANDLE), ssaoSampler(VK_NULL_HANDLE), ssaoRenderPass(VK_NULL_HANDLE), ssaoBlurRenderPass(VK_NULL_HANDLE), ssaoFramebuffer(VK_NULL_HANDLE), ssaoBlurFramebuffer(VK_NULL_HANDLE), ssaoDescriptorLayout(VK_NULL_HANDLE), ssaoDescriptorSet(VK_NULL_HANDLE), ssaoBlurDescriptorLayout(VK_NULL_HANDLE), ssaoBlurDescriptorSet(VK_NULL_HANDLE), ssaoPipelineLayout(VK_NULL_HANDLE), ssaoPipeline(VK_NULL_HANDLE), ssaoBlurPipelineLayout(VK_NULL_HANDLE), ssaoBlurPipeline(VK_NULL_HANDLE), ssaoUBOBuffer(VK_NULL_HANDLE), ssaoUBOMemory(VK_NULL_HANDLE), ssgiRawImage(VK_NULL_HANDLE), ssgiRawMemory(VK_NULL_HANDLE), ssgiRawView(VK_NULL_HANDLE), ssgiDenoisedImage(VK_NULL_HANDLE), ssgiDenoisedMemory(VK_NULL_HANDLE), ssgiDenoisedView(VK_NULL_HANDLE), ssgiSampler(VK_NULL_HANDLE), ssgiNearestSampler(VK_NULL_HANDLE), ssgiRenderPass(VK_NULL_HANDLE), ssgiDenoiseRenderPass(VK_NULL_HANDLE), ssgiFramebuffer(VK_NULL_HANDLE), ssgiDenoiseFramebuffer(VK_NULL_HANDLE), ssgiDescriptorLayout(VK_NULL_HANDLE), ssgiDescriptorSet(VK_NULL_HANDLE), ssgiDenoiseDescriptorLayout(VK_NULL_HANDLE), ssgiDenoiseDescriptorSet(VK_NULL_HANDLE), ssgiPipelineLayout(VK_NULL_HANDLE), ssgiPipeline(VK_NULL_HANDLE), ssgiDenoisePipelineLayout(VK_NULL_HANDLE), ssgiDenoisePipeline(VK_NULL_HANDLE), ssgiUBOBuffer(VK_NULL_HANDLE), ssgiUBOMemory(VK_NULL_HANDLE), probeSampler(VK_NULL_HANDLE), probeUBOBuffer(VK_NULL_HANDLE), probeUBOMemory(VK_NULL_HANDLE), gNormalRoughImage(VK_NULL_HANDLE), gAlbedoMetalImage(VK_NULL_HANDLE), gAoImage(VK_NULL_HANDLE), gDepthImage(VK_NULL_HANDLE), gNormalRoughMemory(VK_NULL_HANDLE), gAlbedoMetalMemory(VK_NULL_HANDLE), gAoMemory(VK_NULL_HANDLE), gDepthMemory(VK_NULL_HANDLE), gNormalRoughView(VK_NULL_HANDLE), gAlbedoMetalView(VK_NULL_HANDLE), gAoView(VK_NULL_HANDLE), gDepthView(VK_NULL_HANDLE), gBufferSampler(VK_NULL_HANDLE), gBufferRenderPass(VK_NULL_HANDLE), gBufferFramebuffers(nullptr), gBufferPipelineLayout(VK_NULL_HANDLE), gBufferPipeline(VK_NULL_HANDLE), gBufferDescriptorLayout(VK_NULL_HANDLE), gBufferDescriptorSet(VK_NULL_HANDLE), deferredLightPipelineLayout(VK_NULL_HANDLE), deferredLightPipeline(VK_NULL_HANDLE), deferredLightDescriptorLayout(VK_NULL_HANDLE), deferredLightDescriptorSet(VK_NULL_HANDLE), deferredLightRenderPass(VK_NULL_HANDLE), deferredLightFramebuffers(nullptr), gBufferDebugPipelineLayout(VK_NULL_HANDLE), gBufferDebugPipeline(VK_NULL_HANDLE)
+                     msaaSamples(VK_SAMPLE_COUNT_4_BIT), depthImage(VK_NULL_HANDLE), depthMemory(VK_NULL_HANDLE), depthView(VK_NULL_HANDLE), depthFormat(VK_FORMAT_D32_SFLOAT), msaaColorImage(VK_NULL_HANDLE), msaaColorMemory(VK_NULL_HANDLE), msaaColorView(VK_NULL_HANDLE), renderPass3D(VK_NULL_HANDLE), pipelineLayout3D(VK_NULL_HANDLE), pipeline3D(VK_NULL_HANDLE), descriptorLayout3D(VK_NULL_HANDLE), descriptorSet3D(VK_NULL_HANDLE), uniformBuffer3D(VK_NULL_HANDLE), uniformMemory3D(VK_NULL_HANDLE), lightBuffer3D(VK_NULL_HANDLE), lightMemory3D(VK_NULL_HANDLE), pipelineLayoutPBR(VK_NULL_HANDLE), pipelinePBR(VK_NULL_HANDLE), pipelinePBRBlend(VK_NULL_HANDLE), descriptorLayoutPBR(VK_NULL_HANDLE), descriptorSetPBR(VK_NULL_HANDLE), shadowImage(VK_NULL_HANDLE), shadowMemory(VK_NULL_HANDLE), shadowView(VK_NULL_HANDLE), shadowSampler(VK_NULL_HANDLE), shadowRenderPass(VK_NULL_HANDLE), shadowFramebuffer(VK_NULL_HANDLE), shadowPipelineLayout(VK_NULL_HANDLE), shadowPipeline(VK_NULL_HANDLE), shadowDescriptorLayout(VK_NULL_HANDLE), shadowDescriptorSet(VK_NULL_HANDLE), cubeShadowImage(VK_NULL_HANDLE), cubeShadowMemory(VK_NULL_HANDLE), cubeShadowView(VK_NULL_HANDLE), cubeShadowSampler(VK_NULL_HANDLE), cubeShadowRenderPass(VK_NULL_HANDLE), cubeShadowPipeline(VK_NULL_HANDLE), cubeShadowSize(0), cubeShadowLightCount(0), shadowUBOBuffer(VK_NULL_HANDLE), shadowUBOMemory(VK_NULL_HANDLE), shadowMapSize(2048), vertexBuffer3D(VK_NULL_HANDLE), vertexMemory3D(VK_NULL_HANDLE), indexBuffer3D(VK_NULL_HANDLE), indexMemory3D(VK_NULL_HANDLE), hdrImage(VK_NULL_HANDLE), hdrMemory(VK_NULL_HANDLE), hdrView(VK_NULL_HANDLE), hdrSampler(VK_NULL_HANDLE), hdrRenderPass(VK_NULL_HANDLE), hdrFramebuffers(nullptr), compositePipelineLayout(VK_NULL_HANDLE), compositePipeline(VK_NULL_HANDLE), compositeDescriptorLayout(VK_NULL_HANDLE), compositeDescriptorSet(VK_NULL_HANDLE), compositeRenderPass(VK_NULL_HANDLE), compositeFramebuffers(nullptr), skyboxImage(VK_NULL_HANDLE), skyboxMemory(VK_NULL_HANDLE), skyboxView(VK_NULL_HANDLE), skyboxSampler(VK_NULL_HANDLE), skyboxPipelineLayout(VK_NULL_HANDLE), skyboxPipeline(VK_NULL_HANDLE), skyboxDescriptorLayout(VK_NULL_HANDLE), skyboxDescriptorSet(VK_NULL_HANDLE), skyboxUBOBuffer(VK_NULL_HANDLE), skyboxUBOMemory(VK_NULL_HANDLE), envBakeImage(VK_NULL_HANDLE), envBakeMemory(VK_NULL_HANDLE), envBakeRenderPass(VK_NULL_HANDLE), envBakeFramebuffers(nullptr), envBakePipelineLayout(VK_NULL_HANDLE), envBakePipeline(VK_NULL_HANDLE), envBakeDescriptorLayout(VK_NULL_HANDLE), envBakeUBOBuffer(VK_NULL_HANDLE), envBakeUBOMemory(VK_NULL_HANDLE), envBakeSize(0), envPrefilteredImage(VK_NULL_HANDLE), envPrefilteredMemory(VK_NULL_HANDLE), envPrefilteredView(VK_NULL_HANDLE), envPrefilteredSampler(VK_NULL_HANDLE), envPrefilteredMipCount(0), brdfLutImage(VK_NULL_HANDLE), brdfLutMemory(VK_NULL_HANDLE), brdfLutView(VK_NULL_HANDLE), brdfLutSampler(VK_NULL_HANDLE), giUBOBuffer(VK_NULL_HANDLE), giUBOMemory(VK_NULL_HANDLE), ssaoRawImage(VK_NULL_HANDLE), ssaoRawMemory(VK_NULL_HANDLE), ssaoRawView(VK_NULL_HANDLE), ssaoBlurImage(VK_NULL_HANDLE), ssaoBlurMemory(VK_NULL_HANDLE), ssaoBlurView(VK_NULL_HANDLE), ssaoSampler(VK_NULL_HANDLE), ssaoRenderPass(VK_NULL_HANDLE), ssaoBlurRenderPass(VK_NULL_HANDLE), ssaoFramebuffer(VK_NULL_HANDLE), ssaoBlurFramebuffer(VK_NULL_HANDLE), ssaoDescriptorLayout(VK_NULL_HANDLE), ssaoDescriptorSet(VK_NULL_HANDLE), ssaoBlurDescriptorLayout(VK_NULL_HANDLE), ssaoBlurDescriptorSet(VK_NULL_HANDLE), ssaoPipelineLayout(VK_NULL_HANDLE), ssaoPipeline(VK_NULL_HANDLE), ssaoBlurPipelineLayout(VK_NULL_HANDLE), ssaoBlurPipeline(VK_NULL_HANDLE), ssaoUBOBuffer(VK_NULL_HANDLE), ssaoUBOMemory(VK_NULL_HANDLE), ssgiRawImage(VK_NULL_HANDLE), ssgiRawMemory(VK_NULL_HANDLE), ssgiRawView(VK_NULL_HANDLE), ssgiDenoisedImage(VK_NULL_HANDLE), ssgiDenoisedMemory(VK_NULL_HANDLE), ssgiDenoisedView(VK_NULL_HANDLE), ssgiSampler(VK_NULL_HANDLE), ssgiNearestSampler(VK_NULL_HANDLE), ssgiRenderPass(VK_NULL_HANDLE), ssgiDenoiseRenderPass(VK_NULL_HANDLE), ssgiFramebuffer(VK_NULL_HANDLE), ssgiDenoiseFramebuffer(VK_NULL_HANDLE), ssgiDescriptorLayout(VK_NULL_HANDLE), ssgiDescriptorSet(VK_NULL_HANDLE), ssgiDenoiseDescriptorLayout(VK_NULL_HANDLE), ssgiDenoiseDescriptorSet(VK_NULL_HANDLE), ssgiPipelineLayout(VK_NULL_HANDLE), ssgiPipeline(VK_NULL_HANDLE), ssgiDenoisePipelineLayout(VK_NULL_HANDLE), ssgiDenoisePipeline(VK_NULL_HANDLE), ssgiUBOBuffer(VK_NULL_HANDLE), ssgiUBOMemory(VK_NULL_HANDLE), probeSampler(VK_NULL_HANDLE), probeUBOBuffer(VK_NULL_HANDLE), probeUBOMemory(VK_NULL_HANDLE), gNormalRoughImage(VK_NULL_HANDLE), gAlbedoMetalImage(VK_NULL_HANDLE), gAoImage(VK_NULL_HANDLE), gDepthImage(VK_NULL_HANDLE), gNormalRoughMemory(VK_NULL_HANDLE), gAlbedoMetalMemory(VK_NULL_HANDLE), gAoMemory(VK_NULL_HANDLE), gDepthMemory(VK_NULL_HANDLE), gNormalRoughView(VK_NULL_HANDLE), gAlbedoMetalView(VK_NULL_HANDLE), gAoView(VK_NULL_HANDLE), gDepthView(VK_NULL_HANDLE), gBufferSampler(VK_NULL_HANDLE), gBufferRenderPass(VK_NULL_HANDLE), gBufferFramebuffers(nullptr), gBufferPipelineLayout(VK_NULL_HANDLE), gBufferPipeline(VK_NULL_HANDLE), gBufferDescriptorLayout(VK_NULL_HANDLE), gBufferDescriptorSet(VK_NULL_HANDLE), deferredLightPipelineLayout(VK_NULL_HANDLE), deferredLightPipeline(VK_NULL_HANDLE), deferredLightDescriptorLayout(VK_NULL_HANDLE), deferredLightDescriptorSet(VK_NULL_HANDLE), deferredLightRenderPass(VK_NULL_HANDLE), deferredLightFramebuffers(nullptr), gBufferDebugPipelineLayout(VK_NULL_HANDLE), gBufferDebugPipeline(VK_NULL_HANDLE)
 #endif
     {
     }
@@ -656,14 +672,25 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex = 0
 // nearZ/farZ：光源到场景的深度范围。点光需要覆盖整个影响半径，通常取
 //   nearZ = 0.05~0.2，farZ = 灯的 range。
 //
-// **一张 cube map 只能服务一盏灯**（后渲染的会覆盖前面的）。多盏灯需要引擎扩展成数组；
-// 接口形状（Begin/FaceBegin/FaceEnd/End）不用变。
+// **多盏灯**：cube shadow 是 CUBE ARRAY，每盏灯一层。用
+// `GN_VkCubeShadowBeginForLight(i, ...)` 渲染第 i 盏；旧 `GN_VkCubeShadowBegin`
+// 等价于第 0 盏（不破坏已有调用方）。
+// 超过 GN_MAX_CUBE_SHADOW_LIGHTS（4）盏需要阴影时，超出的按"无阴影"处理 ——
+// 不做静默复用（那会让阴影出现在错误的灯上，比没有阴影更糟）。
+// 多光源：给第 lightIndex 盏灯（0..GN_MAX_CUBE_SHADOW_LIGHTS-1）渲染 cube shadow。
+// 每盏灯占用 cube array 的独立一层，互不覆盖。
+bool GN_VkCubeShadowBeginForLight(uint32_t lightIndex, const sVEC3 &lightPos, float nearZ,
+                                 float farZ);
+// 等价于 BeginForLight(0, ...)（保留旧签名，不破坏已有调用方）。
 bool GN_VkCubeShadowBegin(const sVEC3 &lightPos, float nearZ, float farZ);
 void GN_VkCubeShadowFaceBegin(const sVEC3 &lightPos, uint32_t face, float nearZ, float farZ);
 void GN_VkCubeShadowFaceEnd();
 void GN_VkCubeShadowEnd();
 // 当前 cube shadow 的边长（未创建返回 0）。诊断/验收用。
 uint32_t GN_VkCubeShadowSize();
+// 本帧已渲染了几盏灯的 cube shadow（需在帧首调 GN_VkResetCubeShadowLightCount 清零）。
+uint32_t GN_VkCubeShadowLightCount();
+void GN_VkResetCubeShadowLightCount();
 
 // 当前是否处于 3D pass 内部。
 // 用途：GN_VkBegin3DPass 失败时（设备未初始化 / 重复进入）是静默返回的，

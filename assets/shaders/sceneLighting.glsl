@@ -161,6 +161,15 @@ int selectCascade(vec3 worldPos) {
 // （cube 的 6 个面是不同投影，uv 偏移会跨面跳变）。方向偏移角 = 世界宽度 / 距离。
 //
 // lightRadius 来自 L.coneAngles.z（见 GN_3Dlight.h 的说明，复用未使用的 pad 字段）。
+// ═══════════════════════════════════════════════════════════
+//  编译期守卫：cube shadow 只在声明了 samplerCubeArray 的着色器里编译
+// ═══════════════════════════════════════════════════════════
+// 本文件是**公共片段**，被 gn3d_pbr.frag 与 gn3d_deferred_light.frag 同时 include。
+// 后者不用 cube shadow，也就没声明 cubeShadowSampler —— 不加守卫会报
+// "cubeShadowSampler: undeclared identifier"（实测）。
+// 需要的一方在 include 之前 `#define GN_HAS_CUBE_SHADOW_ARRAY 1`。
+#ifdef GN_HAS_CUBE_SHADOW_ARRAY
+
 // 距离（米）→ NDC 深度（0..1）。**这一步漏掉过一次**：
 // cube shadow 图里存的是 NDC 深度，而这里算出的是世界距离；直接比较会让几乎所有片元
 // 都被判成"被遮挡"（实测整片地面暗了 25%，正好是"那一盏灯完全没贡献"）。
@@ -173,10 +182,13 @@ float cubeDepthToNdc(float dist, float nearZ, float farZ) {
 }
 
 float cubeShadowFactor(vec3 worldPos, vec3 lightPos, vec3 N, float lightRadius,
-                       float nearZ, float farZ) {
+                       float nearZ, float farZ, int layer) {
     // near/far 未设置时（<=0）无法把米转成 NDC —— **保守返回全亮**，
     // 而不是拿两个不同单位的值硬比（那会把整片场景压黑）。
     if(!(farZ > nearZ) || nearZ <= 0.0) return 1.0;
+    // layer < 0：这盏灯没有 cube shadow（超过 4 盏灯的阴影上限，或调用方没渲染）。
+    // 同样保守返回全亮，而不是去采样别的灯的层 —— 那会把别人的阴影搬过来。
+    if(layer < 0) return 1.0;
 
     vec3 toFrag = worldPos - lightPos; // 从光源指向片元（正好是 cube 的采样方向）
     float dist = length(toFrag);
@@ -219,7 +231,8 @@ float cubeShadowFactor(vec3 worldPos, vec3 lightPos, vec3 N, float lightRadius,
         float radial = (i == 0) ? 0.0 : 1.0; // 第 0 个取中心，其余铺满
         vec3 sampleDir = normalize(baseDir + (tangent * cos(angle) * radial +
                                              bitangent * sin(angle) * radial) * searchAngle);
-        float occluder = textureLod(cubeShadowSampler, sampleDir, 0.0).r;
+        // cube ARRAY 采样：第四个分量是层号（哪盏灯）
+        float occluder = textureLod(cubeShadowSampler, vec4(sampleDir, float(layer)), 0.0).r;
         // border=白(1.0) ⇒ 图外自然不算遮挡
         if(occluder < refZ - 1e-4) {
             blockerSum += occluder;
@@ -249,11 +262,13 @@ float cubeShadowFactor(vec3 worldPos, vec3 lightPos, vec3 N, float lightRadius,
         float radial = (i == 0) ? 0.0 : 1.0;
         vec3 sampleDir = normalize(baseDir + (tangent * cos(angle) * radial +
                                              bitangent * sin(angle) * radial) * penumbraAngle);
-        float occluder = textureLod(cubeShadowSampler, sampleDir, 0.0).r;
+        float occluder = textureLod(cubeShadowSampler, vec4(sampleDir, float(layer)), 0.0).r;
         lit += (refZ <= occluder + 1e-4) ? 1.0 : 0.0;
     }
     return lit / float(kPcfSamples);
 }
+
+#endif // GN_HAS_CUBE_SHADOW_ARRAY
 
 // 原始深度比较：receiver <= occluder 视为受光（layer = 选中的 CSM 级）。
 float shadowCompare(vec2 uv, float layer, float receiver) {

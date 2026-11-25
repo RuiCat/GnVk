@@ -370,10 +370,10 @@ void makeOccluder(std::vector<GNg::VkVertex3D> &verts, std::vector<uint32_t> &in
 // 渲染一次"点光 cube shadow"，返回 6 面的中心深度。失败返回空。
 bool captureCubeShadow(const GNg::sVEC3 &lightPos, float nearZ, float farZ,
                        const std::vector<GNg::VkVertex3D> *occluder,
-                       std::vector<std::vector<float> > &outDepths) {
+                       std::vector<std::vector<float> > &outDepths, uint32_t lightIndex = 0) {
     outDepths.clear();
     if (!GNg::GN_VkBeginFrame()) return false;
-    if (!GNg::GN_VkCubeShadowBegin(lightPos, nearZ, farZ)) {
+    if (!GNg::GN_VkCubeShadowBeginForLight(lightIndex, lightPos, nearZ, farZ)) {
         GNg::GN_VkEndFrame();
         return false;
     }
@@ -400,16 +400,25 @@ bool captureCubeShadow(const GNg::sVEC3 &lightPos, float nearZ, float farZ,
     const uint32_t size = GNg::GN_VkCubeShadowSize();
     if (size == 0) return false;
     // **逐层读回**：cube 的 6 个面各一层。只读 layer 0 会漏掉"内容全在别的面"这种情况。
+    // cube ARRAY：第 lightIndex 盏灯的 6 个面在 layer [lightIndex*6, lightIndex*6+6)
     for (uint32_t face = 0; face < 6; ++face) {
         std::vector<float> depth;
         if (!ReadDepthImageLayer(Hooks().cubeShadowImage,
                                  VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, size, size,
-                                 face, depth)) {
+                                 lightIndex * 6u + face, depth)) {
             return false;
         }
         outDepths.push_back(depth);
     }
     return true;
+}
+
+// 统计一张深度图里"非清屏"（< 0.999）的像素数。空场景应为 0。
+uint32_t countRenderedPixels(const std::vector<float> &depth) {
+    uint32_t n = 0;
+    for (size_t i = 0; i < depth.size(); ++i)
+        if (depth[i] < 0.999f) ++n;
+    return n;
 }
 
 } // namespace
@@ -537,6 +546,77 @@ void RunCubeShadowChecks() {
         const bool ok = lit > 100u && minDepth > 0.05f && minDepth < 0.999f;
         if (ok) ReportPass("cube.occluder", detail);
         else ReportFail("cube.occluder", detail);
+    }
+
+    // ── 多光源：两盏灯各自独立的一层，互不覆盖 ──
+    //
+    // 这是本轮改动的核心语义：旧实现只有一张 cube map，后渲染的灯会覆盖前面的，
+    // 多灯场景里只有最后一盏有阴影。现在每盏灯占 cube ARRAY 的独立一层。
+    //
+    // 验收方式：灯 A 用"偏移到 +X 的方块"，灯 B 用"偏移到 +Z 的方块"，
+    // 两者写入的像素数应当**都 > 0**（各自都渲染成功），
+    // 且两层的像素分布**不相同**（若层被复用/覆盖，两层会完全一样）。
+    {
+        // 灯 A：方块在 +X 2m 处
+        std::vector<GNg::VkVertex3D> vertsA = verts;
+        for (size_t i = 0; i < vertsA.size(); ++i) vertsA[i].px += 2.0f;
+        // 灯 B：方块在 +Z 2m 处
+        std::vector<GNg::VkVertex3D> vertsB = verts;
+        for (size_t i = 0; i < vertsB.size(); ++i) vertsB[i].pz += 2.0f;
+
+        std::vector<std::vector<float> > depthsA;
+        std::vector<std::vector<float> > depthsB;
+
+        const bool okA = captureCubeShadow(lightPos, 0.1f, 20.0f, &vertsA, depthsA, 0);
+        const bool okB = captureCubeShadow(lightPos, 0.1f, 20.0f, &vertsB, depthsB, 1);
+
+        if (!okA || !okB) {
+            ReportFail("cube.multiLayer", "layer 0 或 layer 1 的 cube pass 无法执行");
+        } else {
+            uint32_t litA = 0;
+            for (uint32_t f = 0; f < 6; ++f) litA += countRenderedPixels(depthsA[f]);
+            uint32_t litB = 0;
+            for (uint32_t f = 0; f < 6; ++f) litB += countRenderedPixels(depthsB[f]);
+
+            // 两层必须有差异：逐面比较像素值（不同方向摆的方块会落在不同的面上）
+            uint32_t diffPixels = 0;
+            for (uint32_t f = 0; f < 6; ++f) {
+                const uint32_t n = (uint32_t)std::min(depthsA[f].size(), depthsB[f].size());
+                for (uint32_t i = 0; i < n; ++i) {
+                    if (std::fabs(depthsA[f][i] - depthsB[f][i]) > 1e-4f) ++diffPixels;
+                }
+            }
+
+            char detail[256];
+            std::snprintf(detail, sizeof(detail),
+                          "layer0 写入 %u 像素, layer1 写入 %u 像素, 两层差异 %u 像素"
+                          "（层被复用/覆盖时差异会是 0）",
+                          litA, litB, diffPixels);
+            // 判据：两层都真的渲染了东西，且**内容不同**（证明是两份独立的 cube map）
+            const bool ok = litA > 100u && litB > 100u && diffPixels > 100u;
+            if (ok) ReportPass("cube.multiLayer", detail);
+            else ReportFail("cube.multiLayer", detail);
+        }
+    }
+
+    // ── 多灯选灯 API 的接线检查 ──
+    {
+        GN3d::cLIGHT lt;
+        // AddPoint(pos, range, color, intensity, enableShadow, lightRadius)
+        lt.AddPoint(GNg::sVEC3{3.0f, 1.0f, 0.0f}, 20.0f, GNg::sVEC3{1, 1, 1}, 2.0f, true, 0.1f);
+        lt.AddPoint(GNg::sVEC3{1.0f, 1.0f, 0.0f}, 20.0f, GNg::sVEC3{1, 1, 1}, 2.0f, true, 0.1f);
+        lt.AddPoint(GNg::sVEC3{9.0f, 1.0f, 0.0f}, 20.0f, GNg::sVEC3{1, 1, 1}, 2.0f, true, 0.1f);
+        const GN3d::sCUBE_SHADOW_PICKS picks =
+            GN3d::pickCubeShadowLights(*lt.GetUBO(), GNg::sVEC3{0, 0, 0}, 40.0f, 2);
+        char detail[160];
+        std::snprintf(detail, sizeof(detail), "选 %u 盏: [%d(%.3f), %d(%.3f)]", picks.aCount,
+                      picks.aLightIndex[0], picks.aScore[0],
+                      picks.aCount > 1 ? picks.aLightIndex[1] : -1,
+                      picks.aCount > 1 ? picks.aScore[1] : 0.0f);
+        if (picks.aCount == 2u && picks.aLightIndex[0] == 1 && picks.aLightIndex[1] == 0)
+            ReportPass("cube.pickMulti", detail);
+        else
+            ReportFail("cube.pickMulti", detail);
     }
 }
 

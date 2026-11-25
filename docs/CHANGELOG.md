@@ -1,5 +1,163 @@
 # Changelog
 
+## 2026-11-25 — 多光源 cube shadow（B2 扩展）
+
+### 问题
+
+一张 cube map 只能服务一盏灯 —— 后渲染的会覆盖前面的。多灯场景里**只有最后一盏有阴影**，
+而 `pickCubeShadowLight` 每帧只挑一盏，其余灯完全没有阴影。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| CUBE ARRAY | `GN_Vk.h` / `vk3dInit.cpp` | `layerCount = 6 × 4 = 24`；每灯占 6 层（一个完整立方图） |
+| `GN_VkCubeShadowBeginForLight` | `vk3dPasses.cpp` | 给第 i 盏灯渲染；旧 `Begin` 转调 i=0（不破坏调用方） |
+| `samplerCubeArray` | `gn3d_pbr.frag` / `sceneLighting.glsl` | 采样 `vec4(dir, layer)` |
+| per-light 深度范围 | `sLIGHT_UBO::cubeShadowRange[4][4]` | `.x=near .y=far .z=layer(<0=无) .w 保留` |
+| `pickCubeShadowLights` | `GN_3Dlight.*` | 按评分取前 N 盏（复用单灯评分，保证行为一致） |
+| 单测 17 例 | `tests/unit/testMultiCubeShadow.cpp` | 布局 + 每灯范围 + 选灯排序/上限/并列 |
+| GPU 验收 2 例 | `tests/gpu/gpuCheckLight.cpp` | `cube.multiLayer`、`cube.pickMulti` |
+| 演示 | `tests/multiShadowDemo`（`make multiShadowDemo`） | 四盏不同颜色的点光，四根柱子各投四道影子 |
+
+### 验收
+
+```
+make unit        783 cases, 0 failed     （766 → +17）
+make gpuCheck    126 pass, 0 fail        （124 → +2）
+make smoke       12/12                   （11 → +1）
+make ci          全绿
+```
+
+GPU 侧的关键证据：
+
+```
+cube.multiLayer   layer0 写入 51546 像素, layer1 写入 58653 像素,
+                  两层差异 110199 像素（层被复用/覆盖时差异会是 0）
+```
+
+### 六条实现口径
+
+**1. cube ARRAY 的一"层"是一个完整立方图。**
+`layerCount = 6 × 灯数`。采样是 `texture(samplerCubeArray, vec4(dir, lightIndex))`，
+索引是**灯号**不是面号。
+
+**2. 渲染到 cubearray 的某一层必须经 2D(1 层) 视图。**
+不能用 CUBE_ARRAY 视图当 attachment（layerCount 对不上，Vulkan 会拒绝）。
+所以 `cubeShadowFaceView[24]` + `cubeShadowFramebuffer[24]`，索引 = `light*6 + face`。
+
+**3. 每个"灯-面"要独立的 UBO 槽（4 + 24 = 28 个）。**
+命令缓冲是**延迟执行**的：若 4 盏灯复用 6 个槽，录制第 2 盏时会把槽改写，
+而第 1 盏灯的 6 个 pass 还没执行，最终 24 个面全读到最后一盏灯的矩阵。
+这与 CSM 早期"4 级共用一个槽"是同一个 bug。
+
+**4. 层号默认必须是 -1，不能是 0。**
+`memset` 后全是 0，而 0 是**有效的**层号。着色器会以为"这盏灯有 shadow、层号 0"，
+去采样一张从没渲染过的深度图 —— 整片场景被错误遮挡，比没有阴影黑得多。
+构造函数与 `Clear()` 都必须显式写 -1。
+
+**5. 超过 4 盏灯的阴影上限时按"无阴影"处理，不做静默复用。**
+复用别人的层会让阴影出现在**错误的灯**上，比没有阴影更糟（也很难排查）。
+
+**6. 公共片段要加编译期守卫。**
+`sceneLighting.glsl` 被 `gn3d_pbr.frag` 与 `gn3d_deferred_light.frag` 同时 include；
+后者不用 cube shadow 也就没声明 sampler —— 不加 `#ifdef GN_HAS_CUBE_SHADOW_ARRAY`
+会报 `cubeShadowSampler: undeclared identifier`。需要的一方在 include **之前**定义宏。
+
+### UBO 布局
+
+在 976 B 之后**追加** `float cubeShadowRange[4][4]`（64 B），总长 1040。
+追加只影响 `sizeof`，不改变任何既有字段偏移 —— 单测逐条钉住了
+`shadowParams=928 / shadowTexelWorld=960 / cubeShadowRange=976`。
+
+### 排查过程中"以为是新增 bug，其实是测试基础设施"的一次
+
+改完之后 gpuCheck 出现 5 个 FAIL（`3d.forward` 等），看起来像渲染被改坏了。
+`git stash` 回 HEAD 验证基线 → 那次**编译还没结束**就跑了测试，用的是旧二进制，
+于是把"编译失败"误判成"新增回归"。等编译彻底结束后：HEAD 是 124/0，
+改动后是 126/0 —— 那 5 个 FAIL 一直是**新旧二进制混用**造成的假象。
+
+教训：`make` 只要 grep 到 "error:" 就该先修编译，**测试结果在编译成功前没有意义**。
+
+## 2026-11-25 — 多光源 cube shadow（B2 扩展）
+
+### 问题
+
+一张 cube map 只能服务一盏灯 —— 后渲染的会覆盖前面的。多灯场景里**只有最后一盏有阴影**，
+而 `pickCubeShadowLight` 每帧只挑一盏，其余灯完全没有阴影。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| CUBE ARRAY | `GN_Vk.h` / `vk3dInit.cpp` | `layerCount = 6 × 4 = 24`；每灯占 6 层（一个完整立方图） |
+| `GN_VkCubeShadowBeginForLight` | `vk3dPasses.cpp` | 给第 i 盏灯渲染；旧 `Begin` 转调 i=0（不破坏调用方） |
+| `samplerCubeArray` | `gn3d_pbr.frag` / `sceneLighting.glsl` | 采样 `vec4(dir, layer)` |
+| per-light 深度范围 | `sLIGHT_UBO::cubeShadowRange[4][4]` | `.x=near .y=far .z=layer(<0=无) .w 保留` |
+| `pickCubeShadowLights` | `GN_3Dlight.*` | 按评分取前 N 盏（复用单灯评分，保证行为一致） |
+| 单测 17 例 | `tests/unit/testMultiCubeShadow.cpp` | 布局 + 每灯范围 + 选灯排序/上限/并列 |
+| GPU 验收 2 例 | `tests/gpu/gpuCheckLight.cpp` | `cube.multiLayer`、`cube.pickMulti` |
+| 演示 | `tests/multiShadowDemo`（`make multiShadowDemo`） | 四盏不同颜色的点光，四根柱子各投四道影子 |
+
+### 验收
+
+```
+make unit        783 cases, 0 failed     （766 → +17）
+make gpuCheck    126 pass, 0 fail        （124 → +2）
+make smoke       12/12                   （11 → +1）
+make ci          全绿
+```
+
+GPU 侧的关键证据：
+
+```
+cube.multiLayer   layer0 写入 51546 像素, layer1 写入 58653 像素,
+                  两层差异 110199 像素（层被复用/覆盖时差异会是 0）
+```
+
+### 六条实现口径
+
+**1. cube ARRAY 的一"层"是一个完整立方图。**
+`layerCount = 6 × 灯数`。采样是 `texture(samplerCubeArray, vec4(dir, lightIndex))`，
+索引是**灯号**不是面号。
+
+**2. 渲染到 cubearray 的某一层必须经 2D(1 层) 视图。**
+不能用 CUBE_ARRAY 视图当 attachment（layerCount 对不上，Vulkan 会拒绝）。
+所以 `cubeShadowFaceView[24]` + `cubeShadowFramebuffer[24]`，索引 = `light*6 + face`。
+
+**3. 每个"灯-面"要独立的 UBO 槽（4 + 24 = 28 个）。**
+命令缓冲是**延迟执行**的：若 4 盏灯复用 6 个槽，录制第 2 盏时会把槽改写，
+而第 1 盏灯的 6 个 pass 还没执行，最终 24 个面全读到最后一盏灯的矩阵。
+这与 CSM 早期"4 级共用一个槽"是同一个 bug。
+
+**4. 层号默认必须是 -1，不能是 0。**
+`memset` 后全是 0，而 0 是**有效的**层号。着色器会以为"这盏灯有 shadow、层号 0"，
+去采样一张从没渲染过的深度图 —— 整片场景被错误遮挡，比没有阴影黑得多。
+构造函数与 `Clear()` 都必须显式写 -1。
+
+**5. 超过 4 盏灯的阴影上限时按"无阴影"处理，不做静默复用。**
+复用别人的层会让阴影出现在**错误的灯**上，比没有阴影更糟（也很难排查）。
+
+**6. 公共片段要加编译期守卫。**
+`sceneLighting.glsl` 被 `gn3d_pbr.frag` 与 `gn3d_deferred_light.frag` 同时 include；
+后者不用 cube shadow 也就没声明 sampler —— 不加 `#ifdef GN_HAS_CUBE_SHADOW_ARRAY`
+会报 `cubeShadowSampler: undeclared identifier`。需要的一方在 include **之前**定义宏。
+
+### UBO 布局
+
+在 976 B 之后**追加** `float cubeShadowRange[4][4]`（64 B），总长 1040。
+追加只影响 `sizeof`，不改变任何既有字段偏移 —— 单测逐条钉住了
+`shadowParams=928 / shadowTexelWorld=960 / cubeShadowRange=976`。
+
+### 排查过程中"以为是新增 bug，其实是测试基础设施"的一次
+
+改完之后 gpuCheck 出现 5 个 FAIL（`3d.forward` 等），看起来像渲染被改坏了。
+`git stash` 回 HEAD 验证基线 → 那次**编译还没结束**就跑了测试，用的是旧二进制，
+于是把"编译失败"误判成"新增回归"。等编译彻底结束后：HEAD 是 124/0，
+改动后是 126/0 —— 那 5 个 FAIL 一直是**新旧二进制混用**造成的假象。
+
+教训：`make` 只要 grep 到 "error:" 就该先修编译，**测试结果在编译成功前没有意义**。
+
 ## 2026-11-25 — C3b：布娃娃（物理驱动的倒地 / 击飞）
 
 角色"死亡"时播放预制动画显得假 —— 倒地位置、坡度、撞到什么都不影响结果。

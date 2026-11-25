@@ -18,7 +18,9 @@ using namespace GNg;
 // ── 布局契约：与 gn3d_pbr.frag / gn3d_deferred_light.frag 的 LightUBO 逐字段一致 ──
 TEST_CASE(lightUboLayoutMatchesShader) {
     CHECK_EQ(sizeof(sLIGHT_GPU), 80u);
-    CHECK_EQ(sizeof(sLIGHT_UBO), 976u);
+    // B2 扩展：976（既有契约）+ 4×16（多光源 cube shadow 的每灯 near/far/layer） = 1040。
+    // **已有字段的偏移一个都不能变** —— 下面逐条断言。
+    CHECK_EQ(sizeof(sLIGHT_UBO), 1040u);
 
     // 8 光源 × 80 B = 640
     CHECK_EQ(offsetof(sLIGHT_UBO, lights), 0u);
@@ -28,6 +30,7 @@ TEST_CASE(lightUboLayoutMatchesShader) {
     CHECK_EQ(offsetof(sLIGHT_UBO, shadowParams), 928u);      // vec4
     CHECK_EQ(offsetof(sLIGHT_UBO, cascadeSplits), 944u);     // vec4
     CHECK_EQ(offsetof(sLIGHT_UBO, shadowTexelWorld), 960u);  // vec4
+    CHECK_EQ(offsetof(sLIGHT_UBO, cubeShadowRange), 976u);   // vec4[4]（B2 扩展追加）
 
     CHECK_EQ(GN_MAX_LIGHTS, 8);
     CHECK_EQ(GN_MAX_SHADOW_CASCADES, 4u);

@@ -467,6 +467,26 @@ $(UNDO_DEMO_BIN): $(UNDO_DEMO_SRC) $(TARGET)
 	@mkdir -p build
 	$(CXX) $(UNDO_DEMO_FLAGS) $(UNDO_DEMO_SRC) $(TEST_LIBS) -o $(UNDO_DEMO_BIN)
 
+# ── 多光源 cube shadow 演示（B2 扩展）──
+MSHADOW_SRC   := $(wildcard tests/multiShadowDemo/*.cpp)
+MSHADOW_BIN   := build/multiShadowDemo
+MSHADOW_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES) -Itests/common
+
+.PHONY: multiShadowDemo
+multiShadowDemo: $(MSHADOW_BIN)
+	@echo "$(YELLOW)🔦 渲染多光源 cube shadow 演示...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(MSHADOW_BIN) --out $(GIZMO_VIDEO_OUT)/multiShadow-frames \
+		--frames 300 --size $(GIZMO_VIDEO_SIZE)
+	@$(FFMPEG) -y -loglevel error -framerate 30 -i $(GIZMO_VIDEO_OUT)/multiShadow-frames/frame_%05d.png \
+		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart \
+		$(GIZMO_VIDEO_OUT)/multi-cube-shadow.mp4
+	@ls -lh $(GIZMO_VIDEO_OUT)/multi-cube-shadow.mp4
+
+$(MSHADOW_BIN): $(MSHADOW_SRC) $(wildcard tests/common/*.h) $(TARGET)
+	@echo "$(YELLOW)🔦 编译多光源 cube shadow 演示...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(MSHADOW_FLAGS) $(MSHADOW_SRC) $(TEST_LIBS) -o $(MSHADOW_BIN)
+
 # ── 布娃娃演示（C3b）──
 RAGDOLL_SRC   := $(wildcard tests/ragdollDemo/*.cpp)
 RAGDOLL_BIN   := build/ragdollDemo
@@ -572,7 +592,7 @@ $(CHAR_PUSH_BIN): $(CHAR_PUSH_SRC) $(TARGET)
 # 否则它们会先以窗口模式跑一次（无显示时 SKIP → make 直接失败）。
 # 没有 Vulkan 设备时整体 SKIP（退出码 2）。
 .PHONY: smoke
-smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene physicsBoxes characterDemo $(ROOTMOTION_BIN) $(ANIMBLEND_BIN) $(IKDEMO_BIN) $(RAGDOLL_BIN)
+smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene physicsBoxes characterDemo $(ROOTMOTION_BIN) $(ANIMBLEND_BIN) $(IKDEMO_BIN) $(RAGDOLL_BIN) $(MSHADOW_BIN)
 	@echo "$(YELLOW)🚦 示例无窗口冒烟...$(RESET)"
 	@GN_HEADLESS_FRAMES=$(if $(SMOKE_FRAMES),$(SMOKE_FRAMES),8) \
 		LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH bash tests/smoke/runSamples.sh
