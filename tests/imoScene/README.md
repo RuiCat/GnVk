@@ -153,6 +153,7 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
 - 转身：模型按移动方向平滑转向（模型正面 = +Z）。没有独立的倒退/侧移动画，倒退与侧移就是「转身走过去」；
 - 调试：`IMO_SCENE_TEST_MOVE=front|back|left|right` 强制移动意图（无键鼠时验证朝向/选段），`IMO_SCENE_ANIM_DIR` 换剪辑目录；
 - 髋部运动：Unity humanoid 的身体前倾/左右摆/上下起伏不在肌肉里，而在 `RootT`/`RootQ`；导出时已把它们施加到髋部（绕髋关节旋转 + 位移增量），上半身随之运动；水平位移仍由游戏逻辑驱动（原地循环）；
+- 摇摆幅度：`RootQ` 的 roll/yaw 默认收敛到原幅度的 30% / 45%（pitch 保留 100%），数值在 `exportClips.py` 的 `BODY_ROLL_SCALE/BODY_YAW_SCALE/BODY_PITCH_SCALE`，也可用同名环境变量重导出：`BODY_ROLL=0.15 BODY_YAW=0.3 python3 .local/anim/exportClips.py Standard_Idle Walking2 Slow_Run`，重启程序生效；
 - 边界：动画数据来自游戏资产，只在本机 `.local/` 下。
 
 ## 默认模型：Clothes_imo_chan（穿好衣服的版本）
