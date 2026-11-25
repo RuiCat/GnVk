@@ -32,6 +32,9 @@ bool ReadColorImage(VkImage image, VkFormat format, VkImageLayout currentLayout,
                     uint32_t width, uint32_t height, std::vector<uint8_t> &out);
 bool ReadDepthImage(VkImage image, VkImageLayout currentLayout, uint32_t width, uint32_t height,
                     std::vector<float> &out);
+// 读 array image 的指定层（cube shadow 的 6 个面各一层）。
+bool ReadDepthImageLayer(VkImage image, VkImageLayout currentLayout, uint32_t width,
+                         uint32_t height, uint32_t baseLayer, std::vector<float> &out);
 
 float HalfToFloat(uint16_t half);
 

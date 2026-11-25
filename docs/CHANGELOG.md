@@ -1,5 +1,95 @@
 # Changelog
 
+## 2026-11-25 — 光照收尾：PCSS 软化 + 多光源选灯 + 修掉两个真 bug
+
+继续处理光照。除了两项新能力（PCSS、选灯），这一轮**挖出了两个一直存在的 bug** ——
+其中一个是上一轮 B2 我自己误判成"已修好"的。
+
+### 交付
+
+| 项 | 内容 |
+|---|---|
+| **B6 PCSS** | `cubeShadowFactor` 从"固定 5 点 PCF + 常数软度"改成三段式：阻塞物搜索 → 半影估计 → PCF。遮挡物贴近接收面时边缘自然变锐（**接触硬化**） |
+| 光源物理半径 | `AddPoint/AddSpot(..., lightRadius)`，存 `coneAngles.z`（复用未使用的 pad 字段，不动 `sLIGHT_UBO` 布局） |
+| **B7 选灯** | `pickCubeShadowLight(light, cameraPos, maxDistance)` —— 引擎只有一张 cube map，每帧挑"离相机近 + 强度高"的那一盏；纯 CPU、可单测 |
+| cube 深度范围 | `cLIGHT::SetCubeShadowRange(near, far)` → `shadowParams.z/w` |
+
+### 验收
+
+```
+make unit        673 cases, 0 failed     （666 → +7）
+make gpuCheck    124 pass, 0 fail        （123 → +1：cube.occluderFaces）
+make smoke       7/7      make ci 全绿
+```
+
+---
+
+## 修掉的 bug 1：`refZ` 是米、纹理里是 NDC —— 单位不一致
+
+`cubeShadowFactor` 里算出的是世界距离（米），而 cube shadow 图里存的是 **NDC 深度（0..1）**。
+第一版直接比较两者 ⇒ `refZ(2.0) > occluder(0.95)` 几乎恒成立 ⇒ **所有片元都被判成遮挡**。
+实测：整个火焰场景暗了 25%，正好是"那一盏投影灯完全没贡献"。
+
+修法：加 `cubeDepthToNdc(dist, near, far)` 换算（`z = f/(f-n)·(1-n/d)`），
+并把 near/far 通过 `shadowParams.z/w` 传给着色器。**near/far 未设置时保守返回全亮**，
+而不是拿两个不同单位的值硬比。
+
+## 修掉的 bug 2：`GN_VkShadowDraw` 硬绑定管线，覆盖了 cube 的
+
+这个更严重，而且是**上一轮 B2 遗留**的：
+
+`GN_VkShadowDraw` 内部每次都 `vkCmdBindPipeline(cb, ..., GN_Vk.shadowPipeline)` ——
+那是 CSM 的管线，viewport 写死 2048。所以 cube pass 里绑的 `cubeShadowPipeline`
+（动态 viewport 版本）**立刻被覆盖**，实际一直在用 CSM 那条。
+
+表现：cube 的 6 面内容全被挤到图幅右下角（bbox `x[686,1023] y[683,767]`），
+而 **改 viewport 完全没反应**（我试过动态改一半、静态改一半，像素数一个都不差）。
+
+上一轮我为什么没发现：`cube.occluder` 的断言当时写的是"写入像素数 > 100"——
+14450 远大于 100，于是"通过"了。**这是我放宽断言绕过了真实缺陷**，
+这一轮它反噬成"PCSS 看不出效果"。
+
+修法：加 `s_shadowPassPipeline` 开关 —— `GN_VkShadowDraw` 优先用它，
+cube pass 设成 `cubeShadowPipeline`，CSM pass 设回 `VK_NULL_HANDLE`（= 默认）。
+修好后 face 0 的 bbox 变成 **`x[341,682] y[341,682]`**：正方形、完美居中，
+像素数 14450 → **51546**。
+
+### 验收口径也跟着修正了
+
+`cube.occluder` 原来只读 layer 0 且只数像素。现在：
+* 新增 `ReadDepthImageLayer`，**逐层读回 6 个面**（`cube.occluderFaces` 站点）；
+* 断言"6 面共写入 > 100 像素"，而不是盯某一面 —— 遮挡物只会在它所在的那一面，
+  这是 cube shadow 的正常语义，不是缺陷。
+
+### 火焰场景的前后对比
+
+| 版本 | 平均亮度 | 与无阴影的差异像素 |
+|---|---|---|
+| 单位 bug（米 vs NDC） | 44.7（暗 27%） | 54.8%（整片变暗） |
+| 管线被覆盖 | 61.1（完全无阴影） | 0% |
+| **修复后** | **58.1（暗 5%）** | **8.5%（局部柔和阴影）** |
+
+8.5% 才是 PCSS 应有的样子：**局部**的柔和投影，而不是整片压暗。
+
+### 三条实现口径
+
+1. **搜索锥的上限由 cube 分辨率决定，不是物理半影。**
+   1024 面 / 90° ≈ 11 texel/度；第一版按"光源张角 × 1.6"算出 17°（≈190 texel），
+   采到的是邻面噪声和远处遮挡物。现在钳到 0.10 rad（≈5.7°，约 65 texel）。
+2. **阻挡物搜索在方向空间做，不在 uv 空间。**
+   cube 的 6 个面是不同投影，uv 偏移会跨面跳变；方向偏移（`tangent/bitangent` 扰动
+   `baseDir`）在所有面上都连续。
+3. **`coneAngles.z` 复用为光源半径**，而不是给 `sLIGHT_UBO` 加字段 ——
+   后者会改动 976 B 的冻结布局契约。
+
+### 边界
+
+- 一张 cube map 仍只服务一盏灯（多盏需扩成数组，接口形状不用变）；
+  现在由 `pickCubeShadowLight` 自动选，切换是平滑的。
+- PCSS 的 blocker 搜索是 8 样本、PCF 8 样本（为了在 lavapipe 上可跑）——
+  真实 GPU 上可以提到 16/16 换更平滑的边缘。
+- 未做：PCSS 的时域重投影（会抖）、多光源 cube 数组。
+
 ## 2026-11-25 — C2：角色推动态刚体
 
 `cCHARACTER` 从 P5 起只消费**静态三角网**——它不知道动态刚体的存在，所以角色走过一堆

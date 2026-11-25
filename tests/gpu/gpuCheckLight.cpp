@@ -399,14 +399,16 @@ bool captureCubeShadow(const GNg::sVEC3 &lightPos, float nearZ, float farZ,
 
     const uint32_t size = GNg::GN_VkCubeShadowSize();
     if (size == 0) return false;
-    // 逐面读回（用 2D array 的 layer 方式读：ReadDepthImage 读的是整张图，
-    // 这里只读第 0 层做"有没有内容"的判断 —— 足够验证"渲染发生了"）。
-    std::vector<float> depth;
-    if (!ReadDepthImage(Hooks().cubeShadowImage,
-                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, size, size, depth)) {
-        return false;
+    // **逐层读回**：cube 的 6 个面各一层。只读 layer 0 会漏掉"内容全在别的面"这种情况。
+    for (uint32_t face = 0; face < 6; ++face) {
+        std::vector<float> depth;
+        if (!ReadDepthImageLayer(Hooks().cubeShadowImage,
+                                 VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, size, size,
+                                 face, depth)) {
+            return false;
+        }
+        outDepths.push_back(depth);
     }
-    outDepths.push_back(depth);
     return true;
 }
 
@@ -468,6 +470,51 @@ void RunCubeShadowChecks() {
         return;
     }
     {
+        // 逐面统计（诊断）：哪些面有内容、bbox 多大
+        for (uint32_t face = 0; face < 6 && face < occludedDepths.size(); ++face) {
+            const std::vector<float> &dd = occludedDepths[face];
+            uint32_t n = 0;
+            uint32_t minX = size, maxX = 0, minY = size, maxY = 0;
+            for (uint32_t i = 0; i < dd.size(); ++i) {
+                if (dd[i] >= 0.999f) continue;
+                ++n;
+                const uint32_t px = i % size;
+                const uint32_t py = i / size;
+                if (px < minX) minX = px;
+                if (px > maxX) maxX = px;
+                if (py < minY) minY = py;
+                if (py > maxY) maxY = py;
+            }
+            // 只在失败/异常时打印。正常路径的完整 6 面输出会刷屏 CI 日志，
+            // 而"哪面有内容"只在排查投影问题时才有用。
+            if (n == 0 && face == 0) {
+                std::fprintf(stderr, "[cube] face %u: empty（+X 面应有遮挡物）\n", face);
+            }
+            (void)minX;
+            (void)maxX;
+            (void)minY;
+            (void)maxY;
+        }
+        // 断言口径：**6 面中至少一面**写入了深度（cube 的遮挡物只会在它所在的那一面）
+        uint32_t totalLit = 0;
+        float minDepthAll = 1.0f;
+        for (size_t face = 0; face < occludedDepths.size(); ++face) {
+            const std::vector<float> &dd = occludedDepths[face];
+            for (size_t i = 0; i < dd.size(); ++i) {
+                if (dd[i] < 0.999f) {
+                    ++totalLit;
+                    if (dd[i] < minDepthAll) minDepthAll = dd[i];
+                }
+            }
+        }
+        char detailAll[192];
+        std::snprintf(detailAll, sizeof(detailAll), "6 面共写入 %u 个深度像素，最小 %.4f",
+                      totalLit, minDepthAll);
+        if (totalLit > 100u && minDepthAll > 0.05f && minDepthAll < 0.999f)
+            ReportPass("cube.occluderFaces", detailAll);
+        else
+            ReportFail("cube.occluderFaces", detailAll);
+
         const std::vector<float> &d = occludedDepths[0];
         // 断言口径：**"有遮挡物时的深度写入量显著多于空场景"**，而不是盯某个像素坐标。
         //

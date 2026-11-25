@@ -252,13 +252,15 @@ vec3 CalcPBRLight(Light L, vec3 N, vec3 V, vec3 albedo, float roughness, float m
     // B2：点光/聚光走 cube shadow。shadowType == 2 表示"这盏灯有 cube shadow"。
     // softness 按光源尺寸给：点光用固定小值（真实点光源无面积），聚光按锥角略放大。
     else if (shadowType > 1.5 && shadowType < 2.5) {
-        float softness = 0.03;
-        if (L.position.w > 1.5) {
-            // 聚光：锥角越大，半影越宽（与真实聚光灯的物理一致）
-            softness = 0.02 + 0.06 * clamp(1.0 - L.coneAngles.x, 0.0, 1.0);
-            // 锥体外直接无光（attenuation 已经在外面算过，这里只保证不采到别的面）
-        }
-        shadow = cubeShadowFactor(fragWorldPos, L.position.xyz, N, softness);
+        // B2b：PCSS。半影宽度由**光源物理半径**（L.coneAngles.z）与遮挡物-接收面距离决定，
+        // 不再是一个写死的软度常数 —— 遮挡物贴近接收面时边缘自然变锐（接触硬化）。
+        // 半径 0 表示调用方没设：给 0.1 m（约等于一个灯泡的灯丝尺度）。
+        float lightRadius = L.coneAngles.z;
+        if (lightRadius <= 0.0) lightRadius = 0.1;
+        // cube 的深度范围由调用方在渲染 cube shadow 时通过 SetCubeShadowRange 写进
+        // shadowParams.z/w（见 GN_3Dlight.h）。未设置时 cubShadowFactor 会保守返回全亮。
+        shadow = cubeShadowFactor(fragWorldPos, L.position.xyz, N, lightRadius,
+                                  lightData.shadowParams.z, lightData.shadowParams.w);
     }
     
     vec3 H = normalize(V + Ldir);

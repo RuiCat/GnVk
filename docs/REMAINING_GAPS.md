@@ -28,6 +28,8 @@
 | B2 | ~~点光/聚光无阴影~~ | ✅ 2026-11-25 完成：cube shadow map（单光源 6 面）+ `samplerCube` binding 12 + `GN_VkCubeShadow{Begin,FaceBegin,FaceEnd,End}` | — | 已完成 |
 | B3 | 无 GPU 侧剔除 | CPU 逐实体剔除（`cSCENE`） | 实体数上万时 CPU 侧成为瓶颈 | [大改] compute culling |
 | B4 | 无遮挡剔除 / 阴影剔除 | 只有视锥剔除 | overdraw 偏高 | [大改] |
+| B6 | ~~cube shadow 的 PCSS 软化~~ | ✅ 2026-11-25 完成：阻塞物搜索 + 半影估计 + PCF；光源物理半径走 `coneAngles.z` | — | 已完成 |
+| B7 | ~~多光源 cube shadow 轮转~~ | ✅ 2026-11-25 完成：`pickCubeShadowLight`（离相机近 + 强度高） | — | 已完成 |
 | B5 | `sMATERIAL::aEmissive` 已打通 ✅ | 2026-11-25 完成 | — | 已完成 |
 
 ## C. 场景 / 物理 / 角色

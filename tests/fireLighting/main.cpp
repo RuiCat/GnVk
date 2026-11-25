@@ -248,7 +248,8 @@ void initLights() {
                        gFireOrigin.z + offsets[i][2]},
             6.5f, GNg::sVEC3{1.0f, 0.52f, 0.16f}, 2.4f,
             // FIRE_NO_POINT_SHADOW=1 可关掉做 A/B 对比
-            /* enableShadow = */ (i == 0) && std::getenv("FIRE_NO_POINT_SHADOW") == nullptr);
+            /* enableShadow = */ std::getenv("FIRE_NO_POINT_SHADOW") == nullptr,
+            /* lightRadius = */ 0.30f);
     }
 
     // 月光：冷蓝方向光（B 段渐亮）
@@ -259,7 +260,10 @@ void initLights() {
                                         GNg::sVEC3{0.55f, 0.60f, 0.85f}, 0.0f, false);
     // 聚光灯：从天顶斜扫
     gSpotLight = gLight->AddSpot(GNg::sVEC3{0.0f, 7.5f, 0.0f}, GNg::sVEC3{0.0f, -1.0f, 0.0f},
-                                 16.0f, 0.15f, 0.38f, GNg::sVEC3{1.0f, 0.95f, 0.86f}, 0.0f, false);
+                                 16.0f, 0.15f, 0.38f, GNg::sVEC3{1.0f, 0.95f, 0.86f}, 0.0f,
+                                 /* enableShadow = */
+                                 std::getenv("FIRE_NO_POINT_SHADOW") == nullptr,
+                                 /* lightRadius = */ 0.22f);
 
     std::fprintf(stderr,
                  "[fireLighting] 光源：4×point=%d,%d,%d,%d moon=%d fill=%d spot=%d\n",
@@ -516,15 +520,33 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     cubeCasters.reserve(gProps.size());
     for (size_t i = 0; i < gProps.size(); ++i) cubeCasters.push_back(gProps[i].aModel);
     if (!cubeCasters.empty() && std::getenv("FIRE_NO_POINT_SHADOW") == nullptr) {
-        const GNg::sVEC3 lightPos = {gFireOrigin.x, gFireOrigin.y + 0.35f, gFireOrigin.z};
-        // near 要给一点余量（贴近光源的投射体会被裁），far 覆盖火光影响半径
-        if (GNg::GN_VkCubeShadowBegin(lightPos, 0.08f, 14.0f)) {
-            for (uint32_t face = 0; face < 6; ++face) {
-                GNg::GN_VkCubeShadowFaceBegin(lightPos, face, 0.08f, 14.0f);
-                for (size_t i = 0; i < cubeCasters.size(); ++i) cubeCasters[i]->DrawShadow();
-                GNg::GN_VkCubeShadowFaceEnd();
+        // **选灯**：引擎只有一张 cube map，每帧挑"最该有阴影的那一盏"。
+        // 评分在 pickCubeShadowLight 里（离相机近 + 强度高），纯 CPU、可单测。
+        // 这里必须用 gLight->GetUBO() 而不是自己挑 —— 否则示例里的选灯逻辑会和引擎漂移。
+        const GN3d::sCUBE_SHADOW_PICK pick =
+            GN3d::pickCubeShadowLight(*gLight->GetUBO(), eye, 30.0f);
+        if (pick.aLightIndex >= 0) {
+            const GN3d::sLIGHT_GPU &L = gLight->GetUBO()->lights[pick.aLightIndex];
+            const GNg::sVEC3 lightPos = {L.position[0], L.position[1], L.position[2]};
+            // near 给余量（贴近光源的投射体会被裁），far 覆盖火光影响半径。
+            const float cubeNear = 0.08f;
+            const float cubeFar = 14.0f;
+            // **必须告诉光源这两个值**：cube 图里存的是 NDC 深度，着色器算的是米，
+            // 换算靠它们（写在 shadowParams.z/w）。漏掉这一步会让 PCSS 把所有片元
+            // 误判成遮挡 —— 实测整片地面暗 25%，且没有任何报错。
+            gLight->SetCubeShadowRange(cubeNear, cubeFar);
+            if (GNg::GN_VkCubeShadowBegin(lightPos, cubeNear, cubeFar)) {
+                for (uint32_t face = 0; face < 6; ++face) {
+                    GNg::GN_VkCubeShadowFaceBegin(lightPos, face, cubeNear, cubeFar);
+                    for (size_t i = 0; i < cubeCasters.size(); ++i) cubeCasters[i]->DrawShadow();
+                    GNg::GN_VkCubeShadowFaceEnd();
+                }
+                GNg::GN_VkCubeShadowEnd();
             }
-            GNg::GN_VkCubeShadowEnd();
+            if (gVerbose && ((int)(gTime * 30.0f) % 30 == 0)) {
+                std::fprintf(stderr, "[cube] picked light %d (score %.3f)\n", pick.aLightIndex,
+                             pick.aScore);
+            }
         }
     }
 

@@ -145,34 +145,114 @@ int selectCascade(vec3 worldPos) {
 //
 // 为什么 PCF 的偏移要在**方向空间**做而不是 uv 空间：cube 的 6 个面用的是不同的 2D 投影，
 // 在某一面的 uv 上偏移到面外会跳变。做法是把方向扰动后重新采样 —— 代价是多几次 normalize。
-float cubeShadowFactor(vec3 worldPos, vec3 lightPos, vec3 N, float softness) {
+// ═══════════════════════════════════════════════════════════
+//  B2b：点光/聚光 cube shadow 的 PCSS（接触硬化）
+// ═══════════════════════════════════════════════════════════
+// 之前是"固定 5 点 PCF + 常数软度"。问题是：软度写死 ⇒ 遮挡物紧贴接收面时阴影也是糊的，
+// 而离得远时又不够糊。PCSS 的三段式正好解决这一点：
+//
+//   1) 阻塞物搜索：在"光源可见锥"里采样，求平均遮挡深度 blocker；
+//      一个都没遮挡 ⇒ 直接返回 1.0（全亮），这是最省的早退路径。
+//   2) 半影宽度：penumbra = (refZ - blocker) * lightRadius / blocker
+//      —— 遮挡物离接收面越近，(refZ - blocker) 越小，半影越窄（**接触硬化**）。
+//   3) 在半影半径上做 PCF。
+//
+// 与 CSM 的 PCSS 的差别：那边在 2D 纹理的 uv 空间偏移，这边在**方向空间**偏移
+// （cube 的 6 个面是不同投影，uv 偏移会跨面跳变）。方向偏移角 = 世界宽度 / 距离。
+//
+// lightRadius 来自 L.coneAngles.z（见 GN_3Dlight.h 的说明，复用未使用的 pad 字段）。
+// 距离（米）→ NDC 深度（0..1）。**这一步漏掉过一次**：
+// cube shadow 图里存的是 NDC 深度，而这里算出的是世界距离；直接比较会让几乎所有片元
+// 都被判成"被遮挡"（实测整片地面暗了 25%，正好是"那一盏灯完全没贡献"）。
+// 透视投影的深度关系：z_ndc = far/(far-near) * (1 - near/dist)
+float cubeDepthToNdc(float dist, float nearZ, float farZ) {
+    float n = max(nearZ, 1e-4);
+    float f = max(farZ, n + 1e-3);
+    float d = max(dist, n);
+    return clamp(f / (f - n) * (1.0 - n / d), 0.0, 1.0);
+}
+
+float cubeShadowFactor(vec3 worldPos, vec3 lightPos, vec3 N, float lightRadius,
+                       float nearZ, float farZ) {
+    // near/far 未设置时（<=0）无法把米转成 NDC —— **保守返回全亮**，
+    // 而不是拿两个不同单位的值硬比（那会把整片场景压黑）。
+    if(!(farZ > nearZ) || nearZ <= 0.0) return 1.0;
+
     vec3 toFrag = worldPos - lightPos; // 从光源指向片元（正好是 cube 的采样方向）
     float dist = length(toFrag);
-    if (dist < 1e-4) return 1.0;
-    vec3 dir = toFrag / dist;
+    if(dist < 1e-4) return 1.0;
 
-    // 法线偏移：沿法线抬高一点再比较，避免自阴影痤疮（与 CSM 的 2 texel 偏移同思路）
+    // 法线偏移：沿法线抬高一点再比较，避免自阴影痤疮
     vec3 biasedPos = worldPos + N * max(dist * 0.0025, 0.002);
-    vec3 biasedDir = normalize(biasedPos - lightPos);
-    float refZ = length(biasedPos - lightPos);
+    float refDist = length(biasedPos - lightPos);
+    // 纹理里存的是 NDC 深度，比较前必须换算到同一单位
+    float refZ = cubeDepthToNdc(refDist, nearZ, farZ);
+    vec3 baseDir = normalize(biasedPos - lightPos);
 
-    // 5 点 PCF：中心 + 4 个沿切线的扰动。softness 由调用方按光源半径/距离给。
-    vec3 up = abs(dir.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-    vec3 tangent = normalize(cross(up, dir));
-    vec3 bitangent = cross(dir, tangent);
-    float sum = 0.0;
-    const int kSamples = 5;
-    vec2 offsets[5] = vec2[5](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0),
-                              vec2(0.0, 1.0), vec2(0.0, -1.0));
-    for (int i = 0; i < kSamples; ++i) {
-        vec3 sampleDir = normalize(biasedDir + (tangent * offsets[i].x + bitangent * offsets[i].y) *
-                                                        softness);
-        // 用**未偏移的** refZ 比较：偏移只影响采样方向，不该改变被测点的深度
+    // 方向空间的一组正交基（用于在锥内扰动采样方向）
+    vec3 up = abs(baseDir.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, baseDir));
+    vec3 bitangent = cross(baseDir, tangent);
+
+    // 光源半径不能为 0（否则没有任何半影）：给一个极小值保证"硬阴影"也至少 1 texel
+    float radius = max(lightRadius, 0.002);
+
+    // ── 1) 阻塞物搜索 ──
+    //
+    // 搜索锥的**上限由 cube 分辨率决定**，不是由物理半影决定。这点踩过坑：
+    // 第一版直接用"光源张角 × 1.6"，火塘场景里算出来 0.3 rad ≈ 17° ——
+    // 而 1024 面的 cube 是 1024/90° ≈ 11 texel/度，17° 相当于 190 texel 的搜索半径，
+    // 采到的全是邻面噪声与**远处**遮挡物（结果是右侧 5 m 外的矮墙也被误判成有阴影，
+    // 整片地面暗了 27%）。
+    //
+    // 合理上限 ≈ 搜索 12 texel：12 / (1024/90) ≈ 1.05° ≈ 0.018 rad。
+    // 但纯 12 texel 又表达不了"石头紧贴光源"那种大半影，所以取一个折中上限 0.10 rad
+    // （≈ 5.7°，约 65 texel）—— 既不误采远处遮挡，也能表达中等宽度的半影。
+    const float kMaxSearchAngle = 0.10;
+    float searchAngle = clamp(radius / max(dist, 0.05), 0.0, kMaxSearchAngle);
+    const int kBlockerSamples = 8;
+    float blockerSum = 0.0;
+    float blockerCount = 0.0;
+    for(int i = 0; i < kBlockerSamples; ++i) {
+        // 8 个方向均匀铺在锥内（避免用 poissonDisk 那样的大表：cube 侧对噪点更敏感）
+        float angle = float(i) * 0.78539816339; // 2pi / 8
+        float radial = (i == 0) ? 0.0 : 1.0; // 第 0 个取中心，其余铺满
+        vec3 sampleDir = normalize(baseDir + (tangent * cos(angle) * radial +
+                                             bitangent * sin(angle) * radial) * searchAngle);
         float occluder = textureLod(cubeShadowSampler, sampleDir, 0.0).r;
-        // 图外（border=白=1.0）自然算"无遮挡"
-        sum += (refZ <= occluder + 1e-4) ? 1.0 : 0.0;
+        // border=白(1.0) ⇒ 图外自然不算遮挡
+        if(occluder < refZ - 1e-4) {
+            blockerSum += occluder;
+            blockerCount += 1.0;
+        }
     }
-    return sum / float(kSamples);
+    if(blockerCount < 0.5) return 1.0; // 锥内无遮挡：全亮（最重要的早退）
+    float blockerNdc = blockerSum / blockerCount;
+
+    // ── 2) 半影宽度（世界单位 → 方向角）──
+    // 需要**世界距离**而不是 NDC：把 blocker 的 NDC 深度反解回距离。
+    // 由 z = f/(f-n) * (1 - n/d) 反解：d = n / (1 - z*(f-n)/f)
+    float k = (farZ - nearZ) / farZ;
+    float denom = 1.0 - blockerNdc * k;
+    float blockerDist = denom > 1e-4 ? nearZ / denom : farZ;
+    // 相似三角形：penumbraWorld / lightRadius = (refDist - blockerDist) / blockerDist
+    float penumbraWorld = (refDist - blockerDist) * radius / max(blockerDist, 1e-4);
+    // 转成方向角，钳到 [1 texel, 搜索锥] —— **上界必须与搜索锥一致**：
+    // PCF 采到搜索范围之外的东西等于在采样没有经过 blocker 验证的区域。
+    float penumbraAngle = clamp(penumbraWorld / max(refDist, 1e-3), 0.0015, kMaxSearchAngle);
+
+    // ── 3) 在半影半径上做 PCF ──
+    const int kPcfSamples = 8;
+    float lit = 0.0;
+    for(int i = 0; i < kPcfSamples; ++i) {
+        float angle = float(i) * 0.78539816339;
+        float radial = (i == 0) ? 0.0 : 1.0;
+        vec3 sampleDir = normalize(baseDir + (tangent * cos(angle) * radial +
+                                             bitangent * sin(angle) * radial) * penumbraAngle);
+        float occluder = textureLod(cubeShadowSampler, sampleDir, 0.0).r;
+        lit += (refZ <= occluder + 1e-4) ? 1.0 : 0.0;
+    }
+    return lit / float(kPcfSamples);
 }
 
 // 原始深度比较：receiver <= occluder 视为受光（layer = 选中的 CSM 级）。

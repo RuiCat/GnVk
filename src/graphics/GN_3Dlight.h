@@ -30,7 +30,10 @@ struct alignas(16) sLIGHT_GPU {
     float position[4]; // xyz + type (0=dir, 1=point, 2=spot)
     float direction[4]; // xyz + _pad
     float attenuation[4]; // constant, linear, quadratic, range
-    float coneAngles[4]; // innerCos, outerCos, _pad, _pad
+    // [0]=innerCos [1]=outerCos（聚光用）；[2]=**光源物理半径**（点光/聚光，PCSS 半影用）；
+    // [3]=保留。复用 [2] 而不是新增字段：新增会改动 sLIGHT_UBO 的布局契约（672 B 冻结槽位），
+    // 而 [2]/[3] 自始未使用 —— 用它零成本。
+    float coneAngles[4];
 };
 
 // 最大阴影级联数（L3c CSM；固定 4 级，cascadeCount=1 时退化为单张阴影图）
@@ -73,14 +76,31 @@ class cLIGHT {
 
     // 添加点光源。enableShadow = true 时写入 cube shadow（**只有一盏能生效**：
     // 引擎只有一张 cube map，后写入的会覆盖前面的；见 GN_VkSetCubeShadowLight）。
+    // lightRadius：光源的物理半径（米），决定点光阴影的半影宽度（PCSS）。
+    // 0 = 用默认 0.1（近似"细灯丝"）；火焰/灯泡这类有体积的光源给 0.15~0.4。
     int AddPoint(const GNg::sVEC3 &pos, float range,
-                 const GNg::sVEC3 &color, float intensity = 1.0f, bool enableShadow = false);
+                 const GNg::sVEC3 &color, float intensity = 1.0f, bool enableShadow = false,
+                 float lightRadius = 0.1f);
 
     // 添加聚光灯 (enableShadow=false 可关闭阴影)
     int AddSpot(const GNg::sVEC3 &pos, const GNg::sVEC3 &dir,
                 float range, float innerConeRad, float outerConeRad,
                 const GNg::sVEC3 &color, float intensity = 1.0f,
-                bool enableShadow = false); // 同上：点光/聚光共用一张 cube map
+                bool enableShadow = false, // 同上：点光/聚光共用一张 cube map
+                float lightRadius = 0.1f);
+
+    // ── cube shadow 的深度范围（nearZ/farZ）──
+    // **必须与 GN_VkCubeShadowBegin 传的值一致**。原因：cube shadow 图里存的是
+    // **NDC 深度（0..1）**，而着色器里算出的是世界距离（米）—— 两者要比较就得先换算，
+    // 换算需要 near/far。不设的话着色器没法把米转成 NDC，只能保守地返回"全亮"。
+    // 写入 LIGHT_UBO 的 shadowParams.z/w（这两个位置此前未使用）。
+    void SetCubeShadowRange(float nearZ, float farZ);
+    float CubeShadowNear() const;
+    float CubeShadowFar() const;
+
+    // 光源物理半径（PCSS 半影宽度用）。越界返回 0。
+    float GetLightRadius(int index) const;
+    void SetLightRadius(int index, float radius); // 钳到 >= 0
 
     // 修改/获取光源
     void SetColor(int index, const GNg::sVEC3 &color);
@@ -110,6 +130,28 @@ cLIGHT *CreateThreePointLighting(
 
 // 简单户外光照 (方向光 + 环境光)
 cLIGHT *CreateOutdoorLighting();
+
+// ═══════════════════════════════════════════════════════════
+//  B2c：多光源 cube shadow 的**选灯**
+// ═══════════════════════════════════════════════════════════
+// 引擎只有一张 cube map（6 面 × 1024² ≈ 25 MB + 6 遍场景渲染），所以"多盏点光都有阴影"
+// 在当前结构下不成立。可行做法是**每帧挑一盏最重要的**渲染，其余用无阴影版本 ——
+// 这也是多数实时引擎在中低配置下的策略。
+//
+// 评分口径（每条都有用例）：
+//   * 只考虑 `shadowType == 2`（开了 cube shadow）的点光/聚光；
+//   * 主要项是"**离相机多近**"：靠近相机的光源，投出的阴影最容易被看到；
+//   * 次项是"强度"：一盏在画面外的弱光不该抢走阴影预算；
+//   * 距离超过 maxDistance 的直接排除（远处光源的阴影在屏幕上只有几个像素）。
+struct sCUBE_SHADOW_PICK {
+    int aLightIndex; // -1 = 没有可用的候选
+    float aScore; // 越大越重要（诊断/日志用）
+    sCUBE_SHADOW_PICK();
+};
+
+// 从 LIGHT_UBO 里挑一盏该渲 cube shadow 的灯。maxDistance <= 0 用默认 40 m。
+sCUBE_SHADOW_PICK pickCubeShadowLight(const sLIGHT_UBO &light, const GNg::sVEC3 &cameraPos,
+                                      float maxDistance = 40.0f);
 
 } // namespace GN3d
 #endif // _GN_3DLIGHT_H_

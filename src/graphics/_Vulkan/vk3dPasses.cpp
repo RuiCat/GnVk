@@ -8,6 +8,15 @@
 namespace GNg {
 
 bool s_inShadowPass = false;
+// 当前 shadow pass 用哪条管线。默认 CSM 的 shadowPipeline；
+// cube pass 会临时设成 cubeShadowPipeline。
+//
+// **为什么需要这个开关**：GN_VkShadowDraw 内部要绑管线，而它以前是**硬绑定**
+// shadowPipeline —— 于是 cube pass 里绑的 cubeShadowPipeline 立刻被它覆盖，
+// 实际一直在用 CSM 那条（静态 viewport 2048）。表现是"cube 的 viewport 怎么改都没反应，
+// 内容永远缩在右下角"（B2 那轮就是因此误判成"已修好"，因为当时的断言只看
+// '有没有像素被写入'）。
+VkPipeline s_shadowPassPipeline = VK_NULL_HANDLE;
 
 namespace {
 // 天空参数：GN_VkSetSky 写入，GN_VkDrawSkybox 每帧连同 viewProj 一起上传。
@@ -76,6 +85,7 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
     vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
                             GN_Vk.shadowPipelineLayout, 0, 1, &cascadeSet, 0, 0);
     s_inShadowPass = true;
+    s_shadowPassPipeline = VK_NULL_HANDLE; // CSM 用默认那条
     s_inRenderPass = true; // 阴影渲染通道活跃
 }
 
@@ -199,6 +209,7 @@ void GN_VkCubeShadowFaceBegin(const sVEC3 &lightPos, uint32_t face, float nearZ,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.shadowPipelineLayout, 0, 1,
                                 &set, 0, 0);
     }
+    s_shadowPassPipeline = GN_Vk.cubeShadowPipeline; // 让 GN_VkShadowDraw 用 cube 那条
     s_inShadowPass = true; // 让 GN_VkShadowDraw 认这个 pass
     s_inRenderPass = true;
 }
@@ -242,9 +253,11 @@ void GN_VkShadowDraw(const void *vertices, uint32_t vertexCount,
     memcpy(d, vertices, vtxSize);
     vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory3D);
 
-    // 绑定阴影管线
+    // 绑定阴影管线：优先用 pass 指定的那条（cube 需要它自己的动态 viewport 版本）
+    const VkPipeline activePipeline =
+        (s_shadowPassPipeline != VK_NULL_HANDLE) ? s_shadowPassPipeline : GN_Vk.shadowPipeline;
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame],
-                      VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.shadowPipeline);
+                      VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
 
     VkDeviceSize offs[] = {s_vtxOfs3D};
     vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1,

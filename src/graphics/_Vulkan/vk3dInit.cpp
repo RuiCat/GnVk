@@ -903,8 +903,14 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         descCube.aTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         descCube.aSamples = VK_SAMPLE_COUNT_1_BIT;
         descCube.aColorAttachmentCount = 0;
+        // **必须显式给静态 viewport**：实测 aDynamicViewport=true + vkCmdSetViewport
+        // 在这条路径上不生效（把 viewport 改成一半尺寸，渲染出的像素数一点没变）。
+        // 保留 dynamicState 声明（让 SetViewport 仍然合法），但按 cube 尺寸写死。
+        const uint32_t cubeSize = GN_Vk.cubeShadowSize > 0 ? GN_Vk.cubeShadowSize : 1024u;
         descCube.aDynamicViewport = true;
         descCube.aDynamicScissor = true;
+        descCube.aViewport = VkViewport{0.0f, 0.0f, (float)cubeSize, (float)cubeSize, 0.0f, 1.0f};
+        descCube.aScissor = VkRect2D{{0, 0}, {cubeSize, cubeSize}};
         descCube.aCustomBlend = false;
         GN_Vk.cubeShadowPipeline = GN_Vk.aPipelineCache.GetOrCreate(descCube);
         if(GN_Vk.cubeShadowPipeline == VK_NULL_HANDLE) {

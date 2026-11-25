@@ -62,7 +62,8 @@ int cLIGHT::AddDirectional(const sVEC3 &dir, const sVEC3 &color, float intensity
 }
 
 int cLIGHT::AddPoint(const sVEC3 &pos, float range,
-                     const sVEC3 &color, float intensity, bool enableShadow) {
+                     const sVEC3 &color, float intensity, bool enableShadow,
+                     float lightRadius) {
     if(aCount >= GN_MAX_LIGHTS) return -1;
     int idx = aCount++;
 
@@ -84,7 +85,9 @@ int cLIGHT::AddPoint(const sVEC3 &pos, float range,
     L.attenuation[1] = 2.0f / (range > 0.001f ? range : 10.0f);
     L.attenuation[2] = 1.0f / ((range > 0.001f ? range : 10.0f) * (range > 0.001f ? range : 10.0f));
     L.attenuation[3] = range;
-    L.coneAngles[0] = L.coneAngles[1] = L.coneAngles[2] = L.coneAngles[3] = 0.0f;
+    L.coneAngles[0] = L.coneAngles[1] = 0.0f; // 点光无锥角
+    L.coneAngles[2] = lightRadius > 0.0f ? lightRadius : 0.1f; // PCSS 半影
+    L.coneAngles[3] = 0.0f;
 
     aData.lightCount = (float)aCount;
     aDirty = true;
@@ -93,7 +96,8 @@ int cLIGHT::AddPoint(const sVEC3 &pos, float range,
 
 int cLIGHT::AddSpot(const sVEC3 &pos, const sVEC3 &dir,
                     float range, float innerConeRad, float outerConeRad,
-                    const sVEC3 &color, float intensity, bool enableShadow) {
+                    const sVEC3 &color, float intensity, bool enableShadow,
+                    float lightRadius) {
     if(aCount >= GN_MAX_LIGHTS) return -1;
     int idx = aCount++;
 
@@ -120,11 +124,35 @@ int cLIGHT::AddSpot(const sVEC3 &pos, const sVEC3 &dir,
     L.attenuation[3] = range;
     L.coneAngles[0] = cosf(innerConeRad);
     L.coneAngles[1] = cosf(outerConeRad);
-    L.coneAngles[2] = L.coneAngles[3] = 0.0f;
+    L.coneAngles[2] = lightRadius > 0.0f ? lightRadius : 0.1f; // PCSS 半影
+    L.coneAngles[3] = 0.0f;
 
     aData.lightCount = (float)aCount;
     aDirty = true;
     return idx;
+}
+
+void cLIGHT::SetCubeShadowRange(float nearZ, float farZ) {
+    if(!(nearZ > 0.0f)) nearZ = 0.05f;
+    if(!(farZ > nearZ)) farZ = nearZ + 1.0f;
+    aData.shadowParams[2] = nearZ;
+    aData.shadowParams[3] = farZ;
+    aDirty = true;
+}
+
+float cLIGHT::CubeShadowNear() const { return aData.shadowParams[2]; }
+
+float cLIGHT::CubeShadowFar() const { return aData.shadowParams[3]; }
+
+float cLIGHT::GetLightRadius(int index) const {
+    if(index < 0 || index >= (int)aCount) return 0.0f;
+    return aData.lights[index].coneAngles[2];
+}
+
+void cLIGHT::SetLightRadius(int index, float radius) {
+    if(index < 0 || index >= (int)aCount) return;
+    aData.lights[index].coneAngles[2] = radius > 0.0f ? radius : 0.0f;
+    aDirty = true;
 }
 
 void cLIGHT::SetColor(int index, const sVEC3 &color) {
@@ -224,6 +252,49 @@ cLIGHT *CreateOutdoorLighting() {
     lt->AddDirectional(sVEC3{0.0f, -1.0f, 0.0f}, sVEC3{0.3f, 0.4f, 0.6f}, 0.6f);
     lt->SetAmbient(sVEC3{0.2f, 0.25f, 0.35f}, 1.0f);
     return lt;
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  B2c：多光源 cube shadow 的选灯
+// ═══════════════════════════════════════════════════════════
+sCUBE_SHADOW_PICK::sCUBE_SHADOW_PICK() : aLightIndex(-1), aScore(0.0f) {}
+
+sCUBE_SHADOW_PICK pickCubeShadowLight(const sLIGHT_UBO &light, const GNg::sVEC3 &cameraPos,
+                                      float maxDistance) {
+    sCUBE_SHADOW_PICK pick;
+    if(!(maxDistance > 0.0f)) maxDistance = 40.0f;
+    const int count = (int)light.lightCount;
+    if(count <= 0) return pick;
+    if(count > GN_MAX_LIGHTS) return pick; // 越界视为数据损坏，宁可不选也不读脏
+
+    float bestScore = 0.0f;
+    int bestIndex = -1;
+    for(int i = 0; i < count; ++i) {
+        const sLIGHT_GPU &L = light.lights[i];
+        // 只考虑"开了 cube shadow 的点光/聚光"：shadowType == 2
+        if(L.direction[3] < 1.5f || L.direction[3] > 2.5f) continue;
+        // 方向光没有位置（position.w < 0.5），不参与 cube shadow
+        if(L.position[3] < 0.5f) continue;
+
+        const float dx = L.position[0] - cameraPos.x;
+        const float dy = L.position[1] - cameraPos.y;
+        const float dz = L.position[2] - cameraPos.z;
+        const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if(distance > maxDistance) continue; // 太远：阴影只有几个像素
+
+        // 评分：距离越近越好（1/(1+d) 而不是 1/d —— 避免 d→0 时爆掉导致永远选同一盏），
+        // 强度按平方根参与（一盏 4 倍亮的光不该拿 4 倍权重，否则亮度差异会盖过位置差异）。
+        const float intensity = L.color[3] > 0.0f ? L.color[3] : 0.0f;
+        const float proximity = 1.0f / (1.0f + distance * 0.08f);
+        const float score = proximity * std::sqrt(intensity);
+        if(!(score > bestScore)) continue; // 严格大于：并列时**先注册的赢**，行为可预测
+        bestScore = score;
+        bestIndex = i;
+    }
+    pick.aLightIndex = bestIndex;
+    pick.aScore = bestScore;
+    return pick;
 }
 
 } // namespace GN3d

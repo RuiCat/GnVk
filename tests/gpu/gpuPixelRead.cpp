@@ -243,8 +243,8 @@ bool ReadColorImage(VkImage image, VkFormat format, VkImageLayout currentLayout,
     return true;
 }
 
-bool ReadDepthImage(VkImage image, VkImageLayout currentLayout, uint32_t width, uint32_t height,
-                    std::vector<float> &out) {
+bool ReadDepthImageLayer(VkImage image, VkImageLayout currentLayout, uint32_t width,
+                         uint32_t height, uint32_t baseLayer, std::vector<float> &out) {
     if(!image || width == 0 || height == 0) return false;
     const VkDeviceSize size = (VkDeviceSize)width * height * sizeof(float);
     VkBuffer buffer = VK_NULL_HANDLE;
@@ -267,6 +267,7 @@ bool ReadDepthImage(VkImage image, VkImageLayout currentLayout, uint32_t width, 
                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     VkBufferImageCopy region = {};
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    region.imageSubresource.baseArrayLayer = baseLayer;
     region.imageSubresource.layerCount = 1;
     region.imageExtent = {width, height, 1};
     vkCmdCopyImageToBuffer(cb, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
@@ -307,6 +308,11 @@ float HalfToFloat(uint16_t half) {
         value = std::ldexp(1.0f + (float)mantissa / 1024.0f, exp);
     }
     return sign ? -value : value;
+}
+
+bool ReadDepthImage(VkImage image, VkImageLayout currentLayout, uint32_t width, uint32_t height,
+                    std::vector<float> &out) {
+    return ReadDepthImageLayer(image, currentLayout, width, height, 0, out);
 }
 
 } // namespace GpuCheck
