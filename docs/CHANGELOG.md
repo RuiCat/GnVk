@@ -25,6 +25,76 @@ Unity humanoid 动画在 `m_MuscleClip` 里存的是 95 个肌肉值而不是骨
 身体摇摆：`RootQ` 的 roll（左右倒）与 yaw（左右转）默认分别收敛到原幅度的 30% / 45%，pitch（前倾）保留 100% —— 走动时髋部旋转幅度从 9.55° 降到 4.40°（`Walking2`），符合「日系走路夸张摆胯」原数据与观感之间的折中；三个系数可用 `BODY_ROLL`/`BODY_YAW`/`BODY_PITCH` 重导出。
 
 已知边界：游戏数据里没有独立的倒退/侧移动画，倒退与侧移靠「转身朝移动方向」解决；水平位移仍由游戏逻辑驱动（动画为原地循环）；窗口截图只能在 lavapipe 下复现，真机帧率待确认。
+## 2026-11-26 — 换装逻辑抽成引擎模块 `GN_Visibility`
+
+`tests/imoScene/imoSceneOutfit.cpp` 的 312 行里，真正可复用的是"给定名字与规则，
+算出每个网格是否可见"这套状态机（约 90 行），其余是读按键、读环境变量、手写 JSON 扫描。
+抽出来之后，那 90 行从"只能靠看画面判断"变成"可以断言"，也让两个角色各自换装成为可能。
+
+### 交付
+
+| 内容 | 位置 | 说明 |
+|---|---|---|
+| 规则集 | `src/graphics/GN_Visibility.h` | `cVISIBILITY_SET`：`Build` / `IsVisible` / `ToggleGroup` / `CycleFamily` / `SetFamilySelection` / `SetMaskByName` / `SetMaskByRule` / `ResetAll` / `Explain` |
+| 三类名字匹配 | 同上 | `eNAME_EXACT_BASE` / `eNAME_PREFIX` / `eNAME_SUBSTRING`，**统一大小写不敏感**，按"基名"判（自动去掉 `#N` 后缀）|
+| 诊断 | `cVISIBILITY_SET::Explain` | 回答"它为什么不见了"：哪个组 / 是否 mask / 是否变体排除 |
+| 单测 29 例 | `tests/unit/testVisibility.cpp` | 见下 |
+| 配置解析单测 13 例 | `tests/unit/testOutfitDefault.cpp` | JSON 名单 + 严格整数解析 |
+| 接线集成测试 9 例 | `tests/unit/testOutfitWiring.cpp` | 用假 `cMODEL` 跑 `outfitInit`→`aVisible` 全链路 |
+| demo 瘦身 | `tests/imoScene/imoSceneOutfit.cpp` | 312 → 217 行，只剩规则表 / 按键映射 / 写回 |
+| 解析独立成文件 | `tests/imoScene/imoSceneOutfitConfig.cpp` | 不依赖 `cMODEL`/`cINPUT_MAP`，因此能被单测直接链接验证 |
+
+`make unit` 840 → **891**（+51）。
+
+### 修掉的缺陷
+
+1. **全局状态**：4 个文件级变量（`gModel` / `gForceHidden` / `gHiddenNames` / `gDefaultHair`）
+   + 两个静态表（`kGroups[].aVisible` / `kFamilies[].aSelected`）→ 收进一个可实例化的
+   `cVISIBILITY_SET`。用例 `visTwoInstancesAreIndependent` 直接钉住"两个角色互不影响"。
+2. **`CycleFamily` 不清 mask**（真实缺陷）：默认组合把不穿的服装 mask 掉之后，
+   按 6 切换身体**完全没反应** —— 族换了，但那些网格仍被 mask 挡住。
+   现在 `CycleFamily` / `SetFamilySelection` / `ToggleGroup` 都会清掉**自己成员**的 mask
+   （用户接了手），且不会误清别人。用例：`visCycleFamilyClearsMaskOfItsMembers`、
+   `visToggleGroupDoesNotClearOtherGroupsMask`。
+3. **三套名字匹配规则并存**：装饰组用大小写敏感的 `strstr`（所以 ribbon 组不得不写
+   "Ribbon" + "ribbon" 两条，换套资产命名习惯就静默失效）；变体族用前缀；
+   默认组合用"去 `#prim` 后精确相等"。现在统一成三类显式规则 + 大小写不敏感。
+4. **`atoi` 静默接受垃圾**：`IMO_SCENE_HAIR=abc` 得到 0（选第一套），
+   而用户想表达的是 -1（全部）。现在 `parseIntegerStrict` 整串校验，非法就忽略并打印提示。
+5. **`"hair"` 全文件搜索**：若 `hidden` 名单里恰好有叫 `hair` 的槽，会误命中并把后面的内容
+   当数值解析。现在只在 `hidden` 数组**之后**找该字段。
+6. **`loadOutfitDefault` 靠全局副作用传值**：`gDefaultHair` 在失败路径上也可能被写入。
+   现在解析输出到 `sOUTFIT_DEFAULT` 结构，失败即空状态。
+
+### 过程中被测试纠正的两次误判
+
+1. 断言"立方体角在 60° 阈值下会被平滑"是错的（面积加权使 2:1:1 的入射面数偏向大面）——
+   已在本轮上一个提交记录，与本轮无关但同源：**测试要跟实现的实际性质走，不能跟想象走**。
+2. `visThreeSourcesCombineWithAnd` 一开始写成"先设 mask 再选族"，结果 mask 当场被清掉、
+   用例失败。这不是 bug 而是**设计工作的证明**（用户操作会清自己那块的 mask），
+   于是改成"先选族、再设 mask"，并在用例里显式断言"选族后 MaskedCount == 0"。
+
+### 验收
+
+```
+make unit                891 cases, 0 failed
+make imoScene            编译 + 运行通过
+make doc-check           AUTO-STATS 一致 + 索引 + 头注释 121/121
+make ci                  全绿
+```
+
+### 明确没做 / 无法验证
+
+- **换装的实际观感无法在本容器验证**：`.local/imoScene/*.glb` 不在仓库，
+  `imoScene` 启动即报"加载失败"，`outfitInit` 根本不会执行。所以本轮验证的是
+  **逻辑与接线**（规则表命中哪些名字、mask/族/组怎么合成），不是画面；
+- **没有做多关节权重式的"部分隐藏"**：`aVisible` 是布尔，只能整网格开关。
+  换装到"半脱"这种需求要改渲染路径，不在本轮范围；
+- demo 里仍有 `gModel` / `gVisibility` 两个文件级变量：它们是**单场景**的接线状态，
+  不是规则状态——要支持两个角色，再建一个 `cVISIBILITY_SET` 实例即可，无需再改模块。
+
+---
+
 ## 2026-11-26 — 网格工具抽成引擎模块 `GN_MeshTools`
 
 imoScene 里有六个纯函数是**与资产格式无关**的，却埋在演示程序里（`tests/imoScene/imoSceneConvert.cpp`

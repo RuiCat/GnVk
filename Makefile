@@ -252,7 +252,10 @@ TEST_LIBS  := -L. -l$(LIB_STEM) $(LIBS)
 UNIT_DIR   := tests/unit
 # 示例的键位绑定表（P0）也要被单测直接验：把这两个 TU 一起编进单测二进制，
 # 保证"改绑定表"与"跑绑定用例"永远是同一份代码。
-UNIT_DEMO_SRC := tests/mmdViewer/mmdViewerActions.cpp tests/imoScene/imoSceneActions.cpp
+# imoScene 的"规则表/解析"这几个文件不碰 GPU、不碰 cMODEL 的绘制路径，
+# 单独列出来让单测直接链接（否则换装规则只能靠看画面验证）。
+UNIT_DEMO_SRC := tests/mmdViewer/mmdViewerActions.cpp tests/imoScene/imoSceneActions.cpp \
+                 tests/imoScene/imoSceneOutfitConfig.cpp tests/imoScene/imoSceneOutfit.cpp
 # 程序化测试资产（P1）：单测与 `make fixtures` 共用同一份生成器。
 UNIT_FIXTURE_SRC := tests/fixtures/fixtures.cpp
 UNIT_SRC   := $(wildcard $(UNIT_DIR)/*.cpp) $(UNIT_DEMO_SRC) $(UNIT_FIXTURE_SRC)

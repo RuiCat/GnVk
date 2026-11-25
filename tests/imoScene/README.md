@@ -153,6 +153,7 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
 - 转身：模型按移动方向平滑转向（模型正面 = +Z）。没有独立的倒退/侧移动画，倒退与侧移就是「转身走过去」；
 - 调试：`IMO_SCENE_TEST_MOVE=front|back|left|right` 强制移动意图（无键鼠时验证朝向/选段），`IMO_SCENE_ANIM_DIR` 换剪辑目录；
 - **默认服装组合（方案 A）**：`.local/imoScene/outfitDefault.json` 的 `hidden` 名单来自游戏 prefab（level1 的 `Clothes_imo_chan`）里**激活的服装槽**，按**顶点数**把槽位的 Body/Face/衣服网格映射回 glTF 网格（顶点数对不上时用材质名兜底）。当前激活槽位 = `Clothes_imo_chan`(Body 7278 / Face 4343) + `Sera_Top0815`(1646) + `sera_sukart0824`(754)，其余（衬衫 1899、外套 2890、内衣 459/830、尾巴 2569、袜子 1021、帽子 1168、口罩 589、猫耳/铃铛/尾巴、项圈、丝带、Jirai）全部隐藏，实测 23 个网格；`hair` 字段指定默认发型下标（当前 5 = `Clothes_imo_chan` 槽下的头发）。文件缺失时行为与旧版一致；`IMO_SCENE_OUTFIT_DEFAULT=<path>` 可换文件；键 1–4 取回对应装饰、6 循环身体、5 循环发型、0 恢复全部；
+- 换装的判定逻辑在引擎模块 `src/graphics/GN_Visibility.h`（`GN3d::cVISIBILITY_SET`）：三类名字匹配（精确基名/前缀/子串，统一大小写不敏感）、三个来源（组 / mask / 变体族）AND 合成、用户操作会清掉自己那块的 mask。本场景只提供规则表（`kGroupBindings` / `kFamilyDescs`）与按键映射，`tests/unit/testVisibility.cpp` + `testOutfitWiring.cpp` 覆盖规则与接线；
 - 换装/变体：资产里 `Mesh_Hair` 有 9 个头发网格（头皮/刘海/长发等零件混杂，只留一套会露头皮，所以默认全部显示）、`Mesh_Body` 有 12 个身体/服装网格；**键 5 循环切换发型、键 6 循环切换身体/服装、0 恢复全部**，默认值可用 `IMO_SCENE_HAIR=N` / `IMO_SCENE_BODY=N` 固定（-1 = 全部）；
 - 头发物理：游戏里头发由 VRM SpringBone（游戏目录里有 `FastSpringBone.dll`）驱动，不在 MuscleClip 里；本场景头发刚性跟随头骨，属预期行为，不是绑定错误；
 - 法线平滑：FBX 导出的身体网格在同位置有多份顶点、各自带面法线（身体网格实测 1024 个重复顶点、951 处法线不同，画出来是硬边手指）。导入时按「同位置合并 + 夹角 ≤ 60° 取面积加权平均法线」重建，只作用于角色（带绑定顶点的网格），房间保持原样；`IMO_SCENE_SMOOTH=0` 关闭、`IMO_SCENE_SMOOTH_ANGLE=<deg>` 调阈值（默认 60）。

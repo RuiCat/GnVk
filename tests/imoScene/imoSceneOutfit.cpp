@@ -1,10 +1,17 @@
-// tests/imoScene/imoSceneOutfit.cpp — 换装：按网格名分组做显隐切换。
+// tests/imoScene/imoSceneOutfit.cpp — 换装接线：规则表 + 按键映射 + 写回 cMODEL。
 //
 // 为什么按名字而不是材质：一套装饰（如猫耳+铃铛+尾巴）跨多个网格、共用一个材质，
 // 按材质切换会把同材质的其它部件一起藏掉。名字匹配对 glTF 导出的命名稳定。
+//
+// 判定逻辑不在这里：`GN3d::cVISIBILITY_SET`（src/graphics/GN_Visibility.h）负责
+// 三类名字匹配、三来源 AND 合成、mask/变体族的对称清空；本文件只提供规则描述、
+// 把按键翻译成操作、以及把结果写进 sMESH::aVisible。
+
 #include "imoSceneOutfit.h"
 
 #include "imoSceneActions.h"
+
+#include "GN_Visibility.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -16,242 +23,166 @@ namespace imoScene {
 
 namespace {
 
-// 每个装饰组最多匹配 3 个名字子串；aVisible 是组状态（true = 显示）。
-struct sOUTFIT_GROUP {
-    GN::eACTION aAction;
-    const char *aNeedle[3];
-    bool aVisible;
+// ═══════════════════════════════════════════════════════════
+//  一、规则表（纯数据）
+// ═══════════════════════════════════════════════════════════
+// 组 = 可整体开关的一批网格。SUBSTRING 比 PREFIX 更合适：装饰名散落在各个前缀下
+// （CatEar / CatBell / CatTail），没有共同的词头。
+//
+// 注意 `"ribbon"` 只写了一条小写：匹配已统一为**大小写不敏感**，
+// 不再需要旧实现那样同时写 "Ribbon" 和 "ribbon" 两条。
+const GN3d::sNAME_RULE kCatRules[] = {
+    {GN3d::eNAME_SUBSTRING, "CatEar"},
+    {GN3d::eNAME_SUBSTRING, "CatBell"},
+    {GN3d::eNAME_SUBSTRING, "CatTail"},
+};
+const GN3d::sNAME_RULE kHatRules[] = {
+    {GN3d::eNAME_SUBSTRING, "Hat"},
+};
+const GN3d::sNAME_RULE kMaskRules[] = {
+    {GN3d::eNAME_SUBSTRING, "PleatedMask"},
+};
+// 丝带/领结/项圈：同一类装饰的三种叫法。
+const GN3d::sNAME_RULE kRibbonRules[] = {
+    {GN3d::eNAME_SUBSTRING, "Ribbon"},
+    {GN3d::eNAME_SUBSTRING, "Collar"},
 };
 
-sOUTFIT_GROUP kGroups[] = {
-    {eIMO_ACT_OUTFIT_CAT, {"CatEar", "CatBell", "CatTail"}, true},
-    {eIMO_ACT_OUTFIT_HAT, {"Hat", 0, 0}, true},
-    {eIMO_ACT_OUTFIT_MASK, {"PleatedMask", 0, 0}, true},
-    {eIMO_ACT_OUTFIT_RIBBON, {"Ribbon", "ribbon", "Collar"}, true},
+struct sGROUP_BINDING {
+    GN::eACTION aAction; // 哪个键切它
+    GN3d::sHIDE_GROUP_DESC aDesc;
 };
 
-const uint32_t kGroupCount = sizeof(kGroups) / sizeof(kGroups[0]);
+const sGROUP_BINDING kGroupBindings[] = {
+    {eIMO_ACT_OUTFIT_CAT, GN3d::sHIDE_GROUP_DESC("cat（猫耳/铃铛/尾巴）", kCatRules, 3, true)},
+    {eIMO_ACT_OUTFIT_HAT, GN3d::sHIDE_GROUP_DESC("hat（帽子）", kHatRules, 1, true)},
+    {eIMO_ACT_OUTFIT_MASK, GN3d::sHIDE_GROUP_DESC("mask（口罩）", kMaskRules, 1, true)},
+    {eIMO_ACT_OUTFIT_RIBBON, GN3d::sHIDE_GROUP_DESC("ribbon（丝带/领结/项圈）", kRibbonRules, 2, true)},
+};
+const uint32_t kGroupCount = sizeof(kGroupBindings) / sizeof(kGroupBindings[0]);
 
+// 变体族 = 同一槽位的互斥变体。用 PREFIX：`Mesh_Hair.001` 属于发型族。
+const GN3d::sVARIANT_FAMILY_DESC kFamilyDescs[] = {
+    GN3d::sVARIANT_FAMILY_DESC("hair（发型）", GN3d::sNAME_RULE(GN3d::eNAME_PREFIX, "Mesh_Hair")),
+    GN3d::sVARIANT_FAMILY_DESC("body（身体/服装）",
+                               GN3d::sNAME_RULE(GN3d::eNAME_PREFIX, "Mesh_Body")),
+};
+const uint32_t kFamilyCount = sizeof(kFamilyDescs) / sizeof(kFamilyDescs[0]);
+
+// 族下标常量：0 = 发型、1 = 身体（与 kFamilyDescs 顺序一致）
+const uint32_t kFamilyHair = 0;
+const uint32_t kFamilyBody = 1;
+
+// ═══════════════════════════════════════════════════════════
+//  二、状态
+// ═══════════════════════════════════════════════════════════
+// 只剩模型指针（写回目标）；显隐状态全在 aVisibility 里，可被替换/复制。
 GN3d::cMODEL *gModel = nullptr;
-// 默认服装组合（方案 A）：从游戏 prefab 的激活槽位导出的"只保留这一套"名单，
-// 只作用于身体/衣服（Mesh_Body*），装饰仍归 1–4 键管。空 = 不启用。
-std::vector<unsigned char> gForceHidden;
-std::vector<std::string> gHiddenNames;
-int32_t gDefaultHair = -1; // JSON 里可选的 "hair": N，作为默认发型下标
+GN3d::cVISIBILITY_SET gVisibility;
+uint32_t gVisibleMeshCount = 0; // 缓存的可见数（HUD 每帧读）
 
-// 从 JSON 里取出 "hidden": [ "..." ] 名单（文件很简单，按引号切分足够）。
-bool loadOutfitDefault(const char *path) {
-    std::FILE *file = std::fopen(path, "rb");
-    if (file == 0) {
-        return false;
-    }
-    std::string text;
-    char buffer[4096];
-    while (true) {
-        const size_t read = std::fread(buffer, 1, sizeof(buffer), file);
-        if (read == 0) {
-            break;
-        }
-        text.append(buffer, read);
-    }
-    std::fclose(file);
-    const size_t key = text.find("\"hidden\"");
-    if (key == std::string::npos) {
-        return false;
-    }
-    const size_t begin = text.find('[', key);
-    const size_t end = text.find(']', key);
-    if (begin == std::string::npos || end == std::string::npos || end < begin) {
-        return false;
-    }
-    gHiddenNames.clear();
-    size_t cursor = begin;
-    while (true) {
-        const size_t quote = text.find('"', cursor);
-        if (quote == std::string::npos || quote > end) {
-            break;
-        }
-        const size_t close = text.find('"', quote + 1);
-        if (close == std::string::npos || close > end) {
-            break;
-        }
-        gHiddenNames.push_back(text.substr(quote + 1, close - quote - 1));
-        cursor = close + 1;
-    }
-    // 可选的默认发型下标："hair": N
-    const size_t hairKey = text.find("\"hair\"");
-    if (hairKey != std::string::npos) {
-        const size_t colon = text.find(':', hairKey);
-        if (colon != std::string::npos) {
-            gDefaultHair = static_cast<int32_t>(std::atoi(text.c_str() + colon + 1));
-        }
-    }
-    return !gHiddenNames.empty();
-}
-
-// 变体族：导入资产里同名网格（Mesh_Hair / Mesh_Hair.001 …、Mesh_Body / Mesh_Body.001 …）
-// 是同一槽位的不同套发型/服装，游戏里同一时刻只激活一套。默认 -1 = 全部显示（保持导入画面），
-// 键 5 / 6 循环切换，切到末尾回到"全部"。
-struct sVARIANT_FAMILY {
-    const char *aPrefix;
-    std::vector<uint32_t> aMeshes;
-    int32_t aSelected; // -1 = 全部
-};
-
-sVARIANT_FAMILY kFamilies[] = {
-    {"Mesh_Hair", std::vector<uint32_t>(), -1},
-    {"Mesh_Body", std::vector<uint32_t>(), -1},
-};
-const uint32_t kFamilyCount = sizeof(kFamilies) / sizeof(kFamilies[0]);
-
-bool variantFamilyVisible(uint32_t meshIndex) {
-    for (uint32_t family = 0; family < kFamilyCount; ++family) {
-        const sVARIANT_FAMILY &slot = kFamilies[family];
-        if (slot.aSelected < 0) {
-            continue;
-        }
-        for (size_t item = 0; item < slot.aMeshes.size(); ++item) {
-            if (slot.aMeshes[item] != meshIndex) {
-                continue;
-            }
-            if (static_cast<int32_t>(item) != slot.aSelected) {
-                return false;
-            }
-            break;
-        }
-    }
-    return true;
-}
-
-// 名称前缀命中即属于该族（名字形如 Mesh_Hair、Mesh_Hair.001）。
-bool nameHasPrefix(const char *name, const char *prefix) {
-    return std::strncmp(name, prefix, std::strlen(prefix)) == 0;
-}
-
-void applyGroups();
-
-void buildFamilies() {
-    for (uint32_t family = 0; family < kFamilyCount; ++family) {
-        kFamilies[family].aMeshes.clear();
-        kFamilies[family].aSelected = -1; // 默认全部显示（9 套头发里有头皮/刘海等零件，只留一套会露出光头）
-    }
+// 把规则集的结果刷进 cMODEL。**这是本文件唯一写 aVisible 的地方。**
+void applyToModel() {
     if (gModel == nullptr) {
+        gVisibleMeshCount = 0;
         return;
     }
-    for (uint32_t meshIndex = 0; meshIndex < gModel->aMeshCount; ++meshIndex) {
-        const char *name = gModel->aMeshes[meshIndex].aName;
-        for (uint32_t family = 0; family < kFamilyCount; ++family) {
-            if (nameHasPrefix(name, kFamilies[family].aPrefix)) {
-                kFamilies[family].aMeshes.push_back(meshIndex);
-                break;
-            }
+    uint32_t visible = 0;
+    // 网格数取两边较小值：规则集是按同一份名字建的，但不做假设。
+    const uint32_t count = (gModel->aMeshCount < gVisibility.MeshCount())
+                               ? gModel->aMeshCount
+                               : gVisibility.MeshCount();
+    for (uint32_t meshIndex = 0; meshIndex < count; ++meshIndex) {
+        const bool shown = gVisibility.IsVisible(meshIndex);
+        gModel->aMeshes[meshIndex].aVisible = shown;
+        if (shown) {
+            ++visible;
         }
     }
+    // 规则集之外的网格（理论上不该有）保持导入时的可见性，并计入统计。
+    for (uint32_t meshIndex = count; meshIndex < gModel->aMeshCount; ++meshIndex) {
+        if (gModel->aMeshes[meshIndex].aVisible) {
+            ++visible;
+        }
+    }
+    gVisibleMeshCount = visible;
 }
 
-void cycleFamily(uint32_t family) {
-    if (family >= kFamilyCount) {
-        return;
+// 把默认名单套到规则集上：名单里给的是**槽位名**（不带 #prim），按基名精确匹配。
+// 只作用于身体/衣服 —— 装饰仍归 1–4 键管（方案 A 的约定）。
+uint32_t applyDefaultHidden(const std::vector<std::string> &hidden) {
+    uint32_t changed = 0;
+    for (size_t item = 0; item < hidden.size(); ++item) {
+        changed += gVisibility.SetMaskByName(hidden[item].c_str(), true);
     }
-    sVARIANT_FAMILY &slot = kFamilies[family];
-    if (slot.aMeshes.empty()) {
-        return;
-    }
-    if (slot.aSelected + 1 >= static_cast<int32_t>(slot.aMeshes.size())) {
-        slot.aSelected = -1; // 回到"全部显示"
-    } else {
-        ++slot.aSelected;
-    }
-    applyGroups();
-}
-
-bool matchesGroup(const sOUTFIT_GROUP &group, const char *meshName) {
-    for (int index = 0; index < 3; ++index) {
-        const char *needle = group.aNeedle[index];
-        if (needle != 0 && std::strstr(meshName, needle) != 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// 按各组当前状态重算每个网格的可见性（未被任何隐藏组命中的网格始终可见）。
-void applyGroups() {
-    if (gModel == nullptr) {
-        return;
-    }
-    for (uint32_t meshIndex = 0; meshIndex < gModel->aMeshCount; ++meshIndex) {
-        GN3d::sMESH &mesh = gModel->aMeshes[meshIndex];
-        bool visible = true;
-        for (uint32_t groupIndex = 0; groupIndex < kGroupCount; ++groupIndex) {
-            if (!kGroups[groupIndex].aVisible &&
-                matchesGroup(kGroups[groupIndex], mesh.aName)) {
-                visible = false;
-                break;
-            }
-        }
-        bool forced = false;
-        if (meshIndex < gForceHidden.size() && gForceHidden[meshIndex] != 0) {
-            forced = true;
-        }
-        mesh.aVisible = visible && !forced && variantFamilyVisible(meshIndex);
-    }
+    return changed;
 }
 
 } // namespace
 
-void outfitInit(GN3d::cMODEL &model) {
+// ═══════════════════════════════════════════════════════════
+//  对外接口
+// ═══════════════════════════════════════════════════════════
+
+void outfitInit(GN3d::cMODEL &model, const char *defaultPath) {
     gModel = &model;
-    for (uint32_t groupIndex = 0; groupIndex < kGroupCount; ++groupIndex) {
-        kGroups[groupIndex].aVisible = true;
+
+    // ── 1. 收集网格名（规则集要一份 const char* 数组；Build 内部会复制）──
+    std::vector<const char *> names(model.aMeshCount);
+    for (uint32_t meshIndex = 0; meshIndex < model.aMeshCount; ++meshIndex) {
+        names[meshIndex] = model.aMeshes[meshIndex].aName;
     }
-    buildFamilies();
-    // 方案 A：默认服装组合。只隐藏 Mesh_Body*（身体/衣服），装饰留给 1–4 键。
-    gForceHidden.assign(gModel->aMeshCount, 0);
-    const char *defaultPath = std::getenv("IMO_SCENE_OUTFIT_DEFAULT");
-    const std::string fallback = ".local/imoScene/outfitDefault.json";
-    if (loadOutfitDefault(defaultPath != 0 ? defaultPath : fallback.c_str())) {
-        size_t hiddenBody = 0;
-        for (uint32_t meshIndex = 0; meshIndex < gModel->aMeshCount; ++meshIndex) {
-            const std::string name = gModel->aMeshes[meshIndex].aName;
-            // 网格名可能带 "#prim" 后缀；按去掉后缀的节点名精确比较（否则 Mesh_Body 会命中所有 Mesh_Body.*）。
-            const size_t hash = name.find('#');
-            const std::string base = (hash == std::string::npos) ? name : name.substr(0, hash);
-            for (size_t item = 0; item < gHiddenNames.size(); ++item) {
-                if (base == gHiddenNames[item]) {
-                    gForceHidden[meshIndex] = 1;
-                    ++hiddenBody;
-                    break;
-                }
-            }
+
+    // ── 2. 建规则集 ──
+    GN3d::sHIDE_GROUP_DESC groupDescs[kGroupCount];
+    for (uint32_t group = 0; group < kGroupCount; ++group) {
+        groupDescs[group] = kGroupBindings[group].aDesc;
+    }
+    GN3d::sVISIBILITY_DESC desc;
+    desc.aGroups = groupDescs;
+    desc.aGroupCount = kGroupCount;
+    desc.aFamilies = kFamilyDescs;
+    desc.aFamilyCount = kFamilyCount;
+    if (!gVisibility.Build(names.empty() ? 0 : names.data(), model.aMeshCount, desc)) {
+        std::printf("[imoScene] 换装规则非法，全部网格保持可见\n");
+        for (uint32_t meshIndex = 0; meshIndex < model.aMeshCount; ++meshIndex) {
+            model.aMeshes[meshIndex].aVisible = true;
         }
-        std::printf("[imoScene] 默认服装组合: 隐藏网格 %zu 个（.local/imoScene/outfitDefault.json）\n",
-                    hiddenBody);
+        gVisibleMeshCount = model.aMeshCount;
+        return;
     }
-    // 默认显示集合可用环境变量固定（便于挑好之后固化）；-1 = 全部。
-    const char *hairEnv = std::getenv("IMO_SCENE_HAIR");
-    const char *bodyEnv = std::getenv("IMO_SCENE_BODY");
-    if (hairEnv != 0) {
-        kFamilies[0].aSelected = static_cast<int32_t>(std::atoi(hairEnv));
-        if (kFamilies[0].aSelected >= static_cast<int32_t>(kFamilies[0].aMeshes.size())) {
-            kFamilies[0].aSelected = -1;
-        }
+
+    // ── 3. 默认服装组合（可选）──
+    const char *path = defaultPath;
+    if (path == 0) {
+        path = std::getenv("IMO_SCENE_OUTFIT_DEFAULT");
     }
-    if (bodyEnv != 0) {
-        kFamilies[1].aSelected = static_cast<int32_t>(std::atoi(bodyEnv));
-        if (kFamilies[1].aSelected >= static_cast<int32_t>(kFamilies[1].aMeshes.size())) {
-            kFamilies[1].aSelected = -1;
-        }
+    const char *fallback = ".local/imoScene/outfitDefault.json";
+    sOUTFIT_DEFAULT defaults;
+    if (parseOutfitDefaultFile(path != 0 ? path : fallback, defaults)) {
+        const uint32_t hidden = applyDefaultHidden(defaults.aHidden);
+        std::printf("[imoScene] 默认服装组合: 隐藏 %u 个网格（%zu 条名单）\n", hidden,
+                    defaults.aHidden.size());
     }
-    if (hairEnv == 0 && gDefaultHair >= 0 &&
-        gDefaultHair < static_cast<int32_t>(kFamilies[0].aMeshes.size())) {
-        kFamilies[0].aSelected = gDefaultHair;
+
+    // ── 4. 默认选中哪套变体：环境变量优先，其次 JSON 的 hair 字段 ──
+    int32_t hair = -1;
+    int32_t body = -1;
+    if (parseIntegerEnv("IMO_SCENE_HAIR", hair)) {
+        gVisibility.SetFamilySelection(kFamilyHair, hair);
+    } else if (defaults.aHair >= 0) {
+        gVisibility.SetFamilySelection(kFamilyHair, defaults.aHair);
     }
-    std::printf("[imoScene] 换装: 发型 %zu 套 / 身体 %zu 套（5/6 循环切换，0 恢复全部；"
-                "默认 hair=%d body=%d）\n",
-                kFamilies[0].aMeshes.size(), kFamilies[1].aMeshes.size(),
-                kFamilies[0].aSelected, kFamilies[1].aSelected);
-    applyGroups();
+    if (parseIntegerEnv("IMO_SCENE_BODY", body)) {
+        gVisibility.SetFamilySelection(kFamilyBody, body);
+    }
+
+    // ── 5. 写回并报告 ──
+    applyToModel();
+    std::printf("[imoScene] 换装: 网格 %u / 可见 %u；发型 %u 套、身体 %u 套"
+                "（1–4 切装饰，5/6 循环变体，0 恢复全部）\n",
+                gVisibility.MeshCount(), gVisibleMeshCount, gVisibility.FamilySize(kFamilyHair),
+                gVisibility.FamilySize(kFamilyBody));
 }
 
 void outfitUpdate() {
@@ -259,55 +190,28 @@ void outfitUpdate() {
         return;
     }
     bool changed = false;
-    for (uint32_t groupIndex = 0; groupIndex < kGroupCount; ++groupIndex) {
-        if (gInput.Pressed(kGroups[groupIndex].aAction)) {
-            kGroups[groupIndex].aVisible = !kGroups[groupIndex].aVisible;
-            // 默认组合里被隐藏的装饰，一旦用户按 1–4 就交回手动控制（清掉默认隐藏标记）。
-            for (uint32_t meshIndex = 0; meshIndex < gModel->aMeshCount; ++meshIndex) {
-                if (meshIndex < gForceHidden.size() &&
-                    matchesGroup(kGroups[groupIndex], gModel->aMeshes[meshIndex].aName)) {
-                    gForceHidden[meshIndex] = 0;
-                }
-            }
-            changed = true;
+    for (uint32_t group = 0; group < kGroupCount; ++group) {
+        if (gInput.Pressed(kGroupBindings[group].aAction)) {
+            changed = gVisibility.ToggleGroup(group) || changed;
         }
     }
     if (gInput.Pressed(eIMO_ACT_OUTFIT_HAIR)) {
-        cycleFamily(0);
-        changed = false; // cycleFamily 内部已刷新可见性
+        changed = gVisibility.CycleFamily(kFamilyHair) || changed;
     }
     if (gInput.Pressed(eIMO_ACT_OUTFIT_BODY)) {
-        cycleFamily(1);
-        changed = false;
+        changed = gVisibility.CycleFamily(kFamilyBody) || changed;
     }
     if (gInput.Pressed(eIMO_ACT_OUTFIT_RESET)) {
-        for (uint32_t groupIndex = 0; groupIndex < kGroupCount; ++groupIndex) {
-            kGroups[groupIndex].aVisible = true;
-        }
-        for (uint32_t family = 0; family < kFamilyCount; ++family) {
-            kFamilies[family].aSelected = -1;
-        }
-        for (size_t index = 0; index < gForceHidden.size(); ++index) {
-            gForceHidden[index] = 0;
-        }
+        gVisibility.ResetAll();
         changed = true;
     }
     if (changed) {
-        applyGroups();
+        applyToModel();
     }
 }
 
-uint32_t outfitVisibleMeshCount() {
-    if (gModel == nullptr) {
-        return 0;
-    }
-    uint32_t count = 0;
-    for (uint32_t meshIndex = 0; meshIndex < gModel->aMeshCount; ++meshIndex) {
-        if (gModel->aMeshes[meshIndex].aVisible) {
-            ++count;
-        }
-    }
-    return count;
-}
+uint32_t outfitVisibleMeshCount() { return gVisibleMeshCount; }
+
+const GN3d::cVISIBILITY_SET &outfitVisibility() { return gVisibility; }
 
 } // namespace imoScene
