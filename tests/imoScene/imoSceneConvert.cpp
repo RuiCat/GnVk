@@ -10,7 +10,11 @@
 #include "GN_3Dscene.h"
 #include "GN_3Dtexture.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <map>
+#include <tuple>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -190,6 +194,112 @@ int32_t nearestJointToCentroid(const GN3d::sASSET &asset, uint32_t skinIndex,
     return best;
 }
 
+// 法线平滑：FBX 导出的身体网格在同位置上有多份顶点、每份带不同面法线（实测 1024 个重复顶点、
+// 951 处法线不同），画出来就是硬边的多边形手指。这里按「同位置」合并，夹角不超过
+// 阈值（默认 60°）就取面积加权平均法线；超过阈值（真硬边，如领口/鞋底）保持原样。
+// 统计：跨网格累加，便于确认平滑真的生效（IMO_SCENE_SMOOTH_DEBUG=1 时打印）。
+size_t gSmoothedGroups = 0;
+
+bool smoothMeshNormals(sMeshData &mesh, float thresholdCos) {
+    const size_t vertexCount = mesh.aVertices.size() / 11u;
+    if (vertexCount == 0 || mesh.aIndices.size() < 3) {
+        return false;
+    }
+    const size_t triangleCount = mesh.aIndices.size() / 3u;
+    std::vector<GNg::sVEC3> faceNormal(triangleCount);
+    std::vector<float> faceArea(triangleCount);
+    for (size_t triangle = 0; triangle < triangleCount; ++triangle) {
+        const uint32_t i0 = mesh.aIndices[triangle * 3 + 0];
+        const uint32_t i1 = mesh.aIndices[triangle * 3 + 1];
+        const uint32_t i2 = mesh.aIndices[triangle * 3 + 2];
+        if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount) {
+            return false;
+        }
+        const float *p0 = &mesh.aVertices[i0 * 11u];
+        const float *p1 = &mesh.aVertices[i1 * 11u];
+        const float *p2 = &mesh.aVertices[i2 * 11u];
+        const float ax = p1[0] - p0[0], ay = p1[1] - p0[1], az = p1[2] - p0[2];
+        const float bx = p2[0] - p0[0], by = p2[1] - p0[1], bz = p2[2] - p0[2];
+        const float nx = ay * bz - az * by;
+        const float ny = az * bx - ax * bz;
+        const float nz = ax * by - ay * bx;
+        const float length = std::sqrt(nx * nx + ny * ny + nz * nz);
+        faceArea[triangle] = length;
+        if (length > 1.0e-12f) {
+            faceNormal[triangle] = {nx / length, ny / length, nz / length};
+        } else {
+            faceNormal[triangle] = {0.0f, 0.0f, 0.0f};
+        }
+    }
+    std::vector<std::vector<uint32_t>> incident(vertexCount);
+    for (size_t triangle = 0; triangle < triangleCount; ++triangle) {
+        for (int corner = 0; corner < 3; ++corner) {
+            incident[mesh.aIndices[triangle * 3 + corner]].push_back(static_cast<uint32_t>(triangle));
+        }
+    }
+    // 同位置分组（量化到 0.1 mm）。
+    std::map<std::tuple<int, int, int>, std::vector<uint32_t>> groups;
+    for (size_t index = 0; index < vertexCount; ++index) {
+        const float *vertex = &mesh.aVertices[index * 11u];
+        const std::tuple<int, int, int> key(
+            static_cast<int>(std::lround(vertex[0] * 10000.0f)),
+            static_cast<int>(std::lround(vertex[1] * 10000.0f)),
+            static_cast<int>(std::lround(vertex[2] * 10000.0f)));
+        groups[key].push_back(static_cast<uint32_t>(index));
+    }
+    size_t smoothed = 0;
+    for (auto &entry : groups) {
+        std::vector<uint32_t> &members = entry.second;
+        if (members.size() < 2) {
+            continue;
+        }
+        // 面积加权平均 + 最大偏差检查。
+        GNg::sVEC3 sum = {0.0f, 0.0f, 0.0f};
+        std::vector<uint32_t> faces;
+        for (size_t member = 0; member < members.size(); ++member) {
+            const std::vector<uint32_t> &list = incident[members[member]];
+            for (size_t f = 0; f < list.size(); ++f) {
+                faces.push_back(list[f]);
+            }
+        }
+        std::sort(faces.begin(), faces.end());
+        faces.erase(std::unique(faces.begin(), faces.end()), faces.end());
+        for (size_t f = 0; f < faces.size(); ++f) {
+            const uint32_t triangle = faces[f];
+            const float weight = faceArea[triangle];
+            sum.x += faceNormal[triangle].x * weight;
+            sum.y += faceNormal[triangle].y * weight;
+            sum.z += faceNormal[triangle].z * weight;
+        }
+        const float length = std::sqrt(sum.x * sum.x + sum.y * sum.y + sum.z * sum.z);
+        if (length <= 1.0e-12f) {
+            continue;
+        }
+        const GNg::sVEC3 average = {sum.x / length, sum.y / length, sum.z / length};
+        bool hardEdge = false;
+        for (size_t f = 0; f < faces.size(); ++f) {
+            const GNg::sVEC3 &normal = faceNormal[faces[f]];
+            const float dot = normal.x * average.x + normal.y * average.y + normal.z * average.z;
+            if (dot < thresholdCos) {
+                hardEdge = true;
+                break;
+            }
+        }
+        if (hardEdge) {
+            continue;
+        }
+        for (size_t member = 0; member < members.size(); ++member) {
+            const uint32_t index = members[member];
+            mesh.aVertices[index * 11u + 3] = average.x;
+            mesh.aVertices[index * 11u + 4] = average.y;
+            mesh.aVertices[index * 11u + 5] = average.z;
+        }
+        ++smoothed;
+    }
+    gSmoothedGroups += smoothed;
+    return smoothed > 0;
+}
+
 // 烘焙一个 primitive 的顶点/索引；返回 false 表示该 primitive 不可用（已计入 skipped）。
 bool bakePrimitive(const GN3d::sASSET &asset, const GN3d::sASSET_PRIMITIVE &primitive,
                    bool skinned, const std::vector<GNg::sMAT44> *palette,
@@ -315,6 +425,24 @@ bool bakePrimitive(const GN3d::sASSET &asset, const GN3d::sASSET_PRIMITIVE &prim
         }
     } else {
         mesh.aIndices.assign(primitive.aIndices.begin(), primitive.aIndices.end());
+    }
+    // 法线平滑（默认 60° 阈值；IMO_SCENE_SMOOTH=0 关闭）。只处理带绑定顶点的角色网格，
+    // 房间/静态场景保持原法线（建筑硬边被平滑会改观感）。
+    const char *smoothEnv = std::getenv("IMO_SCENE_SMOOTH");
+    if (!mesh.aBindVertices.empty() && !(smoothEnv != 0 && smoothEnv[0] == '0')) {
+        const char *angleEnv = std::getenv("IMO_SCENE_SMOOTH_ANGLE");
+        const float angleDeg =
+            (angleEnv != 0) ? static_cast<float>(std::atof(angleEnv)) : 60.0f;
+        const float thresholdCos =
+            std::cos(angleDeg * 3.14159265358979f / 180.0f);
+        smoothMeshNormals(mesh, thresholdCos);
+    }
+    // 同步到绑定顶点：动画时用同一份法线。
+    for (size_t index = 0; index < mesh.aBindVertices.size() && index * 11u + 5 < mesh.aVertices.size();
+         ++index) {
+        mesh.aBindVertices[index].aNormal.x = mesh.aVertices[index * 11u + 3];
+        mesh.aBindVertices[index].aNormal.y = mesh.aVertices[index * 11u + 4];
+        mesh.aBindVertices[index].aNormal.z = mesh.aVertices[index * 11u + 5];
     }
     out.aVertexCount += static_cast<uint32_t>(primitive.aVertices.size());
     out.aTriangleCount += static_cast<uint32_t>(mesh.aIndices.size() / 3);
@@ -633,6 +761,9 @@ bool buildModelFromGltf(const char *path, sModelData &out, std::string &error,
         if (mesh.aMaterial >= 0 && static_cast<size_t>(mesh.aMaterial) >= out.aMaterials.size()) {
             mesh.aMaterial = -1;
         }
+    }
+    if (std::getenv("IMO_SCENE_SMOOTH_DEBUG") != 0) {
+        std::printf("[imoScene] 法线平滑: %zu 组（同位置顶点合并）\n", gSmoothedGroups);
     }
     if (options.aRecenter) {
         recenterModel(out);

@@ -155,6 +155,7 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
 - **默认服装组合（方案 A）**：`.local/imoScene/outfitDefault.json` 的 `hidden` 名单来自游戏 prefab（level1 的 `Clothes_imo_chan`）里**激活的服装槽**，按**顶点数**把槽位的 Body/Face/衣服网格映射回 glTF 网格（顶点数对不上时用材质名兜底）。当前激活槽位 = `Clothes_imo_chan`(Body 7278 / Face 4343) + `Sera_Top0815`(1646) + `sera_sukart0824`(754)，其余（衬衫 1899、外套 2890、内衣 459/830、尾巴 2569、袜子 1021、帽子 1168、口罩 589、猫耳/铃铛/尾巴、项圈、丝带、Jirai）全部隐藏，实测 23 个网格；`hair` 字段指定默认发型下标（当前 5 = `Clothes_imo_chan` 槽下的头发）。文件缺失时行为与旧版一致；`IMO_SCENE_OUTFIT_DEFAULT=<path>` 可换文件；键 1–4 取回对应装饰、6 循环身体、5 循环发型、0 恢复全部；
 - 换装/变体：资产里 `Mesh_Hair` 有 9 个头发网格（头皮/刘海/长发等零件混杂，只留一套会露头皮，所以默认全部显示）、`Mesh_Body` 有 12 个身体/服装网格；**键 5 循环切换发型、键 6 循环切换身体/服装、0 恢复全部**，默认值可用 `IMO_SCENE_HAIR=N` / `IMO_SCENE_BODY=N` 固定（-1 = 全部）；
 - 头发物理：游戏里头发由 VRM SpringBone（游戏目录里有 `FastSpringBone.dll`）驱动，不在 MuscleClip 里；本场景头发刚性跟随头骨，属预期行为，不是绑定错误；
+- 法线平滑：FBX 导出的身体网格在同位置有多份顶点、各自带面法线（身体网格实测 1024 个重复顶点、951 处法线不同，画出来是硬边手指）。导入时按「同位置合并 + 夹角 ≤ 60° 取面积加权平均法线」重建，只作用于角色（带绑定顶点的网格），房间保持原样；`IMO_SCENE_SMOOTH=0` 关闭、`IMO_SCENE_SMOOTH_ANGLE=<deg>` 调阈值（默认 60）。
 - 静态配件也跟随：项圈、发饰、Jirai 等网格在 glTF 里没有 skin（父节点是 Armature、顶点已烘进世界坐标），现在按顶点质心绑到最近关节做刚性跟随（项圈→铃铛骨、发饰→头发骨），跟随网格 43/43；
 - 髋部运动：Unity humanoid 的身体前倾/左右摆/上下起伏不在肌肉里，而在 `RootT`/`RootQ`；导出时已把它们施加到髋部（绕髋关节旋转 + 位移增量），上半身随之运动；水平位移仍由游戏逻辑驱动（原地循环）；
 - 摇摆幅度：`RootQ` 的 roll/yaw 默认收敛到原幅度的 30% / 45%（pitch 保留 100%），数值在 `exportClips.py` 的 `BODY_ROLL_SCALE/BODY_YAW_SCALE/BODY_PITCH_SCALE`，也可用同名环境变量重导出：`BODY_ROLL=0.15 BODY_YAW=0.3 python3 .local/anim/exportClips.py Standard_Idle Walking2 Slow_Run`，重启程序生效；
