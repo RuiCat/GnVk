@@ -35,7 +35,7 @@
 | # | 缺口 | 现状 | 影响 | 标记 |
 |---|---|---|---|---|
 | C1 | ~~相机跟随未接线~~ | ✅ 2026-11-25 完成：`cENTITY::BuildCameraTarget`（角色 > 网格 > 拒绝） | — | 已完成 |
-| C2 | 角色不推动态刚体 | `cCHARACTER` 只消费静态三角网 | 角色走过箱子会穿过去 | [大改] |
+| C2 | ~~角色不推动态刚体~~ | ✅ 2026-11-25 完成：`cCHARACTER::SetPhysicsWorld` + 位置分离 + 速度传递；`cPHYSICS_WORLD::QueryBodiesAABB` | — | 已完成 |
 | C3 | 布娃娃 / IK / root motion | 无 | 动画表现力受限 | [大改] |
 | C4 | 台阶抬升是"抬-移-落" | 不是真正的 capsule sweep | 薄台阶（< 胶囊半径）有轻微穿插感 | [大改] |
 

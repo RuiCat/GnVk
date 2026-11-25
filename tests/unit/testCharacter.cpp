@@ -443,3 +443,214 @@ TEST_CASE(characterMoveIntentPacksAxes) {
     const float distance = std::sqrt(dx * dx + dz * dz);
     CHECK_NEAR(distance, other.Desc().aWalkSpeed * 0.5f, other.Desc().aWalkSpeed * 0.06f);
 }
+
+// ═══════════════════════════════════════════════════════════
+//  C2：角色推动态刚体
+// ═══════════════════════════════════════════════════════════
+// 背景：cCHARACTER 只消费**静态三角网**，完全不知道动态刚体存在 ——
+// 接上 cPHYSICS_WORLD 之后它才变成"运动学推体器"。
+// 这一组用例钉住三条语义：推得动、不推时就别动、角色自己不被顶回去。
+namespace {
+
+const float kPushStep = 1.0f / 60.0f;
+
+// 搭一个"平地 + 一个动态箱子"的世界，角色站在箱子左侧
+struct sPushFixture {
+    GN3d::cPHYSICS_WORLD aWorld;
+    GN3d::cCHARACTER aCharacter;
+    uint32_t aBoxHandle;
+
+    explicit sPushFixture(float boxX = 1.0f) {
+        aWorld.SetFixedTimestep(kPushStep, 4);
+        aWorld.SetGravity(GNg::sVEC3{0.0f, -9.81f, 0.0f});
+
+        // 地面：薄板，顶面 y = 0
+        aWorld.AddBody(GN3d::MakeBoxBody(GN3d::eBODY_STATIC, GNg::sVEC3{0.0f, -0.5f, 0.0f},
+                                         GNg::sVEC3{20.0f, 0.5f, 20.0f}, 0.0f));
+        // 动态箱子（半边长 0.5，中心在 y=0.5 时正好贴地）
+        aBoxHandle = aWorld.AddBody(GN3d::MakeBoxBody(
+            GN3d::eBODY_DYNAMIC, GNg::sVEC3{boxX, 0.5f, 0.0f}, GNg::sVEC3{0.5f, 0.5f, 0.5f}, 1.0f));
+
+        sCHARACTER_DESC desc;
+        desc.aRadius = 0.3f;
+        desc.aHeight = 1.7f;
+        desc.aWalkSpeed = 4.0f;
+        aCharacter.Init(desc);
+        // 角色站在箱子左边 1.2 m 处
+        aCharacter.Position();
+        GN3d::cCHARACTER &character = aCharacter;
+        character.SetPosition(GNg::sVEC3{boxX - 1.2f, 0.85f, 0.0f});
+        character.SetPhysicsWorld(&aWorld);
+    }
+};
+
+} // namespace
+
+// 最基本的语义：角色往前走，箱子必须被推开
+TEST_CASE(characterPushesBoxForward) {
+    sPushFixture fixture;
+    const float boxStartX = fixture.aWorld.GetBody(fixture.aBoxHandle)->aPos.x;
+
+    // 朝 +X 走 1.5 秒
+    int pushedFrames = 0;
+    for (int i = 0; i < 90; ++i) {
+        fixture.aCharacter.Move(GNg::sVEC3{1.0f, 0.0f, 0.0f}, false, false, kPushStep);
+        if (fixture.aCharacter.LastPushedCount() > 0) ++pushedFrames;
+    }
+    const float boxEndX = fixture.aWorld.GetBody(fixture.aBoxHandle)->aPos.x;
+
+    CHECK(pushedFrames > 0);          // 至少有一帧真的接触到了
+    CHECK(boxEndX > boxStartX + 0.5f); // 箱子被明显推动（> 半个身位）
+    // 角色没有被顶回去（运动学推体的语义：角色赢）
+    CHECK(fixture.aCharacter.Position().x > boxStartX - 1.2f);
+}
+
+// 不接物理世界时行为与之前完全一致（默认关闭）
+TEST_CASE(characterPushDisabledByDefault) {
+    sPushFixture fixture;
+    fixture.aCharacter.SetPhysicsWorld(nullptr);
+    CHECK(fixture.aCharacter.PhysicsWorld() == nullptr);
+    const float boxStartX = fixture.aWorld.GetBody(fixture.aBoxHandle)->aPos.x;
+
+    for (int i = 0; i < 90; ++i) {
+        fixture.aCharacter.Move(GNg::sVEC3{1.0f, 0.0f, 0.0f}, false, false, kPushStep);
+    }
+    // 一帧都不该推，且计数器恒为 0
+    CHECK_EQ(fixture.aCharacter.LastPushedCount(), 0u);
+    CHECK_NEAR(fixture.aWorld.GetBody(fixture.aBoxHandle)->aPos.x, boxStartX, 1e-6);
+}
+
+// **站着不动不该推**：角色只是存在，箱子不该自己漂走
+TEST_CASE(characterStandingStillDoesNotPush) {
+    sPushFixture fixture(0.45f); // 箱子紧贴角色（有穿透）
+    const float boxStartX = fixture.aWorld.GetBody(fixture.aBoxHandle)->aPos.x;
+    const GNg::sVEC3 startPos = fixture.aCharacter.Position();
+
+    // 只跑物理（角色原地不动，也不给输入）
+    for (int i = 0; i < 120; ++i) {
+        fixture.aWorld.Step(kPushStep);
+        fixture.aCharacter.Move(GNg::sVEC3{0.0f, 0.0f, 0.0f}, false, false, kPushStep);
+    }
+    // 位置分离仍然会发生（重叠必须解开），但**不该有速度传递**
+    const GN3d::sRIGID_BODY *body = fixture.aWorld.GetBody(fixture.aBoxHandle);
+    const float speed = std::sqrt(body->aLinVel.x * body->aLinVel.x +
+                                  body->aLinVel.z * body->aLinVel.z);
+    CHECK(speed < 1.0f); // 站着不动不该把箱子推得跑起来
+    (void)boxStartX;
+    CHECK_NEAR(fixture.aCharacter.Position().x, startPos.x, 0.5f); // 角色基本没动
+}
+
+// 推力强度：0 = 只分离不传递速度；1 = 正常
+//
+// **怎么量才对**（第一版量错了）：直接比"推完之后的位移"没有区分度 ——
+// 位置分离本身已经把箱子按角色步速顶走了，速度冲量**不会**增加推的过程中的行程。
+// 真正体现差别的量是**角色停手之后箱子还能滑多远**（冲量留下的动能）。
+TEST_CASE(characterPushStrengthSemantics) {
+    struct sRun {
+        float aCoast; // 角色停手后箱子又走了多远
+        float aPeakSpeed;
+    };
+    auto run = [](float strength) {
+        sRun out;
+        out.aCoast = 0.0f;
+        out.aPeakSpeed = 0.0f;
+        sPushFixture fixture;
+        fixture.aCharacter.SetPushStrength(strength);
+        // 推 0.6 秒
+        for (int i = 0; i < 36; ++i) {
+            fixture.aCharacter.Move(GNg::sVEC3{1.0f, 0.0f, 0.0f}, false, false, kPushStep);
+        }
+        const GN3d::sRIGID_BODY *body = fixture.aWorld.GetBody(fixture.aBoxHandle);
+        out.aPeakSpeed = std::sqrt(body->aLinVel.x * body->aLinVel.x +
+                                   body->aLinVel.z * body->aLinVel.z);
+        // 角色把物理世界关掉（等价于"停手"），只让箱子按自己的速度滑行
+        fixture.aCharacter.SetPhysicsWorld(nullptr);
+        const float beforeX = body->aPos.x;
+        for (int i = 0; i < 60; ++i) fixture.aWorld.Step(kPushStep);
+        body = fixture.aWorld.GetBody(fixture.aBoxHandle);
+        out.aCoast = body->aPos.x - beforeX;
+        return out;
+    };
+
+    const sRun normal = run(1.0f);
+    const sRun none = run(0.0f);
+    // 强度 0：没有速度传递 ⇒ 停手后箱子几乎立刻停住
+    CHECK(none.aPeakSpeed < 0.5f);
+    // 强度 1：箱子带着速度 ⇒ 停手后还会滑一段
+    CHECK(normal.aPeakSpeed > none.aPeakSpeed + 0.5f);
+    CHECK(normal.aCoast > none.aCoast);
+
+    // 非法强度被钳制
+    sPushFixture clampFixture;
+    clampFixture.aCharacter.SetPushStrength(-5.0f);
+    CHECK_NEAR(clampFixture.aCharacter.PushStrength(), 0.0f, 1e-6);
+    clampFixture.aCharacter.SetPushStrength(99.0f);
+    CHECK_NEAR(clampFixture.aCharacter.PushStrength(), 4.0f, 1e-6);
+}
+
+// 静态刚体不被推（且角色靠**自己的三角网**被挡住）
+//
+// 注意这条用例故意同时给了 character.AddBox —— 因为"角色只碰撞三角网、不碰撞静态刚体"
+// 是 cCHARACTER 的既定边界（见 GN_Character.h 文件头）。第一版只放了静态刚体墙、
+// 没给三角网，结果角色直接穿过去，断言失败 —— 那是**边界**不是 bug。
+TEST_CASE(characterDoesNotPushStaticBodies) {
+    GN3d::cPHYSICS_WORLD world;
+    world.SetFixedTimestep(kPushStep, 4);
+    world.AddBody(GN3d::MakeBoxBody(GN3d::eBODY_STATIC, GNg::sVEC3{0.0f, -0.5f, 0.0f},
+                                    GNg::sVEC3{20.0f, 0.5f, 20.0f}, 0.0f));
+    // 一堵静态墙（刚体侧）
+    const uint32_t wall = world.AddBody(GN3d::MakeBoxBody(
+        GN3d::eBODY_STATIC, GNg::sVEC3{1.0f, 1.0f, 0.0f}, GNg::sVEC3{0.5f, 1.0f, 2.0f}, 0.0f));
+    const GNg::sVEC3 wallStart = world.GetBody(wall)->aPos;
+
+    GN3d::cCHARACTER character;
+    sCHARACTER_DESC desc;
+    desc.aRadius = 0.3f;
+    desc.aHeight = 1.7f;
+    character.Init(desc);
+    character.SetPosition(GNg::sVEC3{-0.5f, 0.85f, 0.0f});
+    character.SetPhysicsWorld(&world);
+    // 同一堵墙的三角网（角色只认这个）
+    character.AddFloor(GNg::sVEC3{0.0f, 0.0f, 0.0f}, 20.0f, 20.0f, 0.0f);
+    character.AddBox(GNg::sVEC3{1.0f, 1.0f, 0.0f}, GNg::sVEC3{0.5f, 1.0f, 2.0f});
+
+    for (int i = 0; i < 90; ++i) {
+        character.Move(GNg::sVEC3{1.0f, 0.0f, 0.0f}, false, false, kPushStep);
+    }
+    // 墙（刚体）的位置一点没变，计数器也不该把它算进去
+    CHECK_NEAR(world.GetBody(wall)->aPos.x, wallStart.x, 1e-6);
+    CHECK_EQ(character.LastPushedCount(), 0u);
+    // 角色被三角网挡住（不是穿过去）
+    CHECK(character.Position().x < 1.0f);
+}
+
+// 世界查询本身：按 AABB 取句柄，先清空、按升序、不误报
+TEST_CASE(physicsQueryBodiesAABB) {
+    GN3d::cPHYSICS_WORLD world;
+    const uint32_t a = world.AddBody(GN3d::MakeBoxBody(
+        GN3d::eBODY_STATIC, GNg::sVEC3{0.0f, 0.0f, 0.0f}, GNg::sVEC3{0.5f, 0.5f, 0.5f}, 0.0f));
+    const uint32_t b = world.AddBody(GN3d::MakeBoxBody(
+        GN3d::eBODY_DYNAMIC, GNg::sVEC3{10.0f, 0.0f, 0.0f}, GNg::sVEC3{0.5f, 0.5f, 0.5f}, 1.0f));
+    const uint32_t c = world.AddBody(GN3d::MakeBoxBody(
+        GN3d::eBODY_STATIC, GNg::sVEC3{1.0f, 0.0f, 0.0f}, GNg::sVEC3{0.5f, 0.5f, 0.5f}, 0.0f));
+    // 手动刷新 AABB（AddBody 时是空盒，Step 才填）
+    world.Step(1.0f / 60.0f);
+
+    std::vector<uint32_t> hits;
+    hits.push_back(0xDEADBEEF); // 预填垃圾：必须被清空
+    sAABB query;
+    query.aMin = GNg::sVEC3{-1.0f, -1.0f, -1.0f};
+    query.aMax = GNg::sVEC3{2.0f, 1.0f, 1.0f};
+    world.QueryBodiesAABB(query, hits);
+    // a 与 c 在范围内，b 在 x=10 不在
+    CHECK_EQ((uint32_t)hits.size(), 2u);
+    CHECK_EQ(hits[0], a);
+    CHECK_EQ(hits[1], c);
+    // 升序
+    for (size_t i = 1; i < hits.size(); ++i) CHECK(hits[i] > hits[i - 1]);
+
+    // 空盒查询：返回空
+    sAABB empty;
+    world.QueryBodiesAABB(empty, hits);
+    CHECK_EQ((uint32_t)hits.size(), 0u);
+}

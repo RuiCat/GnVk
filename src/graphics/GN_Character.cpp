@@ -14,7 +14,7 @@
 
 #include <GN.h> // 先于 GN_Character.h：那一头依赖 GN_API（见它的注释）
 #include "GN_Character.h"
-#include "GN_Physics.h" // queryCapsuleTriangle
+#include "GN_Physics.h" // queryCapsuleTriangle + CollideBodies + cPHYSICS_WORLD
 
 #include <cmath>
 
@@ -88,7 +88,8 @@ cCHARACTER::sINTENT::sINTENT()
 // ═══════════════════════════════════════════════════════════
 cCHARACTER::cCHARACTER()
     : aPosition{0.0f, 0.0f, 0.0f}, aFootPosition{0.0f, 0.0f, 0.0f}, aVelocity{0.0f, 0.0f, 0.0f},
-      aGravity{0.0f, -9.81f, 0.0f}, aInited(false), aGrounded(false), aStuck(false),
+      aGravity{0.0f, -9.81f, 0.0f}, aInited(false), aPhysicsWorld(nullptr),
+      aPushStrength(1.0f), aLastPushedCount(0), aGrounded(false), aStuck(false),
       aGroundNormalY(0.0f), aSlopeDeg(0.0f) {
     aFootPosition.y = -aDesc.aHeight * 0.5f;
 }
@@ -240,6 +241,97 @@ void cCHARACTER::Teleport(const GNg::sVEC3 &centerPos) {
 }
 
 bool cCHARACTER::IsInitialized() const { return aInited; }
+
+// ═══════════════════════════════════════════════════════════
+//  推动态刚体（C2）
+// ═══════════════════════════════════════════════════════════
+void cCHARACTER::SetPhysicsWorld(cPHYSICS_WORLD *world) { aPhysicsWorld = world; }
+
+cPHYSICS_WORLD *cCHARACTER::PhysicsWorld() const { return aPhysicsWorld; }
+
+uint32_t cCHARACTER::LastPushedCount() const { return aLastPushedCount; }
+
+void cCHARACTER::SetPushStrength(float strength) {
+    if(!(strength >= 0.0f)) strength = 0.0f; // 同时处理 NaN
+    if(strength > 4.0f) strength = 4.0f;
+    aPushStrength = strength;
+}
+
+float cCHARACTER::PushStrength() const { return aPushStrength; }
+
+uint32_t cCHARACTER::pushDynamicBodies(const GNg::sVEC3 &center) {
+    aLastPushedCount = 0;
+    if(aPhysicsWorld == nullptr) return 0;
+
+    // 角色用**静态胶囊**去参与窄相：invMass = 0 ⇒ CollideBodies 会把它当作不可推动的一端，
+    // 法线方向固定为"角色胶囊 → 刚体"（A=角色, B=刚体，约定见 GN_Physics.h）。
+    sRIGID_BODY capsule = MakeCapsuleBody(eBODY_STATIC, center, aDesc.aRadius, cylinderHalf(), 0.0f);
+    BodyUpdateWorldState(capsule);
+
+    // 查询范围：胶囊的世界 AABB 略微外扩（一帧内角色也能移动几厘米）
+    sAABB query = capsule.aWorldAABB;
+    query.Expand(0.05f);
+    std::vector<uint32_t> candidates;
+    aPhysicsWorld->QueryBodiesAABB(query, candidates);
+
+    const float maxPush = aDesc.aRadius * 0.5f; // 每步最多推这么远（防止一帧把人顶飞）
+    for(size_t i = 0; i < candidates.size(); ++i) {
+        sRIGID_BODY *body = aPhysicsWorld->GetBody(candidates[i]);
+        if(body == nullptr) continue;
+        if(body->aType != eBODY_DYNAMIC) continue; // 静态/运动学不推
+
+        sCONTACT_MANIFOLD manifold;
+        if(!CollideBodies(capsule, *body, manifold)) continue;
+        if(manifold.aCount == 0) continue;
+
+        // 取最深的那个接触点：多点流形里最深的决定了要分离多少
+        float penetration = manifold.aPoints[0].aPenetration;
+        for(uint32_t k = 1; k < manifold.aCount && k < 4; ++k) {
+            if(manifold.aPoints[k].aPenetration > penetration) {
+                penetration = manifold.aPoints[k].aPenetration;
+            }
+        }
+        if(!(penetration > 0.0f)) continue;
+
+        // 法线 A→B = 角色 → 刚体，正是"把刚体推出去"的方向
+        const GNg::sVEC3 pushDir = manifold.aNormal;
+
+        // 1) 位置分离：直接改刚体位置（运动学推体的标准做法：不让刚体把角色顶回去）
+        float pushDistance = penetration * 0.9f; // 留 10% 余量，避免与求解器来回抖
+        if(pushDistance > maxPush) pushDistance = maxPush;
+        body->aPos.x += pushDir.x * pushDistance;
+        body->aPos.y += pushDir.y * pushDistance;
+        body->aPos.z += pushDir.z * pushDistance;
+
+        // 2) 速度传递：只有角色**朝刚体运动**时才给冲量。
+        //    approach < 0 说明角色在远离，不该继续推（否则松手后箱子还在加速）。
+        const float approach = aVelocity.x * pushDir.x + aVelocity.y * pushDir.y +
+                               aVelocity.z * pushDir.z;
+        if(aPushStrength > 0.0f && approach > 0.0f) {
+            const float impulse = approach * aPushStrength;
+            body->aLinVel.x += pushDir.x * impulse;
+            body->aLinVel.y += pushDir.y * impulse;
+            body->aLinVel.z += pushDir.z * impulse;
+            // 钳制速度：角色冲刺速度 ~6 m/s，刚体不该被一脚踹到 30 m/s
+            const float speedSq = body->aLinVel.x * body->aLinVel.x +
+                                  body->aLinVel.y * body->aLinVel.y +
+                                  body->aLinVel.z * body->aLinVel.z;
+            const float kMaxSpeed = 12.0f;
+            if(speedSq > kMaxSpeed * kMaxSpeed) {
+                const float scale = kMaxSpeed / std::sqrt(speedSq);
+                body->aLinVel.x *= scale;
+                body->aLinVel.y *= scale;
+                body->aLinVel.z *= scale;
+            }
+        }
+
+        // 3) 位置改过之后 AABB 与惯量都要重算，否则下一帧的 broadphase 还用旧盒
+        BodyUpdateWorldState(*body);
+        aPhysicsWorld->WakeBody(candidates[i]);
+        ++aLastPushedCount;
+    }
+    return aLastPushedCount;
+}
 
 bool cCHARACTER::IsGrounded() const { return aGrounded; }
 
@@ -530,6 +622,11 @@ sCHARACTER_STEP cCHARACTER::Move(const GNg::sVEC3 &wishDir, bool sprint, bool ju
     result.aSlopeDeg = aSlopeDeg;
     result.aHorizontalDistance = std::sqrt((pos.x - startPos.x) * (pos.x - startPos.x) +
                                            (pos.z - startPos.z) * (pos.z - startPos.z));
+
+    // C2：最后才推动态刚体 —— 此时角色本步的最终位置与速度都已经确定，
+    // 推力方向/大小才有意义（在解穿透之前推会用上一帧的速度）。
+    pushDynamicBodies(pos);
+
     return result;
 }
 

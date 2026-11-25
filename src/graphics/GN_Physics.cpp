@@ -379,6 +379,17 @@ void cPHYSICS_WORLD::Step(float dt) {
     aLastSubSteps = steps;
 }
 
+void cPHYSICS_WORLD::QueryBodiesAABB(const sAABB &box, std::vector<uint32_t> &out) const {
+    out.clear();
+    if(!box.IsValid()) return;
+    for(size_t i = 0; i < aBodies.size(); ++i) {
+        if(!aUsed[i]) continue;
+        if(!aBodies[i].aWorldAABB.Overlaps(box)) continue;
+        out.push_back((uint32_t)i); // 句柄即槽位下标（见头文件"槽位稳定"约定）
+    }
+    std::sort(out.begin(), out.end());
+}
+
 bool cPHYSICS_WORLD::GetContactInfo(uint32_t index, sCONTACT_INFO &out) const {
     if(index >= aConstraints.size()) return false;
     if(index >= aConstraintBodyLo.size() || index >= aConstraintBodyHi.size()) return false;

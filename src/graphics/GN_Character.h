@@ -31,6 +31,10 @@
 
 namespace GN3d {
 
+// cPHYSICS_WORLD 只以指针出现（SetPhysicsWorld 的参数 / 成员），前置声明即可 ——
+// 这样 GN_Character.h 不必依赖 GN_Physics.h，包含顺序不会变脆。
+class cPHYSICS_WORLD;
+
 // ═══════════════════════════════════════════════════════════
 //  描述
 // ═══════════════════════════════════════════════════════════
@@ -86,6 +90,25 @@ class cCHARACTER {
     // 一块朝上的水平地板（两个三角形），y = height。
     void AddFloor(const GNg::sVEC3 &center, float halfX, float halfZ, float height);
     uint32_t TriangleCount() const;
+
+    // ── 推动态刚体（C2）──
+    // 没有它，角色走过一堆箱子会直接穿过去 —— 因为 cCHARACTER 只消费**静态三角网**，
+    // 完全不知道动态刚体的存在。接上之后角色变成"运动学推体器"：
+    //
+    //   * 位置分离：把被压住的刚体沿"胶囊 → 刚体"方向推出去（每步最多 MaxPushPerStep）；
+    //   * 速度传递：角色**朝刚体运动**时，按接近速度给刚体一个冲量（缓慢走过去的推力小，
+    //     冲刺撞上去的推力大 —— 这是玩家能直接感受到的差别）；
+    //   * 角色自身不被推开（运动学，质量视为无限）。这是主流第三人称游戏的做法：
+    //     玩家不会因为撞到箱子而停下，但箱子会被推开。
+    //
+    // 世界是非拥有的；传 nullptr 表示关闭（默认关闭，行为与之前完全一致）。
+    void SetPhysicsWorld(cPHYSICS_WORLD *world);
+    cPHYSICS_WORLD *PhysicsWorld() const;
+    // 上一步推开的刚体数量（诊断/验收）。
+    uint32_t LastPushedCount() const;
+    // 推力倍率：0 = 只做位置分离、不传递速度；1 = 默认；>1 更"猛"（钳制到 [0,4]）。
+    void SetPushStrength(float strength);
+    float PushStrength() const;
 
     // ── 状态 ──
     void SetPosition(const GNg::sVEC3 &centerPos); // 胶囊中心
@@ -146,6 +169,8 @@ class cCHARACTER {
     bool resolvePenetration(GNg::sVEC3 &center) const;
     // 地面探测：返回是否着地，并输出法线 y 与坡度。
     bool probeGround(const GNg::sVEC3 &center, float &outNormalY, float &outSlopeDeg) const;
+    // 推动态刚体（见 SetPhysicsWorld 的注释）。返回推开数量。
+    uint32_t pushDynamicBodies(const GNg::sVEC3 &center);
     void resetTransient();
 
     sCHARACTER_DESC aDesc;
@@ -155,6 +180,10 @@ class cCHARACTER {
     GNg::sVEC3 aVelocity;
     GNg::sVEC3 aGravity;
     bool aInited; // Init() 是否调用过
+    // C2：推动态刚体
+    cPHYSICS_WORLD *aPhysicsWorld; // 非拥有，默认 nullptr = 关闭
+    float aPushStrength; // 0..4
+    uint32_t aLastPushedCount; // 上一步推开几个
     bool aGrounded;
     bool aStuck;
     float aGroundNormalY;

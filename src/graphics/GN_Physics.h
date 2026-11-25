@@ -250,6 +250,14 @@ class cPHYSICS_WORLD {
     // index 越界/无接触返回 false（out 不修改）。
     bool GetContactInfo(uint32_t index, sCONTACT_INFO &out) const;
 
+    // 收集世界 AABB 与 box 相交的**刚体句柄**（升序，先清空 out）。
+    //
+    // 这是给"外部需要知道附近有哪些刚体"的场景用的（角色推体、拾取、区域触发器）。
+    // 实现是**线性扫 aBodies** 而不是走 broadphase 树：broadphase 的槽位表与句柄互映射
+    // 只在 Step 内部保证一致，外部查询插入/删除的中间态容易读到脏槽。刚体数量在
+    // 几百以内时线性扫描的常数极小（一次 AABB 相交测试 6 次比较），不值得为此暴露内部树。
+    void QueryBodiesAABB(const sAABB &box, std::vector<uint32_t> &out) const;
+
     // 上一次 Step 实际跑了几个固定子步（0 = 累计不足一步；上限 aMaxSubSteps）。
     // 用途：调用的插值要知道"这一次推进跨了多久"，否则多子步帧的插值会偏快。
     uint32_t GetLastSubStepCount() const { return aLastSubSteps; }

@@ -467,6 +467,26 @@ $(UNDO_DEMO_BIN): $(UNDO_DEMO_SRC) $(TARGET)
 	@mkdir -p build
 	$(CXX) $(UNDO_DEMO_FLAGS) $(UNDO_DEMO_SRC) $(TEST_LIBS) -o $(UNDO_DEMO_BIN)
 
+# ── 角色推体演示（C2）──
+CHAR_PUSH_SRC   := $(wildcard tests/characterPush/*.cpp)
+CHAR_PUSH_BIN   := build/characterPush
+CHAR_PUSH_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+
+.PHONY: characterPush
+characterPush: $(CHAR_PUSH_BIN)
+	@echo "$(YELLOW)🏃 渲染角色推体演示...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(CHAR_PUSH_BIN) --out $(GIZMO_VIDEO_OUT)/push-frames \
+		--frames 300 --size $(GIZMO_VIDEO_SIZE)
+	@$(FFMPEG) -y -loglevel error -framerate 30 -i $(GIZMO_VIDEO_OUT)/push-frames/frame_%05d.png \
+		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart \
+		$(GIZMO_VIDEO_OUT)/character-push.mp4
+	@ls -lh $(GIZMO_VIDEO_OUT)/character-push.mp4
+
+$(CHAR_PUSH_BIN): $(CHAR_PUSH_SRC) $(TARGET)
+	@echo "$(YELLOW)🏃 编译角色推体演示...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(CHAR_PUSH_FLAGS) $(CHAR_PUSH_SRC) $(TEST_LIBS) -o $(CHAR_PUSH_BIN)
+
 # ── 示例无窗口冒烟（所有示例在 GN_HEADLESS_FRAMES 下跑固定帧数）──
 # 依赖只取「编译」产物：不能依赖 headlessCheck/gpuCheck 这些 .PHONY 运行目标，
 # 否则它们会先以窗口模式跑一次（无显示时 SKIP → make 直接失败）。
