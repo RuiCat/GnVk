@@ -198,6 +198,19 @@ bool bakePrimitive(const GN3d::sASSET &asset, const GN3d::sASSET_PRIMITIVE &prim
         vertex[6] = vertex[7] = vertex[8] = 0.0f; // 切线留给着色器回退
         vertex[9] = source.aUv[0];
         vertex[10] = source.aUv[1];
+        if (skinned) {
+            // 绑定姿势 + 关节/权重：动画时用同一份数据重算顶点（顶点本身在绑定时 == 世界位置）。
+            sBindVertex bindVertex;
+            bindVertex.aPosition = position;
+            bindVertex.aNormal = normal;
+            bindVertex.aUv[0] = source.aUv[0];
+            bindVertex.aUv[1] = source.aUv[1];
+            for (int slot = 0; slot < 4; ++slot) {
+                bindVertex.aJoints[slot] = source.aJoints[slot];
+                bindVertex.aWeights[slot] = source.aWeights[slot];
+            }
+            mesh.aBindVertices.push_back(bindVertex);
+        }
         if (position.x < mesh.aMin.x) mesh.aMin.x = position.x;
         if (position.y < mesh.aMin.y) mesh.aMin.y = position.y;
         if (position.z < mesh.aMin.z) mesh.aMin.z = position.z;
@@ -373,6 +386,7 @@ void recenterModel(sModelData &out) {
     }
     const GNg::sVEC3 offset = {-(minimum.x + maximum.x) * 0.5f, -minimum.y,
                                -(minimum.z + maximum.z) * 0.5f};
+    out.aRecenterOffset = offset;
     for (size_t meshIndex = 0; meshIndex < out.aMeshes.size(); ++meshIndex) {
         sMeshData &mesh = out.aMeshes[meshIndex];
         for (size_t vertex = 0; vertex < mesh.aVertices.size(); vertex += VERTEX_FLOATS) {
@@ -395,10 +409,59 @@ void recenterModel(sModelData &out) {
     out.aMax.z = maximum.z + offset.z;
 }
 
+// 从 sASSET 的 skin 0 建立蒙皮骨架（关节顺序 = skin.joints，父索引限定在关节内且早于自身）。
+void buildSkinRig(const GN3d::sASSET &asset, sSkinRig &out) {
+    out = sSkinRig();
+    if (asset.aSkins.empty()) {
+        return;
+    }
+    const GN3d::sASSET_SKIN &skin = asset.aSkins[0];
+    if (skin.aJoints.empty() || skin.aInverseBinds.size() != skin.aJoints.size()) {
+        return;
+    }
+    out.aJointNodes.assign(skin.aJoints.begin(), skin.aJoints.end());
+    out.aInverseBinds.assign(skin.aInverseBinds.begin(), skin.aInverseBinds.end());
+    out.aParents.assign(skin.aJoints.size(), -1);
+    out.aBindLocal.resize(skin.aJoints.size());
+    for (size_t joint = 0; joint < skin.aJoints.size(); ++joint) {
+        const uint32_t node = skin.aJoints[joint];
+        if (static_cast<size_t>(node) >= asset.aNodes.size()) {
+            continue;
+        }
+        const GN3d::sASSET_NODE &source = asset.aNodes[node];
+        GN3d::sANIM_TRANSFORM &local = out.aBindLocal[joint];
+        local.aTranslation = source.aTranslation;
+        local.aRotation = source.aRotation;
+        local.aScale = source.aScale;
+        const int32_t parentNode = source.aParent;
+        if (parentNode < 0) {
+            continue;
+        }
+        for (size_t other = 0; other < joint; ++other) {
+            if (out.aJointNodes[other] == static_cast<uint32_t>(parentNode)) {
+                out.aParents[joint] = static_cast<int32_t>(other);
+                break;
+            }
+        }
+    }
+}
+
 } // namespace
 
 sConvertOptions::sConvertOptions()
     : aForceOpaque(false), aRecenter(true), aClassifyAlpha(false) {}
+
+sBindVertex::sBindVertex() {
+    aPosition.x = aPosition.y = aPosition.z = 0.0f;
+    aNormal.x = aNormal.y = aNormal.z = 0.0f;
+    aUv[0] = aUv[1] = 0.0f;
+    for (int slot = 0; slot < 4; ++slot) {
+        aJoints[slot] = 0;
+        aWeights[slot] = 0.0f;
+    }
+}
+
+sSkinRig::sSkinRig() {}
 
 sMeshData::sMeshData() : aMaterial(-1) {
     aMin.x = aMin.y = aMin.z = 0.0f;
@@ -419,6 +482,7 @@ sModelData::sModelData()
       aFilteredMeshes(0) {
     aMin.x = aMin.y = aMin.z = 0.0f;
     aMax.x = aMax.y = aMax.z = 0.0f;
+    aRecenterOffset.x = aRecenterOffset.y = aRecenterOffset.z = 0.0f;
 }
 
 void sModelData::clear() {
@@ -432,6 +496,8 @@ void sModelData::clear() {
     aFilteredMeshes = 0;
     aMin.x = aMin.y = aMin.z = 0.0f;
     aMax.x = aMax.y = aMax.z = 0.0f;
+    aRecenterOffset.x = aRecenterOffset.y = aRecenterOffset.z = 0.0f;
+    aSkin = sSkinRig();
 }
 
 const char *alphaModeName(GN3d::eALPHA_MODE mode) {
@@ -465,6 +531,7 @@ bool buildModelFromGltf(const char *path, sModelData &out, std::string &error,
     bakeTextures(asset, out);
     bakeMaterials(asset, options, out);
     bakeNodes(asset, world, options, out);
+    buildSkinRig(asset, out.aSkin);
     if (out.aMeshes.empty()) {
         out.clear();
         error = "glTF 中没有可用网格";

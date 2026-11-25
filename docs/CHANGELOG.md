@@ -2,6 +2,19 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-25 — imoScene 接入肌肉动画：解码 → 重定向 → 每帧重蒙皮，角色按移动方向转身
+
+Unity humanoid 动画在 `m_MuscleClip` 里存的是 95 个肌肉值而不是骨骼旋转，本轮把它变成引擎可播的骨骼动画。
+
+| 环节 | 内容 | 证据 |
+|---|---|---|
+| 解码 | clip 的 130 条 Animator 曲线：attribute 7..9=RootT、10..13=RootQ、14..41=四个 IK 目标、**42+m = 肌肉 m**；`m_IndexArray` 按 attribute 直接索引 | `T_Pose` 剪辑解码后与 Avatar 自带 `m_Human.m_SkeletonPose` 逐骨最大误差 **0.001°**（25 根骨） |
+| 重定向 | 25 根人骨的世界 delta 按 base name 套到 glTF 关节（`J_Bip_C_Hips__1..__13` 等副本一并处理），非人骨跟随最近人骨祖先；导出 30fps `.gnac` | Standard_Idle 90 帧 / Walking2 29 帧 / Slow_Run 22 帧，每帧 259 个通道（222 个有运动），重建误差 0.0000 m |
+| 引擎 | `imoSceneConvert` 保留绑定顶点 + 关节/权重 + `sSkinRig`；新增 `imoSceneSkin`：每帧采样局部旋转 → 调色板 → CPU 重蒙皮写回 `cMODEL` 顶点，仍走 `DrawPBR`（贴图/材质/alpha 全部保留） | `make imoScene` 通过；`lintCodeModularity.sh tests/imoScene --naming --comments` = 0 违规 0 告警 |
+| 行为 | 按水平速度选 idle/walk/run（0.4 / 4.2 m/s），播放速率 = 速度 ÷ 3.0（走）或 5.5（跑）；模型按移动方向平滑转身（**模型正面 = +Z**，由脚趾/眼睛的绑定世界坐标确认） | 四方向调试输出 yaw：front 3.14 / back 0.00 / left −1.57 / right 1.57 rad |
+| 开关 | `IMO_SCENE_ANIM=1` 才启用（默认与旧行为逐位一致）；调试 `IMO_SCENE_TEST_MOVE=front|back|left|right`、`IMO_SCENE_ANIM_DIR` | headless 90 帧：关 2.12 s / 开 1.94 s（无可测回归） |
+
+已知边界：游戏数据里没有独立的倒退/侧移动画，倒退与侧移靠「转身朝移动方向」解决；root motion（RootT/RootQ 的髋部位移）v1 未接，动画为原地循环；窗口截图只能在 lavapipe 下复现，真机帧率待确认。
 ## 2026-11-25 — 文档与注释整理：索引化 + 状态行 + 可校验
 
 这一轮不改任何功能代码，只整理「人读的东西」：`docs/` 的 37 份文档与 118 个源码头文件。

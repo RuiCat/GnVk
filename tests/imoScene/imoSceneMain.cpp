@@ -4,7 +4,8 @@
 //       相机的输入/取景在 imoSceneCamera，转换与上传在 imoSceneConvert / imoSceneUpload。
 // 用法：make imoScene && LD_LIBRARY_PATH=. ./build/imoScene
 //       IMO_SCENE_MODEL=/path/to/model.glb 可覆盖默认模型路径。
-// 边界：只显示导入姿势（蒙皮已 CPU 烘焙），不做动画播放、阴影与后处理参数调节。
+// 边界：默认只显示导入姿势（蒙皮在导入时 CPU 烘焙）；IMO_SCENE_ANIM=1 时改用
+//       .local/anim/clips/*.gnac 每帧重蒙皮播放 idle/walk/run。
 
 #include "imoSceneBlobShadow.h"
 #include "imoSceneCamera.h"
@@ -12,12 +13,15 @@
 #include "imoScenePlayer.h"
 #include "imoSceneRoom.h"
 #include "imoSceneShadow.h"
+#include "imoSceneSkin.h"
 #include "imoSceneUpload.h"
 
 #include "GN_3Dlight.h"
 
 #include <cmath>
 #include <cstdio>
+#include <string>
+#include <vector>
 #include <cstdlib>
 #include <cstring>
 
@@ -45,6 +49,110 @@ GN3d::sAABB gCasterBox;      // 角色世界 AABB（阴影拟合用）
 bool gShadowsReady = false;
 bool gBlobShadowReady = false;
 unsigned int gLastTick = 0;
+// 动画：骨骼 + 绑定顶点在 GPU 上传之后仍要保留，才能每帧重蒙皮写回 cMODEL 顶点。
+imoScene::sSkinRig gSkinRig;
+std::vector<std::vector<imoScene::sBindVertex> > gBindVertices;
+std::vector<imoScene::sSkinClip> gSkinClips;
+int gSkinClipIndex = -1;
+float gSkinClipTime = 0.0f;
+float gFrameDelta = 1.0f / 60.0f;
+GNg::sVEC3 gSkinOffset = {0.0f, 0.0f, 0.0f};
+
+// 剪辑目录：.local/anim/clips 是导出脚本的默认落点，IMO_SCENE_ANIM_DIR 可覆盖。
+std::string skinClipPath(const char *name) {
+    const char *dir = std::getenv("IMO_SCENE_ANIM_DIR");
+    const std::string base = (dir != 0 && dir[0] != '\0') ? dir : ".local/anim/clips";
+    return base + "/" + name + ".gnac";
+}
+
+// 载入 idle/walk/run 三段并保留绑定顶点；任何一段失败都退回"没有动画"（不阻塞场景）。
+bool initAnimation(const imoScene::sModelData &data) {
+    const char *enable = std::getenv("IMO_SCENE_ANIM");
+    if (enable == 0 || enable[0] != '1') {
+        return false;
+    }
+    if (data.aSkin.empty()) {
+        std::fprintf(stderr, "[imoScene] 动画: 模型没有蒙皮骨架，跳过\n");
+        return false;
+    }
+    static const char *kClipNames[3] = {"Standard_Idle", "Walking2", "Slow_Run"};
+    gSkinRig = data.aSkin;
+    gSkinOffset = data.aRecenterOffset;
+    gBindVertices.clear();
+    gSkinClips.clear();
+    for (size_t index = 0; index < data.aMeshes.size(); ++index) {
+        gBindVertices.push_back(data.aMeshes[index].aBindVertices);
+    }
+    for (int clip = 0; clip < 3; ++clip) {
+        imoScene::sSkinClip loaded;
+        std::string error;
+        if (!imoScene::loadSkinClip(skinClipPath(kClipNames[clip]).c_str(), gSkinRig, loaded,
+                                    error)) {
+            std::fprintf(stderr, "[imoScene] 动画: %s 载入失败（%s），本帧起不播动画\n",
+                         kClipNames[clip], error.c_str());
+            gSkinClips.clear();
+            gBindVertices.clear();
+            return false;
+        }
+        gSkinClips.push_back(loaded);
+    }
+    gSkinClipIndex = -1;
+    gSkinClipTime = 0.0f;
+    std::printf("[imoScene] 动画: 关节 %zu，剪辑 %zu 段（idle/walk/run）\n",
+                gSkinRig.aJointNodes.size(), gSkinClips.size());
+    return true;
+}
+
+// 每帧：按水平速度选段 → 调色板 → 重蒙皮写回 cMODEL 顶点（DrawPBR 每帧上传）。
+void updateAnimation(float delta) {
+    if (!(delta > 0.0f)) {
+        delta = 1.0f / 60.0f;
+    }
+    if (gSkinClips.empty()) {
+        return;
+    }
+    const float speed = imoScene::playerSpeed();
+    int wanted = 0;
+    if (speed > 4.2f) {
+        wanted = 2;
+    } else if (speed > 0.4f) {
+        wanted = 1;
+    }
+    if (wanted >= static_cast<int>(gSkinClips.size())) {
+        wanted = static_cast<int>(gSkinClips.size()) - 1;
+    }
+    if (wanted != gSkinClipIndex) {
+        gSkinClipIndex = wanted;
+        gSkinClipTime = 0.0f;
+    }
+    // 播放速率跟着实际速度走，避免"脚步打滑"：walk 对应 3.0 m/s、run 对应 5.5 m/s。
+    float playbackRate = 1.0f;
+    if (wanted == 1) {
+        playbackRate = speed / 3.0f;
+    } else if (wanted == 2) {
+        playbackRate = speed / 5.5f;
+    }
+    if (playbackRate < 0.55f) {
+        playbackRate = 0.55f;
+    }
+    if (playbackRate > 1.8f) {
+        playbackRate = 1.8f;
+    }
+    gSkinClipTime += delta * playbackRate;
+    std::vector<GNg::sMAT44> palette;
+    if (!imoScene::buildSkinPalette(gSkinRig, gSkinClips[static_cast<size_t>(gSkinClipIndex)],
+                                    gSkinClipTime, palette)) {
+        return;
+    }
+    const uint32_t meshCount = gScene.aModel.aMeshCount;
+    for (uint32_t index = 0; index < meshCount && index < gBindVertices.size(); ++index) {
+        GN3d::sMESH &mesh = gScene.aModel.aMeshes[index];
+        if (gBindVertices[index].empty() || mesh.aVertices == 0) {
+            continue;
+        }
+        imoScene::skinBindVertices(gBindVertices[index], palette, gSkinOffset, mesh.aVertices);
+    }
+}
 
 // 一块 60×60 m 的地面（PBR 管线；法线 +Y、UV 铺满一块）。
 void drawGround() {
@@ -223,6 +331,7 @@ bool loadScene() {
     }
     std::fprintf(stderr, "[imoScene] AppInit: GPU 上传完成（%u 网格），准备首帧\n",
                  gScene.aModel.aMeshCount);
+    initAnimation(data);
     const float height = data.aMax.y - data.aMin.y;
     std::printf("[imoScene] 网格 %zu 个，顶点 %u，三角形 %u，贴图 %zu 张，材质 %zu 个\n",
                 data.aMeshes.size(), data.aVertexCount, data.aTriangleCount, data.aTextures.size(),
@@ -316,6 +425,9 @@ GN_CALL void AppUnInit() {
     imoScene::playerShutdown();
     imoScene::blobShadowRelease(gBlobShadow);
     gBlobShadowReady = false;
+    gSkinClips.clear();
+    gBindVertices.clear();
+    gSkinRig = imoScene::sSkinRig();
     gRoom.release();
     gScene.release();
     delete gLight;
@@ -346,6 +458,7 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     if (frameCount % 120u == 0u) {
         std::fprintf(stderr, "[imoScene] 已渲染 %lu 帧（%dx%d）\n", frameCount, width, height);
     }
+    updateAnimation(gFrameDelta);
     const float aspect = static_cast<float>(width) / static_cast<float>(height);
     GNg::sMAT44 view;
     GNg::sMAT44 viewProjection;
@@ -355,6 +468,12 @@ GN_CALL void AppDisplay2D(unsigned int nTime) {
     // P5：把胶囊位置写到模型世界变换（模型原点在脚底），并同步阴影拟合的包围盒。
     const GNg::sVEC3 foot = imoScene::playerFootPosition();
     gScene.aModel.aPosition = foot;
+    // 角色按移动方向转身（模型正前方 = +Z，yaw 由 playerFacingYaw() 给出）。
+    const float facing = imoScene::playerFacingYaw();
+    gScene.aModel.aRotation.x = 0.0f;
+    gScene.aModel.aRotation.y = std::sin(facing * 0.5f);
+    gScene.aModel.aRotation.z = 0.0f;
+    gScene.aModel.aRotation.w = std::cos(facing * 0.5f);
     gScene.aModel.UpdateTransform();
     if (gScene.aModel.computeWorldAABB()) {
         gCasterBox = gScene.aModel.aWorldAABB;
@@ -402,6 +521,7 @@ GN_CALL void AppRun(unsigned int nTime) {
     if (!(delta > 0.0f) || delta > MAX_FRAME_SECONDS) {
         delta = 1.0f / 60.0f;
     }
+    gFrameDelta = delta;
     imoScene::cameraUpdate(delta); // 先采样输入（边沿只在这一次 Update 里算）
     imoScene::playerUpdate(delta); // 再按固定步长推进角色并把相机焦点移到角色身上
     imoScene::outfitUpdate(); // 数字键 1–4 切装饰、0 恢复全部

@@ -24,5 +24,11 @@ GNg::sVEC3 playerFootPosition();
 // 当前是否着地（HUD/调试用）。
 bool playerGrounded();
 
+// 当前水平速度（米/秒，动画选段用）。
+float playerSpeed();
+
+// 当前朝向角（弧度，模型 yaw：0 = 面朝 -Z；按移动方向平滑转向）。
+float playerFacingYaw();
+
 } // namespace imoScene
 #endif

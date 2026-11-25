@@ -144,6 +144,16 @@ imo_chan.fbx ──(Blender, tools/assetconvert/fbx2glb.py)──▶ .local/imoS
   其余 → `MASK 0.5`。Blender 用 `CLIP` 渲染同一份 GLB 与 `BLEND` 结果一致（`render_clip.png` / `render_gltf.png`）。
 - **重定心**：网格整体平移到脚底 y=0、xz 中心为原点，相机取景只依赖模型高度。
 
+## 动画播放（IMO_SCENE_ANIM=1）
+
+默认只显示导入姿势。开 `IMO_SCENE_ANIM=1` 后每帧用 `.local/anim/clips/*.gnac` 重蒙皮：
+
+- 剪辑：`Standard_Idle` / `Walking2` / `Slow_Run`（由 `.local/anim/exportClips.py` 从游戏 MuscleClip 解码并重定向，30fps 局部旋转）；
+- 选段：水平速度 <0.4 m/s 播 idle、<4.2 m/s 播 walk、其余播 run；播放速率 = 速度 ÷ 3.0 或 5.5，脚不滑；
+- 转身：模型按移动方向平滑转向（模型正面 = +Z）。没有独立的倒退/侧移动画，倒退与侧移就是「转身走过去」；
+- 调试：`IMO_SCENE_TEST_MOVE=front|back|left|right` 强制移动意图（无键鼠时验证朝向/选段），`IMO_SCENE_ANIM_DIR` 换剪辑目录；
+- 边界：root motion 未接（原地循环），动画数据来自游戏资产，只在本机 `.local/` 下。
+
 ## 默认模型：Clothes_imo_chan（穿好衣服的版本）
 
 游戏数据里 `imo_chan` 根下的 `kemo_Body` 是 **inactive** 的裸体变体（Unity 里 `m_IsActive=False`），
@@ -203,7 +213,7 @@ Blender CPU 预览：`.local/imoScene/render_room_default2.png`（明亮版）�
 
 ## 边界
 
-- 不做动画播放：humanoid muscle-clip 没有离线关键帧（见提取报告），本场景是静态导入姿势；
+- 动画默认关闭：humanoid muscle-clip 已由 `.local/anim/exportClips.py` 解出关键帧（30fps `.gnac`），`IMO_SCENE_ANIM=1` 才每帧重蒙皮；不接 root motion；
 - 不做阴影、后处理调节、HUD 叠层；
 - 只有“角色 + 房间”两份 GLB 的手工装配，未接入场景文件格式；房间只含可见静态网格（无动态物体）；
 - 本次开发机无 Vulkan 设备（`/dev/dri` 缺失），已完成的验证是：`make imoScene` 编译通过 +

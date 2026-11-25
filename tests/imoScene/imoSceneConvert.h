@@ -9,6 +9,7 @@
 //   * 不创建 sIMAGE、不传 GPU、不做剔除（上传见 imoSceneUpload，渲染见 imoSceneMain）；
 //   * 网格统一重定心：脚底 y=0、水平中心 xz=0，供场景摆位与相机取景。
 #include "GN.h"
+#include "GN_3Danim.h"
 #include "GN_3Dmaterial.h"
 
 #include <cstdint>
@@ -16,6 +17,28 @@
 #include <vector>
 
 namespace imoScene {
+
+// 绑定姿势顶点（动画重蒙皮用）：关节下标指向 sSkinRig::aJointNodes，权重未归一化。
+struct sBindVertex {
+    GNg::sVEC3 aPosition;
+    GNg::sVEC3 aNormal;
+    float aUv[2];
+    uint16_t aJoints[4];
+    float aWeights[4];
+
+    sBindVertex();
+};
+
+// 蒙皮骨架：关节顺序 = glTF skin.joints 顺序，也是 sBindVertex::aJoints 的下标空间。
+struct sSkinRig {
+    std::vector<uint32_t> aJointNodes;             // 关节 → sASSET 节点下标
+    std::vector<GNg::sMAT44> aInverseBinds;        // 绑定姿势世界矩阵的逆
+    std::vector<int32_t> aParents;                 // 关节内父下标（拓扑序，-1 = 根）
+    std::vector<GN3d::sANIM_TRANSFORM> aBindLocal; // 每关节绑定局部 TRS
+
+    sSkinRig();
+    bool empty() const { return aJointNodes.empty(); }
+};
 
 // 一个 glTF primitive 烘焙成的网格（顶点布局 = VkVertex3D：pos3 / normal3 / tangent3 / uv2）。
 struct sMeshData {
@@ -25,6 +48,7 @@ struct sMeshData {
     int32_t aMaterial; // 材质下标，-1 = 无
     GNg::sVEC3 aMin;   // 重定心后的 AABB
     GNg::sVEC3 aMax;
+    std::vector<sBindVertex> aBindVertices; // 非空 = 该网格可重蒙皮
 
     sMeshData();
 };
@@ -62,6 +86,8 @@ struct sModelData {
     std::vector<sTextureData> aTextures;
     GNg::sVEC3 aMin;
     GNg::sVEC3 aMax;
+    GNg::sVEC3 aRecenterOffset; // 重定心平移（动画重蒙皮后要补同一偏移）
+    sSkinRig aSkin;
     uint32_t aVertexCount;
     uint32_t aTriangleCount;
     uint32_t aZeroWeightVertices; // 四个权重全为 0 的顶点数（烘焙时保留原位置）
