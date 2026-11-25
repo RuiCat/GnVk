@@ -123,8 +123,14 @@ void cMESH_CONTROLLER::DrawShadow() const {
 // ═══════════════════════════════════════════════════════════
 //  cANIM_CONTROLLER
 // ═══════════════════════════════════════════════════════════
+// D3：混合空间条目（按名字索引；地址由 unique_ptr 保证稳定）
+struct cANIM_CONTROLLER::sBLEND_SPACE_ENTRY {
+    std::string aName;
+    cANIM_BLEND_1D aSpace;
+};
+
 cANIM_CONTROLLER::cANIM_CONTROLLER()
-    : aPlayer(), aMachine(new cANIM_STATE_MACHINE()), aMachineActive(false) {}
+    : aPlayer(), aMachine(new cANIM_STATE_MACHINE()), aMachineActive(false), aLayered(false) {}
 
 cANIM_CONTROLLER::~cANIM_CONTROLLER() {}
 
@@ -193,6 +199,11 @@ void cANIM_CONTROLLER::Stop() {
 void cANIM_CONTROLLER::Update(float dt) {
     // cANIM_PLAYER::update 自己会处理非法 dt；这里只为可读性显式挡一次。
     if(!(dt > 0.0f) || !std::isfinite(dt)) return;
+    if(aLayered) {
+        // 混合树：各层各自推进自己的相位（各层可以不同速度）
+        aLayerStack.Update(dt);
+        return;
+    }
     aPlayer.update(dt);
 }
 
@@ -213,9 +224,79 @@ bool cANIM_CONTROLLER::UpdateWithStateMachine(float dt, sANIM_PARAMS &params) {
 
 bool cANIM_CONTROLLER::StateMachineActive() const { return aMachineActive; }
 
+
+// ═══════════════════════════════════════════════════════════
+//  D3：混合树 / 层栈
+// ═══════════════════════════════════════════════════════════
+cANIM_CONTROLLER::sBLEND_SPACE_ENTRY *cANIM_CONTROLLER::findBlendSpace(const char *name) {
+    if(name == nullptr || name[0] == '\0') return 0;
+    for(size_t i = 0; i < aBlendSpaces.size(); ++i) {
+        if(aBlendSpaces[i]->aName == name) return aBlendSpaces[i].get();
+    }
+    return 0;
+}
+
+bool cANIM_CONTROLLER::AddBlendSpace(const char *space) {
+    if(space == nullptr || space[0] == '\0') return false;
+    if(findBlendSpace(space) != 0) return false; // 重名
+    std::unique_ptr<sBLEND_SPACE_ENTRY> entry(new sBLEND_SPACE_ENTRY());
+    entry->aName = space;
+    aBlendSpaces.push_back(std::move(entry));
+    return true;
+}
+
+bool cANIM_CONTROLLER::AddBlendPoint(const char *space, float threshold, const char *clipName) {
+    sBLEND_SPACE_ENTRY *entry = findBlendSpace(space);
+    if(entry == 0) return false;
+    const sCLIP_ENTRY *found = find(clipName);
+    if(found == 0) return false; // clip 必须先 RegisterClip
+    return entry->aSpace.AddPoint(threshold, found->aClip);
+}
+
+bool cANIM_CONTROLLER::SetBaseBlendSpace(const char *space) {
+    sBLEND_SPACE_ENTRY *entry = findBlendSpace(space);
+    if(entry == 0) return false;
+    if(entry->aSpace.PointCount() == 0) return false; // 空空间当基础层没有意义
+    if(!aLayerStack.SetBase(&entry->aSpace)) return false;
+    // 让位：混合树接管后，单播放器与状态机都不再驱动时间轴
+    aPlayer.stop();
+    aMachineActive = false;
+    aCurrent = "";
+    aLayered = true;
+    return true;
+}
+
+bool cANIM_CONTROLLER::AddBlendLayer(const char *space, float weight, const float *mask,
+                                     uint32_t maskCount) {
+    if(!aLayered) return false; // 必须先有基础层
+    sBLEND_SPACE_ENTRY *entry = findBlendSpace(space);
+    if(entry == 0) return false;
+    if(entry->aSpace.PointCount() == 0) return false;
+    return aLayerStack.AddLayer(&entry->aSpace, weight, mask, maskCount) != 0;
+}
+
+bool cANIM_CONTROLLER::SetBlendParameter(const char *space, float parameter) {
+    sBLEND_SPACE_ENTRY *entry = findBlendSpace(space);
+    if(entry == 0) return false;
+    entry->aSpace.SetParameter(parameter);
+    return true;
+}
+
+void cANIM_CONTROLLER::StopLayered() {
+    aLayerStack.Clear();
+    aLayered = false;
+}
+
+bool cANIM_CONTROLLER::LayeredActive() const { return aLayered; }
+
+const cANIM_LAYER_STACK &cANIM_CONTROLLER::LayerStack() const { return aLayerStack; }
+
 bool cANIM_CONTROLLER::Playing() const { return aPlayer.isPlaying(); }
 
 bool cANIM_CONTROLLER::Sample(uint32_t node, sANIM_TRANSFORM &out) const {
+    // D3：混合树优先
+    if(aLayered) return aLayerStack.Sample(node, out);
+
     return aPlayer.sample(node, out);
 }
 

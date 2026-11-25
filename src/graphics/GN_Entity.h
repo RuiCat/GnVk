@@ -20,6 +20,7 @@
 //   * 本层不碰任何 Vulkan 调用（cMODEL::Draw* 除外，那条依赖是既有白名单），
 //     因此可以纯 CPU 单测（tests/unit/testEntity.cpp）。
 #include <GN.h> // 先定义 GN_API / GN_USING_3D 等模块宏（同 GN_ShadowCascade.h 的写法）
+#include "GN_AnimBlend.h" // D3：混合树与动画层遮罩（不含 <GN.h>，可直接包含）
 #include "GN_3Dmath.h"
 #include "GN_3Dmodel.h"
 #include "GN_3Danim.h"
@@ -133,6 +134,27 @@ class cANIM_CONTROLLER {
     bool UpdateWithStateMachine(float dt, sANIM_PARAMS &params);
     bool StateMachineActive() const;
 
+    // ── 混合树 / 层栈（D3）──
+    // 一旦 `SetBaseBlendSpace` 成功，`Update` / `Sample` 就走层栈（混合树），
+    // 单播放器与状态机都让位。`StopLayered` 回到原来的行为。
+    //
+    // 为什么混合空间与采样点都由**本类拥有**、用名字索引：
+    // 它们是"配置"而不是"外部资产"，让调用方管生命周期只会带来悬垂指针
+    // （clip 本身仍是非拥有 —— 那些来自导入的 GLB）。
+    bool AddBlendSpace(const char *space); // 重名返回 false
+    // 点：clip 名必须在已注册的 clip 表里（否则 false）。阈值重复返回 false。
+    bool AddBlendPoint(const char *space, float threshold, const char *clipName);
+    bool SetBaseBlendSpace(const char *space); // 设为层栈的基础层
+    // 追加覆盖层。mask 为空 = 全关节生效。成功返回该层索引（>=1）。
+    bool AddBlendLayer(const char *space, float weight, const float *mask = 0,
+                       uint32_t maskCount = 0);
+    // 每帧设混合参数（通常就是角色的水平速度）
+    bool SetBlendParameter(const char *space, float parameter);
+    void StopLayered();
+    bool LayeredActive() const;
+    // 层栈（诊断/微调用；未启用时 LayerCount()==0）
+    const cANIM_LAYER_STACK &LayerStack() const;
+
     bool Playing() const;
     bool Sample(uint32_t node, sANIM_TRANSFORM &out) const;
     const char *Current() const; // 手工播放的 clip 名，或状态机的 clip 名
@@ -152,6 +174,15 @@ class cANIM_CONTROLLER {
     std::unique_ptr<cANIM_STATE_MACHINE> aMachine; // clip 表也在这里（RegisterClip 转发）
     bool aMachineActive;
     std::string aCurrent;
+
+    // ── D3：混合树 ──
+    // 用 unique_ptr 存：vector 扩容会搬移元素，而层栈里存的是 cANIM_BLEND_1D*，
+    // 地址必须稳定。
+    struct sBLEND_SPACE_ENTRY;
+    std::vector<std::unique_ptr<sBLEND_SPACE_ENTRY> > aBlendSpaces;
+    cANIM_LAYER_STACK aLayerStack;
+    bool aLayered;
+    sBLEND_SPACE_ENTRY *findBlendSpace(const char *name);
 };
 
 // ═══════════════════════════════════════════════════════════

@@ -467,6 +467,26 @@ $(UNDO_DEMO_BIN): $(UNDO_DEMO_SRC) $(TARGET)
 	@mkdir -p build
 	$(CXX) $(UNDO_DEMO_FLAGS) $(UNDO_DEMO_SRC) $(TEST_LIBS) -o $(UNDO_DEMO_BIN)
 
+# ── 混合树 / 动画层演示（D3）──
+ANIMBLEND_SRC   := $(wildcard tests/animBlend/*.cpp)
+ANIMBLEND_BIN   := build/animBlend
+ANIMBLEND_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+
+.PHONY: animBlend
+animBlend: $(ANIMBLEND_BIN)
+	@echo "$(YELLOW)🎭 渲染混合树/动画层演示...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(ANIMBLEND_BIN) --out $(GIZMO_VIDEO_OUT)/blend-frames \
+		--frames 300 --size $(GIZMO_VIDEO_SIZE)
+	@$(FFMPEG) -y -loglevel error -framerate 30 -i $(GIZMO_VIDEO_OUT)/blend-frames/frame_%05d.png \
+		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart \
+		$(GIZMO_VIDEO_OUT)/anim-blend.mp4
+	@ls -lh $(GIZMO_VIDEO_OUT)/anim-blend.mp4
+
+$(ANIMBLEND_BIN): $(ANIMBLEND_SRC) $(TARGET)
+	@echo "$(YELLOW)🎭 编译混合树/动画层演示...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(ANIMBLEND_FLAGS) $(ANIMBLEND_SRC) $(TEST_LIBS) -o $(ANIMBLEND_BIN)
+
 # ── 角色推体演示（C2）──
 CHAR_PUSH_SRC   := $(wildcard tests/characterPush/*.cpp)
 CHAR_PUSH_BIN   := build/characterPush
