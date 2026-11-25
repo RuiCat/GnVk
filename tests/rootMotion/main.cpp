@@ -177,39 +177,54 @@ void buildScene() {
         w.aCharacter.SetRootMotionEnabled(w.aRootMotion);
 
         w.aBody = GN3d::CreateCubeModel(1.0f, tints[i], tints[i] * 0.92f, tints[i] * 0.85f);
-        w.aBody->SetScale(0.52f, 0.88f, 0.28f);
+        w.aBody->SetScale(0.46f, 0.52f, 0.26f);
         w.aHead = GN3d::CreateCubeModel(1.0f, 0.95f, 0.84f, 0.70f);
-        w.aHead->SetScale(0.32f, 0.32f, 0.32f);
+        w.aHead->SetScale(0.26f, 0.26f, 0.26f);
         w.aLegL = GN3d::CreateCubeModel(1.0f, tints[i] * 0.7f, tints[i] * 0.64f, tints[i] * 0.58f);
-        w.aLegL->SetScale(0.17f, 0.76f, 0.17f);
+        w.aLegL->SetScale(0.15f, 0.72f, 0.15f);
         w.aLegR = GN3d::CreateCubeModel(1.0f, tints[i] * 0.7f, tints[i] * 0.64f, tints[i] * 0.58f);
-        w.aLegR->SetScale(0.17f, 0.76f, 0.17f);
+        w.aLegR->SetScale(0.15f, 0.72f, 0.15f);
         gWalkers.push_back(w);
     }
 }
 
 void poseWalker(sWalker &w, float legAngle) {
     const GNg::sVEC3 foot = w.aCharacter.FootPosition();
-    // 角色朝向 +Z；腿在 X 轴上左右分开，前后摆动
     const float x = foot.x;
     const float z = foot.z;
-    const float hipY = foot.y + 1.05f;
-    const float legLen = 0.76f;
+
+    // 比例：让模型与胶囊一致（胶囊高 1.70 ⇒ 模型顶端也 ≈ foot.y + 1.70）
+    const float legLen = 0.72f;   // 腿长（站立时下端正好落地）
+    const float hipY = foot.y + legLen;  // 髋在腿顶端
+    const float bodyH = 0.52f;
+    const float headH = 0.26f;
+
+    // ── 腿的摆动 ──
+    // **约定：angle > 0 = 向前（+Z）摆**。
+    // 腿默认朝下（局部 -Y）。绕 X 轴转 φ 时方向变成 (0, -cosφ, -sinφ)；
+    // 要让下端往 +Z 走，φ 必须是 **-angle**：
+    //     R_x(-angle) · (0,-1,0) = (0, -cos(angle), +sin(angle))
+    // 于是位置偏移用 +sin(angle)，四元数的 x 分量用 **-sin(angle/2)**。
+    // 之前这里符号不一致（位置 +sin、旋转 +angle），腿被扭成"脚朝上"。
     for (int side = 0; side < 2; ++side) {
         const float sx = (side == 0) ? -0.13f : 0.13f;
         const float angle = (side == 0) ? legAngle : -legAngle;
         GN3d::cMODEL *leg = (side == 0) ? w.aLegL : w.aLegR;
-        leg->SetPosition(x + sx, hipY - std::cos(angle) * legLen * 0.5f,
-                         z + std::sin(angle) * legLen * 0.5f);
+
+        const float dirY = -std::cos(angle);
+        const float dirZ = std::sin(angle);
+        leg->SetPosition(x + sx, hipY + dirY * legLen * 0.5f, z + dirZ * legLen * 0.5f);
+
         GNg::sQUAT q = {};
         q.w = std::cos(angle * 0.5f);
-        q.x = std::sin(angle * 0.5f);
+        q.x = -std::sin(angle * 0.5f); // 注意负号（见上）
         leg->SetRotation(q);
         leg->computeWorldAABB();
     }
-    w.aBody->SetPosition(x, hipY + 0.44f, z);
+
+    w.aBody->SetPosition(x, hipY + bodyH * 0.5f, z);
     w.aBody->computeWorldAABB();
-    w.aHead->SetPosition(x, hipY + 1.08f, z);
+    w.aHead->SetPosition(x, hipY + bodyH + headH * 0.5f, z);
     w.aHead->computeWorldAABB();
 }
 

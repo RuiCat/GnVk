@@ -188,17 +188,17 @@ void buildScene() {
         stick.aBaseX = xs[i];
         stick.aTint = tints[i];
         stick.aBody = GN3d::CreateCubeModel(1.0f, tints[i], tints[i] * 0.92f, tints[i] * 0.85f);
-        stick.aBody->SetScale(0.55f, 0.9f, 0.30f);
+        stick.aBody->SetScale(0.46f, 0.52f, 0.26f);
         stick.aHead = GN3d::CreateCubeModel(1.0f, 0.95f, 0.82f, 0.68f);
-        stick.aHead->SetScale(0.34f, 0.34f, 0.34f);
+        stick.aHead->SetScale(0.26f, 0.26f, 0.26f);
         stick.aArmL = GN3d::CreateCubeModel(1.0f, tints[i] * 0.9f, tints[i] * 0.82f, tints[i] * 0.75f);
-        stick.aArmL->SetScale(0.16f, 0.62f, 0.16f);
+        stick.aArmL->SetScale(0.13f, 0.56f, 0.13f);
         stick.aArmR = GN3d::CreateCubeModel(1.0f, tints[i] * 0.9f, tints[i] * 0.82f, tints[i] * 0.75f);
-        stick.aArmR->SetScale(0.16f, 0.62f, 0.16f);
+        stick.aArmR->SetScale(0.13f, 0.56f, 0.13f);
         stick.aLegL = GN3d::CreateCubeModel(1.0f, tints[i] * 0.7f, tints[i] * 0.65f, tints[i] * 0.6f);
-        stick.aLegL->SetScale(0.18f, 0.78f, 0.18f);
+        stick.aLegL->SetScale(0.15f, 0.72f, 0.15f);
         stick.aLegR = GN3d::CreateCubeModel(1.0f, tints[i] * 0.7f, tints[i] * 0.65f, tints[i] * 0.6f);
-        stick.aLegR->SetScale(0.18f, 0.78f, 0.18f);
+        stick.aLegR->SetScale(0.15f, 0.72f, 0.15f);
         gSticks.push_back(stick);
     }
 }
@@ -206,45 +206,49 @@ void buildScene() {
 // 由 clip 的采样结果摆放火柴人
 void poseStick(sStick &stick, float hipAngle, float shoulderAngle) {
     const float x = stick.aBaseX;
-    // 髋在 y=1.05，腿从髋往下摆
-    const float hipY = 1.05f;
-    // 腿：绕 X 轴摆动（前后）
-    const float legLen = 0.78f;
-    const float lx = x - 0.13f;
-    const float rx = x + 0.13f;
-    // 左腿往前、右腿往后（反相）—— 用同一个角度，一个正一个负
-    const float a1 = hipAngle;
-    const float a2 = -hipAngle;
-    stick.aLegL->SetPosition(lx + std::sin(a1) * legLen * 0.5f,
-                             hipY - std::cos(a1) * legLen * 0.5f, 0.0f);
-    stick.aLegR->SetPosition(rx + std::sin(a2) * legLen * 0.5f,
-                             hipY - std::cos(a2) * legLen * 0.5f, 0.0f);
-    {
+    const float legLen = 0.72f;
+    const float hipY = legLen; // 腿底落地（y=0）
+    const float bodyH = 0.52f;
+    const float headH = 0.26f;
+
+    // ── 腿：绕 X 轴前后摆（**约定 angle>0 = 向前 +Z**）──
+    // 腿默认朝下（局部 -Y）。绕 X 转 φ 后方向是 (0,-cosφ,-sinφ)；
+    // 要让下端往 +Z 走必须用 φ = -angle，所以四元数 x 分量取 **-sin(angle/2)**。
+    // 之前这里用 +sin（位置偏移还写在了 X 上），腿会朝侧向张开而不是前后摆。
+    for (int side = 0; side < 2; ++side) {
+        const float sx = (side == 0) ? -0.13f : 0.13f;
+        const float a = (side == 0) ? hipAngle : -hipAngle;
+        GN3d::cMODEL *leg = (side == 0) ? stick.aLegL : stick.aLegR;
+        leg->SetPosition(x + sx, hipY - std::cos(a) * legLen * 0.5f,
+                         std::sin(a) * legLen * 0.5f);
         GNg::sQUAT q = {};
-        q.w = std::cos(a1 * 0.5f);
-        q.x = std::sin(a1 * 0.5f);
-        stick.aLegL->SetRotation(q);
-        GNg::sQUAT q2 = {};
-        q2.w = std::cos(a2 * 0.5f);
-        q2.x = std::sin(a2 * 0.5f);
-        stick.aLegR->SetRotation(q2);
+        q.w = std::cos(a * 0.5f);
+        q.x = -std::sin(a * 0.5f); // 注意负号
+        leg->SetRotation(q);
+        leg->computeWorldAABB();
     }
-    // 身体与头
-    stick.aBody->SetPosition(x, hipY + 0.45f, 0.0f);
-    stick.aHead->SetPosition(x, hipY + 1.10f, 0.0f);
-    // 手臂：绕 Z 轴挥（左右张开）
-    const float armY = hipY + 0.75f;
-    const float armLen = 0.62f;
+
+    // ── 身体与头 ──
+    stick.aBody->SetPosition(x, hipY + bodyH * 0.5f, 0.0f);
+    stick.aBody->computeWorldAABB();
+    stick.aHead->SetPosition(x, hipY + bodyH + headH * 0.5f, 0.0f);
+    stick.aHead->computeWorldAABB();
+
+    // ── 手臂：绕 Z 轴左右张开（这个轴是对的：绕 Z 转会把下端推向 ±X）──
+    const float armY = hipY + bodyH * 0.86f;
+    const float armLen = 0.56f;
     const float s1 = shoulderAngle;
     const float s2 = -shoulderAngle * 0.6f;
-    stick.aArmL->SetPosition(x - 0.32f - std::sin(std::fabs(s1)) * armLen * 0.5f,
+    // 左臂：绕 Z 转 +s 时 (0,-1,0) → (sin s, -cos s, 0)，下端往 +X
+    // 左边手臂要往 -X 张，所以用 -s1
+    stick.aArmL->SetPosition(x - 0.26f - std::sin(std::fabs(s1)) * armLen * 0.5f,
                              armY - std::cos(s1) * armLen * 0.5f, 0.0f);
-    stick.aArmR->SetPosition(x + 0.32f + std::sin(std::fabs(s2)) * armLen * 0.5f,
+    stick.aArmR->SetPosition(x + 0.26f + std::sin(std::fabs(s2)) * armLen * 0.5f,
                              armY - std::cos(s2) * armLen * 0.5f, 0.0f);
     {
         GNg::sQUAT q = {};
-        q.w = std::cos(s1 * 0.5f);
-        q.z = std::sin(s1 * 0.5f);
+        q.w = std::cos(-s1 * 0.5f);
+        q.z = std::sin(-s1 * 0.5f);
         stick.aArmL->SetRotation(q);
         GNg::sQUAT q2 = {};
         q2.w = std::cos(s2 * 0.5f);
