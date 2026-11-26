@@ -139,6 +139,11 @@ GN_VK_INTERNAL void EndRTRenderPass();
 GN_VK_INTERNAL void vkRenderTargetShutdown(); // 销毁 RT framebuffer/renderPass（GN_VkShutdown 调用）
 GN_VK_INTERNAL extern sIMAGE *s_activeRT; // 当前渲染目标（定义在 vkRenderTarget.cpp）
 GN_VK_INTERNAL extern bool s_rtInProgress; // RT pass 进行中
+
+// ── 无窗口离屏目标（vkOffscreen.cpp）──────────────────
+GN_VK_INTERNAL extern const uint32_t kHeadlessImageCount; // 离屏图张数（Init/Resize 用）
+GN_VK_INTERNAL bool createOffscreenSwapchain(uint32_t w, uint32_t h, uint32_t count);
+GN_VK_INTERNAL void destroyOffscreenSwapchain(); // 只释放图与显存；view 由调用方统一销毁
 GN_VK_INTERNAL void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize);
 GN_VK_INTERNAL void init3DTargets();
 GN_VK_INTERNAL void init3DForward(const std::vector<uint32_t> &vertSpv,
