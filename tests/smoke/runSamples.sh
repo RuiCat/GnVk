@@ -23,6 +23,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT" || exit 1
 
 FRAMES="${GN_HEADLESS_FRAMES:-8}"
+# B8 parity：GN_BUILD_DIR 可指向 CMake 产物目录（默认 build，行为不变）
+BIN_DIR="${GN_BUILD_DIR:-build}"
 FILTER="${SMOKE_FILTER:-}"
 LIB="${LD_LIBRARY_PATH:-}"
 
@@ -40,7 +42,7 @@ failed_names=()
 # 先探一次设备：没有 Vulkan 设备就整体 SKIP（退出码 2），不逐项刷失败。
 probe() {
     local out
-    out="$(GN_HEADLESS_FRAMES=1 ./build/headlessCheck 2>&1)"
+    out="$(GN_HEADLESS_FRAMES=1 "./$BIN_DIR/headlessCheck" 2>&1)"
     local code=$?
     if [ $code -eq 2 ]; then
         return 2
@@ -131,12 +133,12 @@ run_one() {
 
 echo "==== 示例无窗口冒烟（${FRAMES} 帧/示例）===="
 
-if [ ! -x ./build/headlessCheck ]; then
-    echo "  [SKIP] build/headlessCheck 不存在，先 make headlessCheck"
+if [ ! -x "./$BIN_DIR/headlessCheck" ]; then
+    echo "  [SKIP] $BIN_DIR/headlessCheck 不存在，先 make headlessCheck（或 cmake --build --preset default）"
     exit 2
 fi
 
-export LD_LIBRARY_PATH=".:$LIB"
+export LD_LIBRARY_PATH="$BIN_DIR:.:$LIB"
 export GN_HEADLESS_FRAMES="$FRAMES"
 
 probe
@@ -146,32 +148,32 @@ if [ $? -eq 2 ]; then
 fi
 
 # 画面回归（有像素断言，最严格）：自带 4 象限色块 + alpha + 非全黑。
-run_one headlessCheck ./build/headlessCheck
+run_one headlessCheck "./$BIN_DIR/headlessCheck"
 # 场景示例：缺资源时只画背景，判据是「跑完不崩」。
-run_one cornellBox    ./build/cornellBox
-run_one mmdViewer     ./build/mmdViewer
-run_one imoScene      ./build/imoScene
+run_one cornellBox    "./$BIN_DIR/cornellBox"
+run_one mmdViewer     "./$BIN_DIR/mmdViewer"
+run_one imoScene      "./$BIN_DIR/imoScene"
 # P4 物理场景：纯 CPU（不需要 Vulkan），放在这里是为了和"整仓示例都能跑"一起验。
-run_one physicsBoxes  ./build/physicsBoxes
-run_one characterDemo ./build/characterDemo
+run_one physicsBoxes  "./$BIN_DIR/physicsBoxes"
+run_one characterDemo "./$BIN_DIR/characterDemo"
 # 动画演示：带**姿态自检**（demoPoseCheck.h）。自检失败会返回非零，
 # 所以这两个不只是"跑完不崩"，还能拦住"腿反了"这类方向错误。
 # 曾经根因：位置偏移与四元数符号相反 ⇒ 腿被扭成脚朝上，而截图肉眼没看出来。
-run_one rootMotion   ./build/rootMotion
-run_one animBlend    ./build/animBlend
+run_one rootMotion   "./$BIN_DIR/rootMotion"
+run_one animBlend    "./$BIN_DIR/animBlend"
 # IK 演示带**量化验收**：有 IK 的平均脚离地误差必须显著小于无 IK（失败返回 4）。
-run_one ikDemo       ./build/ikDemo
+run_one ikDemo       "./$BIN_DIR/ikDemo"
 # 布娃娃演示带量化验收：必须倒地且不穿地（失败返回 4）。
-run_one ragdollDemo  ./build/ragdollDemo
+run_one ragdollDemo  "./$BIN_DIR/ragdollDemo"
 # 多光源 cube shadow：量化验收"至少渲染了 2 盏灯的阴影"（失败返回 4）。
-run_one multiShadowDemo ./build/multiShadowDemo
+run_one multiShadowDemo "./$BIN_DIR/multiShadowDemo"
 # 阴影视角无关性：定量探针（世界点投影到屏幕取像素）。验证
 #   相机转 40° 同一世界点亮度不变（差 <15%），灯换边则明暗互换。
 # 失败返回 4 —— 这条守卫"阴影被做成屏幕空间效果"这类回归。
-run_one shadowProbe  ./build/shadowProbe
+run_one shadowProbe  "./$BIN_DIR/shadowProbe"
 # 管线验收：无窗口跑同一批检查；按基线判（不把已知的 cull.debugLine 当失败）。
 # 基线 2026-11-24：P2 蒙皮 6 站 + P3 动画切换 1 站后为 116。
-run_baseline gpuCheck      ./build/gpuCheck 124 ""
+run_baseline gpuCheck      "./$BIN_DIR/gpuCheck" 124 ""
 
 echo "---- SMOKE SUMMARY: pass=$pass fail=$fail skip=$skip ----"
 if [ $fail -ne 0 ]; then

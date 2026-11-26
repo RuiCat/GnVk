@@ -483,7 +483,7 @@ nm -D --defined-only libGN_mini.so | sort | diff abi/baseline.txt -   # 只允�
 | B4 | ~~其余超限~~ | `src/ui/`、`src/graphics/_Vulkan/`、`src/core/` | B2/B3 后 | ✅ 2026-11-26：GN_UiBase.cpp 2670→38、GN_Vk.h 1122→49、GN_FormatImgFile.cpp 1041→28（转发 + .inc 片段，单编译单元语义不变） |
 | B6 | ~~平台拆分 + Linux-only 如实声明~~ | `src/platform/`、`docs/` | B4 | ✅ 2026-11-26：GN_Sys.cpp 1722→36 + 7 个 .inc 片段（预处理平衡点切分）；README/Makefile 声明 Linux-only，cross 目标标 experimental |
 | B7 | 上下文收敛（c4）：sEngineContext + 默认上下文门面 → 渲染状态 → 资源缓存 → 输入/UI → 删 static（136 个） | 全仓（**串行**，一次一个模块） | B2–B6 | 待做 |
-| B8 | CMake + presets + make 薄封装；双构建 parity（同一单测/smoke 跑两套产物）后删旧规则 | `CMakeLists.txt`、`cmake/`、`Makefile` | B2–B6（可与 B7 并行） | 待做 |
+| B8 | CMake + presets + make 薄封装；双构建 parity 后删旧规则 | `CMakeLists.txt`、`CMakePresets.json`、`Makefile` | B2–B6（可与 B7 并行） | 🚧 2026-11-26 阶段1：CMakeLists + presets + `make parity`；parity 全过（单测 943/0、smoke 13/0、gpuCheck 126/0、符号零差异）；余 make 薄封装与旧规则删除 |
 | B9 | 质量门全量（c7）：去 -fpermissive、C++17、告警预算 19385→<500、字符串安全清零、解析器 fuzz | 全仓 | B7/B8 | 待做 |
 | B10 | 文档与发布（c8）：版本单一来源、README 重写、ABI 基线随版本、过期文档退役 | `docs/`、`README.md` | 全部 | 待做 |
 

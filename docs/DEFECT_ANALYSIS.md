@@ -115,6 +115,7 @@ rg -n '^[A-Za-z_][A-Za-z0-9_:<>]*[ \*]+(GT_|z)[A-Za-z0-9_]+(\[[^]]*\])?\s*(=|;)'
 | DA-1126-16 角色头注释过期 | `src/graphics/GN_Character.h:14`、`src/graphics/GN_Entity.h:342` | **已修复**：改为现行口径（可经 SetPhysicsWorld 单向推动态刚体） |
 | DA-1126-17 缺口账本 D4 过期 | `docs/REMAINING_GAPS.md` D4 行 | **已修正**（2026-11-26）：deploy key 可用，容器内直接 push |
 | DA-1126-18 SetZoningDrawCall 空指针 | `src/ui/GN_UiBase.cpp`（SetZoningDrawCall 尾行） | **已修复**（P0.2 测试暴露）：注册先于帧初始化时 `zFFrames->zMax_num` 解引用空指针；加空守卫。复现：构造后直接 SetZoningDrawCall |
+| DA-1126-19 cornell 光追自检规则陈旧 | `Makefile` cornellRtProbe/GpuRtProbe/HwRtProbe | **已修复**（B8 parity 暴露）：三个目标含 cornellCpuRt.cpp（`#include <GN.h>` 且调用 GN3d:: 引擎函数），旧规则缺 `$(DEFINES) $(INCLUDES)` 与 `-lGN_mini`，编不过（不在 ci 内故长期未暴露）；补头路径/宏/链接与 $(TARGET) 依赖，CMake 侧同步 |
 
 复算：`make unit` → `stringSymbolToSingleChar*` 2 例 + `scrollListDrawCallSignatureFlag` 1 例（943/0）。
 

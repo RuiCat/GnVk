@@ -2,6 +2,29 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B8 阶段1：CMake 构建 + 双构建 parity 全过
+
+新增 `CMakeLists.txt` + `CMakePresets.json`（default=Release/-O3 无 NDEBUG、debug），
+与 Makefile 的 Linux/Vulkan 配置逐项 parity：同一组源码通配、宏、pkg-config 特性检测
+（x11/alsa/ffmpeg/freetype2/libjpeg）、-O3 引擎 / -O2 测试、cornell 家族显式源列表。
+
+**parity 验证（CMake 产物）**：单测 943/0、smoke 13/0、gpuCheck 126/0、
+`nm -D` 符号名与 abi/baseline.txt **零差异**。Makefile 侧 make ci 同时全绿（无回归）。
+
+配套：
+- `make parity`：一键 CMake 构建 + 同一套单测/冒烟
+- `runSamples.sh` 支持 `GN_BUILD_DIR`（默认 build，行为不变）
+- `.gitignore` 增加 build-cmake*/
+- **DA-1126-19**：cornell 三个光追自检的 Makefile 规则陈旧（缺头路径/宏/引擎链接，
+  编不过但不在 ci 内）——Makefile 与 CMake 两边同步修复
+
+parity 注意两点（已写进 CMakeLists 注释）：
+1. pkg_check_modules 的 INCLUDE_DIRS 是传递闭包，freetype2 会带出 libpng16 头抢在
+   external/include 的 1.2.4 之前（png_struct 变 opaque）——只取 freetype2 自身目录
+2. CMAKE_CXX_EXTENSIONS OFF（Makefile 用 -std=c++11 不是 gnu++11）
+
+B8 余量：make 薄封装（ci 改由 CMake 驱动）与旧规则删除——待 B7 完成后做，避免双线改动。
+
 ## 2026-11-26 — B6：平台拆分 + Linux-only 如实声明（D3）
 
 **平台拆分**（move-only，单测 943/0）：GN_Sys.cpp 1722 → 36 行转发 + 7 个 .inc 片段，

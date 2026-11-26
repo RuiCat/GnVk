@@ -685,6 +685,18 @@ doc-check:
 	@echo "$(YELLOW)💬 校验头文件注释覆盖...$(RESET)"
 	@bash tests/tools/check_comments.sh
 
+# ── B8 双构建 parity：CMake 产物跑同一套单测/冒烟（2026-11-26）──
+# 判据与 make ci 相同：单测全过 + smoke 13/0 + gpuCheck 基线不降。
+.PHONY: parity
+parity:
+	@echo "$(YELLOW)🔁 CMake 构建（default preset）...$(RESET)"
+	@cmake --preset default > /dev/null
+	@cmake --build --preset default -j$(if $(JOBS),$(JOBS),2)
+	@echo "$(YELLOW)🧪 CMake 产物单测...$(RESET)"
+	@LD_LIBRARY_PATH=build-cmake:$$LD_LIBRARY_PATH ./build-cmake/unit_tests
+	@echo "$(YELLOW)💨 CMake 产物冒烟...$(RESET)"
+	@GN_BUILD_DIR=build-cmake tests/smoke/runSamples.sh
+
 # ── 交叉平台编译检查（只编译不链接；experimental，D3：官方 Linux-only）──
 # 用 MinGW-w64 把 src/ 全量按 Windows 目标编一遍；能编≠支持，链接/运行未验证。
 # 没有交叉工具链时退出码 2 = SKIP（没装 g++-mingw-w64-x86-64 就跳过）。
@@ -813,10 +825,10 @@ CORNELL_RT_PROBE_SRC := tests/cornellBox/cornellGeometry.cpp \
 CORNELL_RT_PROBE_BIN := build/cornellRtProbe
 
 .PHONY: cornellRtProbe
-cornellRtProbe:
+cornellRtProbe: $(TARGET)
 	@echo "$(YELLOW)🧪 编译 Cornell CPU 光追自检...$(RESET)"
 	@mkdir -p build
-	$(CXX) -O2 -std=c++11 -pthread $(CORNELL_RT_PROBE_SRC) -lpng -lz -o $(CORNELL_RT_PROBE_BIN)
+	$(CXX) -O2 -std=c++11 -pthread $(DEFINES) $(INCLUDES) $(CORNELL_RT_PROBE_SRC) $(TEST_LIBS) -o $(CORNELL_RT_PROBE_BIN)
 	@echo "$(GREEN)✅ 运行: ./$(CORNELL_RT_PROBE_BIN)$(RESET)"
 
 # ── Cornell GPU compute 光追自检（无窗口 Vulkan；无设备时 SKIP）──────
@@ -828,10 +840,10 @@ CORNELL_GPU_RT_PROBE_SRC := tests/cornellBox/cornellGeometry.cpp \
 CORNELL_GPU_RT_PROBE_BIN := build/cornellGpuRtProbe
 
 .PHONY: cornellGpuRtProbe
-cornellGpuRtProbe: $(CORNELL_SHADERS)
+cornellGpuRtProbe: $(TARGET) $(CORNELL_SHADERS)
 	@echo "$(YELLOW)🧪 编译 Cornell GPU 光追自检...$(RESET)"
 	@mkdir -p build
-	$(CXX) -O2 -std=c++11 -pthread $(CORNELL_GPU_RT_PROBE_SRC) -lvulkan -lpng -lz -o $(CORNELL_GPU_RT_PROBE_BIN)
+	$(CXX) -O2 -std=c++11 -pthread $(DEFINES) $(INCLUDES) $(CORNELL_GPU_RT_PROBE_SRC) $(TEST_LIBS) -o $(CORNELL_GPU_RT_PROBE_BIN)
 	@echo "$(GREEN)✅ 运行: ./$(CORNELL_GPU_RT_PROBE_BIN)$(RESET)"
 
 # ── Cornell 硬件 ray-query 自检（无窗口 Vulkan；无设备时 SKIP）──────
@@ -844,10 +856,10 @@ CORNELL_HW_RT_PROBE_SRC := tests/cornellBox/cornellGeometry.cpp \
 CORNELL_HW_RT_PROBE_BIN := build/cornellHwRtProbe
 
 .PHONY: cornellHwRtProbe
-cornellHwRtProbe: $(CORNELL_SHADERS)
+cornellHwRtProbe: $(TARGET) $(CORNELL_SHADERS)
 	@echo "$(YELLOW)🧪 编译 Cornell 硬件光追自检...$(RESET)"
 	@mkdir -p build
-	$(CXX) -O2 -std=c++11 -pthread $(CORNELL_HW_RT_PROBE_SRC) -lvulkan -lpng -lz -o $(CORNELL_HW_RT_PROBE_BIN)
+	$(CXX) -O2 -std=c++11 -pthread $(DEFINES) $(INCLUDES) $(CORNELL_HW_RT_PROBE_SRC) $(TEST_LIBS) -o $(CORNELL_HW_RT_PROBE_BIN)
 	@echo "$(GREEN)✅ 运行: ./$(CORNELL_HW_RT_PROBE_BIN)$(RESET)"
 
 # ── Cornell Box 自检：确定性 + 位姿/种子敏感性（纯 CPU，可进 CI）────
