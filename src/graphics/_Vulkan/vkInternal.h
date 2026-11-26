@@ -132,6 +132,13 @@ GN_VK_INTERNAL void DestroyImageUploadCache();
 GN_VK_INTERNAL void FlushBatchIfScissorDirty();
 GN_VK_INTERNAL void GrowVBufIfNeeded(uint32_t need);
 GN_VK_INTERNAL void FlushVertexBatch();
+
+// ── RenderTarget 离屏渲染（vkRenderTarget.cpp）──────────────────
+GN_VK_INTERNAL void BeginRTRenderPass();
+GN_VK_INTERNAL void EndRTRenderPass();
+GN_VK_INTERNAL void vkRenderTargetShutdown(); // 销毁 RT framebuffer/renderPass（GN_VkShutdown 调用）
+GN_VK_INTERNAL extern sIMAGE *s_activeRT; // 当前渲染目标（定义在 vkRenderTarget.cpp）
+GN_VK_INTERNAL extern bool s_rtInProgress; // RT pass 进行中
 GN_VK_INTERNAL void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize);
 GN_VK_INTERNAL void init3DTargets();
 GN_VK_INTERNAL void init3DForward(const std::vector<uint32_t> &vertSpv,
