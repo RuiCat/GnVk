@@ -55,9 +55,15 @@
 
 ## 编译
 
+构建定义在 `CMakeLists.txt`（+ `CMakePresets.json`）；`make` 是薄封装，只做「目标名 → CMake 目标」映射。
+产物在 `build-cmake/`，仓库根的 `libGN_mini.so` 是指向它的软链（兼容老工作流）。`make help` 列出全部目标。
+
 ```bash
-# Linux (自动检测)
+# Linux：配置 + 构建全部产物（引擎库 + 单测/验收/示例）
 make
+
+# 列出真实目标
+make help
 
 # 调试版本
 make debug
@@ -103,13 +109,14 @@ make clean
 | Android | `GLES` | **不支持（experimental）**：无 Vulkan 后端，不维护 |
 
 > **平台范围（D3，2026-11-26）**：官方仅支持 Linux。非 Linux 分支代码保留在仓库中（不静默删除能力），
-> 但不维护、不测试、不承诺可用；`make crosscheck` 与 `PLATFORM=windows/macos` 均为 experimental。
+> 但不维护、不测试、不承诺可用；`make crosscheck` 与非 Linux 目标均为 experimental。
 
-以下非 Linux 目标为 **experimental**（D3）：
+B8（2026-11-27）后默认构建走 CMake；非 Linux 交叉构建保留在旧规则文件（D3：能力不静默删除）：
 
 ```bash
-make PLATFORM=windows          # Vulkan 后端（默认）
-make PLATFORM=windows BACKEND=opengl   # 旧的 GLUT/OpenGL 路径（需自行提供窗口层）
+make -f Makefile.legacy PLATFORM=windows                  # Vulkan 后端（默认）
+make -f Makefile.legacy PLATFORM=windows BACKEND=opengl   # 旧的 GLUT/OpenGL 路径（需自行提供窗口层）
+make -f Makefile.legacy PLATFORM=android CROSS=aarch64-linux-android21-
 ```
 
 Vulkan 后端是唯一带**无窗口（离屏）渲染**能力的后端，且不依赖任何窗口系统
@@ -134,8 +141,12 @@ GnVk/
 │   └── plugin/         # 插件接口
 ├── external/include/   # 第三方头文件
 ├── docs/               # 文档
-├── Makefile            # 构建系统
-└── libGN_mini.so       # 编译产物 (动态库)
+├── CMakeLists.txt      # 构建定义（唯一来源）
+├── CMakePresets.json   # 构建预设（default / debug）
+├── Makefile            # 薄封装（目标名 → CMake；B8）
+├── Makefile.legacy     # 旧规则（experimental 交叉平台专用，D3）
+├── build-cmake/        # 构建产物（引擎库 / 单测 / 示例）
+└── libGN_mini.so       # 软链 → build-cmake/libGN_mini.so
 ```
 
 ## 运行

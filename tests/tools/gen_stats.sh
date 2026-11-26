@@ -55,14 +55,16 @@ SRC_LINES=$(find src -name '*.cpp' -o -name '*.h' | xargs cat 2>/dev/null | wc -
 SHADER_SPV=$(find assets/shaders -name '*.spv' 2>/dev/null | wc -l | tr -d ' ')
 
 # gpuCheck 与 unit 的实跑结果（需要二进制已构建且有 Vulkan 设备）
-GPU_SUMMARY="（未运行：build/gpuCheck 不存在）"
-UNIT_SUMMARY="（未运行：build/unit_tests 不存在）"
-if [ -x build/unit_tests ]; then
-    UNIT_SUMMARY=$(LD_LIBRARY_PATH=.:${LD_LIBRARY_PATH:-} ./build/unit_tests 2>&1 | grep -E "cases," | tail -1)
+# B8：构建产物目录由 GN_BUILD_DIR 指定（make 传 build-cmake；默认 build 保持旧行为）。
+BIN_DIR="${GN_BUILD_DIR:-build}"
+GPU_SUMMARY="（未运行：${BIN_DIR}/gpuCheck 不存在）"
+UNIT_SUMMARY="（未运行：${BIN_DIR}/unit_tests 不存在）"
+if [ -x "${BIN_DIR}/unit_tests" ]; then
+    UNIT_SUMMARY=$(LD_LIBRARY_PATH="${BIN_DIR}:${LD_LIBRARY_PATH:-}" "./${BIN_DIR}/unit_tests" 2>&1 | grep -E "cases," | tail -1)
     [ -z "$UNIT_SUMMARY" ] && UNIT_SUMMARY="（运行失败）"
 fi
-if [ -x build/gpuCheck ]; then
-    GPU_SUMMARY=$(LD_LIBRARY_PATH=.:${LD_LIBRARY_PATH:-} GN_HEADLESS=1 ./build/gpuCheck 2>&1 \
+if [ -x "${BIN_DIR}/gpuCheck" ]; then
+    GPU_SUMMARY=$(LD_LIBRARY_PATH="${BIN_DIR}:${LD_LIBRARY_PATH:-}" GN_HEADLESS=1 "./${BIN_DIR}/gpuCheck" 2>&1 \
         | grep -oE "pass=[0-9]+ fail=[0-9]+ skip=[0-9]+" | tail -1)
     [ -z "$GPU_SUMMARY" ] && GPU_SUMMARY="（无 Vulkan 设备或运行失败）"
 fi

@@ -1,6 +1,7 @@
 build/
 build-cmake/
 build-cmake-debug/
+build-asan/
 libGN_mini*.*
 *.o
 *.d

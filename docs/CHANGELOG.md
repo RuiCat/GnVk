@@ -2,6 +2,27 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-27 — B8 收口：make 薄封装（CMake 驱动）+ 旧规则归档
+
+**Makefile 从 1022 行手写规则改为薄封装**：目标名 → CMake 目标映射（`build-cmake/` 产物），
+运行/门禁脚本保留。仓库根 `libGN_mini.so` 改为指向 `build-cmake/libGN_mini.so` 的软链
+（兼容 `nm -D libGN_mini.so` / `LD_LIBRARY_PATH=.` 等老工作流）。
+
+**ci 全链路改由 CMake 驱动**：check（unit + physicsBoxes + characterDemo）/ smoke（13 示例，
+`GN_BUILD_DIR=build-cmake`）/ doc-check（`gen_stats.sh` 支持 `GN_BUILD_DIR`，默认 build 行为不变）/
+spv-check / lint-strict 语义不变。
+
+**旧规则归档**：1022 行原样移入 `Makefile.legacy`，仅用于 experimental 交叉平台（D3：能力不静默删除）：
+`make -f Makefile.legacy PLATFORM=windows CROSS=...`；默认路径不再维护这些规则。
+
+**配套**：`make parity` 改为 ci 同源别名（默认构建即 CMake，双构建 parity 失去意义）；
+`asan` 改为 CMake 独立目录 `build-asan/`（等价旧实现，已入 .gitignore）；`debug` 走 cmake debug preset；
+`make help` 列出真实目标；README 编译/平台章节同步（experimental 命令改为 `-f Makefile.legacy`）。
+
+验证：干净配置 `make` exit=0；`make unit` **955/0**；`make ci` **exit=0**（单测 + 物理/角色场景 +
+无窗口渲染 smoke 13/0 + doc-check + spv-check + lint-strict）；CMake 产物 `nm -D` 与 `abi/baseline.txt`
+**零差异**（同源同工具链，无 ABI 变更）。
+
 ## 2026-11-27 — B7-5：函数内 static 审计 + 全仓复审 + 多实例测试（c4 收尾）
 
 **审计裁决（30 项函数内 static，逐类理由见账本 B7-5 审计记录）**：
