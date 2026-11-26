@@ -2,6 +2,29 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B6：平台拆分 + Linux-only 如实声明（D3）
+
+**平台拆分**（move-only，单测 943/0）：GN_Sys.cpp 1722 → 36 行转发 + 7 个 .inc 片段，
+切分边界全部在预处理平衡点（#ifdef 平台分支语义原样保留）：
+
+| 片段 | 行数 | 内容 |
+|---|---:|---|
+| sysEncoding | 193 | seek 重定义 + GB2312/UTF8 转换 |
+| sysDirectory | 135 | REDEF__A_SUBDIR 目录查找 |
+| sysStrPath | 342 | 模块扩展名/系统名/路径转换（Win/Android/Mac 分支） |
+| sysProcClipboard | 267 | 进程枚举/核心数/剪贴板/应用路径 |
+| sysProcess | 207 | 当前目录 + 线程能力探测 |
+| sysThread | 164 | GN_sTHREAD 实现 |
+| sysMutexIo | 385 | 互斥锁 + IO/传感器 stub |
+
+**Linux-only 如实声明**（D3 裁决，取代 2026-11-24「跨平台编译通过」口径）：
+- README：标题行与特性改为「官方仅支持 Linux」；平台表 Windows/macOS/Android 标**不支持（experimental）**；
+  新增平台范围说明（分支代码保留、不维护、不测试、不承诺可用）
+- Makefile：crosscheck 注释与帮助标 experimental（能编≠支持）
+- 不静默删除任何平台代码；crosscheck 能力保留
+
+下一步：B7（上下文收敛，串行）∥ B8（CMake + make 封装）。
+
 ## 2026-11-26 — B4 第三刀（B4 完结）：GN_FormatImgFile.cpp 1041 → 28 行转发
 
 move-only 按编解码拆分（REFACTOR_PLAN §13 B4），单测 943/0，符号名 diff 为零。

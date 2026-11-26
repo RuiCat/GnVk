@@ -1,11 +1,11 @@
 # GnVk — GN_mini Vulkan 游戏引擎
 
-轻量级跨平台 2D/3D 游戏引擎，Vulkan 渲染后端。
+轻量级 2D/3D 游戏引擎，Vulkan 渲染后端。**官方仅支持 Linux**（D3 裁决，2026-11-26）。
 
 ## 特性
 
 - **Vulkan 渲染** — 2D 批处理绘制 + 3D PBR/延迟光照管线
-- **跨平台** — Linux (Vulkan/GLFW)，macOS/Windows/Android 可扩展
+- **Linux-only** — 官方支持 Linux (Vulkan/GLFW)；Windows/macOS/Android 分支代码保留但**不维护、不测试、不承诺可用**
 - **模块化** — 图形、音频、输入、UI、网络、文件系统独立模块
 - **FFmpeg 视频播放** — 流式解码，支持 MKV/MP4/H264
 - **FreeType 字体** — 实时 TTF/OTF 渲染，替代预生成字库
@@ -35,7 +35,7 @@
 | gpuCheck 实跑 | `pass=126 fail=0 skip=0` |
 | 单测实跑 | `943 cases, 0 failed, 0 assertions failed` |
 | src 源文件 | 189 个 .cpp |
-| src 总行数 | 102682 |
+| src 总行数 | 100997 |
 | 编译产物着色器 | 47 个 .spv |
 
 <!-- AUTO-STATS:END -->
@@ -81,7 +81,7 @@ make smoke
 # 一条命令全跑：check + smoke
 make ci
 
-# 交叉平台编译检查（MinGW-w64 把 src/ 全量按 Windows 目标编一遍；没工具链时 SKIP）
+# 交叉平台编译检查（experimental，D3：官方 Linux-only；MinGW-w64 按 Windows 目标编一遍；没工具链时 SKIP）
 make crosscheck
 
 # 着色器编译
@@ -98,9 +98,14 @@ make clean
 | 平台 | 默认 | 说明 |
 |------|------|------|
 | Linux | `Vulkan + GLFW` | 已实测（RADV / lavapipe） |
-| Windows | `Vulkan + GLFW` | MinGW-w64 交叉编译已验证能编；链接/运行需在 Windows 上做 |
-| macOS | `Vulkan + GLFW` | 需自行安装 MoltenVK；**未实测** |
-| Android | `GLES` | 无 Vulkan 后端 |
+| Windows | `Vulkan + GLFW` | **不支持（experimental）**：MinGW-w64 交叉编译能编；链接/运行未验证、不维护 |
+| macOS | `Vulkan + GLFW` | **不支持（experimental）**：需自行安装 MoltenVK；未实测、不维护 |
+| Android | `GLES` | **不支持（experimental）**：无 Vulkan 后端，不维护 |
+
+> **平台范围（D3，2026-11-26）**：官方仅支持 Linux。非 Linux 分支代码保留在仓库中（不静默删除能力），
+> 但不维护、不测试、不承诺可用；`make crosscheck` 与 `PLATFORM=windows/macos` 均为 experimental。
+
+以下非 Linux 目标为 **experimental**（D3）：
 
 ```bash
 make PLATFORM=windows          # Vulkan 后端（默认）

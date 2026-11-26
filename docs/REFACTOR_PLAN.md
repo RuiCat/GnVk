@@ -481,7 +481,7 @@ nm -D --defined-only libGN_mini.so | sort | diff abi/baseline.txt -   # 只允�
 | B2 | `GN_Vk.cpp` 拆完：vkRenderTarget / vkOffscreen / vkSwapchain / vkInit + 余量归位（Begin2DPass/RenderFinish→vkFrame2d，Shutdown/WaitIdle→vkDevice，3D 状态/Init3D→vk3dInit） | `src/graphics/_Vulkan/` | G3-0 | ✅ 2026-11-26 四刀完成：GN_Vk.cpp 3690→25（仅上下文实例）；符号变更已登记 abi/changes.md，后三刀零变化。遗留：vkInit.cpp 562 行单体函数，内部阶段拆分登记为后续可选 |
 | B3 | `GN_Array.h` 4016 行 → containers/ 11 头 + 转发聚合头 | `src/core/containers/` | G3-0 | ✅ 2026-11-26：11 片段（memMacros/arrayAlgorithms/iterator/array/bufferMapping/list/listWheel/tempBuf/tree2/smartPtr/nodeTree）+ baseTypes 最小类型头；GN_Array.h 16 行转发头；12 头全部自包含（C10），总基线 67/121→66/133；符号零变化 |
 | B4 | ~~其余超限~~ | `src/ui/`、`src/graphics/_Vulkan/`、`src/core/` | B2/B3 后 | ✅ 2026-11-26：GN_UiBase.cpp 2670→38、GN_Vk.h 1122→49、GN_FormatImgFile.cpp 1041→28（转发 + .inc 片段，单编译单元语义不变） |
-| B6 | 平台拆分 + Linux-only 如实声明（cross 目标标 experimental；README/GETTING_STARTED 同步） | `src/platform/`、`docs/` | B4 | 待做 |
+| B6 | ~~平台拆分 + Linux-only 如实声明~~ | `src/platform/`、`docs/` | B4 | ✅ 2026-11-26：GN_Sys.cpp 1722→36 + 7 个 .inc 片段（预处理平衡点切分）；README/Makefile 声明 Linux-only，cross 目标标 experimental |
 | B7 | 上下文收敛（c4）：sEngineContext + 默认上下文门面 → 渲染状态 → 资源缓存 → 输入/UI → 删 static（136 个） | 全仓（**串行**，一次一个模块） | B2–B6 | 待做 |
 | B8 | CMake + presets + make 薄封装；双构建 parity（同一单测/smoke 跑两套产物）后删旧规则 | `CMakeLists.txt`、`cmake/`、`Makefile` | B2–B6（可与 B7 并行） | 待做 |
 | B9 | 质量门全量（c7）：去 -fpermissive、C++17、告警预算 19385→<500、字符串安全清零、解析器 fuzz | 全仓 | B7/B8 | 待做 |

@@ -685,8 +685,8 @@ doc-check:
 	@echo "$(YELLOW)💬 校验头文件注释覆盖...$(RESET)"
 	@bash tests/tools/check_comments.sh
 
-# ── 交叉平台编译检查（只编译不链接）──
-# 用 MinGW-w64 把 src/ 全量按 Windows 目标编一遍，确保 Vulkan 后端不只"在 Linux 上能编"。
+# ── 交叉平台编译检查（只编译不链接；experimental，D3：官方 Linux-only）──
+# 用 MinGW-w64 把 src/ 全量按 Windows 目标编一遍；能编≠支持，链接/运行未验证。
 # 没有交叉工具链时退出码 2 = SKIP（没装 g++-mingw-w64-x86-64 就跳过）。
 .PHONY: crosscheck
 crosscheck:
@@ -970,7 +970,7 @@ help:
 	@echo "║    make smoke               示例无窗口冒烟       ║"
 	@echo "║    make ci                  check + smoke 全跑   ║"
 	@echo "║    make gpuCheck            P1b GPU 管线验收     ║"
-	@echo "║    make crosscheck          Windows 交叉编译检查 ║"
+	@echo "║    make crosscheck          Windows 交叉编译实验 ║"
 	@echo "║    make lint                分层依赖检查           ║"
 	@echo "║    make stats               生成文档统计数字       ║"
 	@echo "║    make doc-check           校验文档数字是否过时   ║"
