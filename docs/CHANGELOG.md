@@ -2,6 +2,20 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B4 第二刀：GN_Vk.h 1122 → 49 行转发 + 5 个片段
+
+move-only 拆分（REFACTOR_PLAN §13 B4），单测 943/0，符号名 diff 为零。
+
+| 片段（.inc） | 行数 | 内容 |
+|---|---:|---|
+| vkImageTypes | 147 | sIMAGE + 3D 顶点/UBO/push constant 类型 |
+| vkContext | 294 | 兼容类型 + GN_VkContext 全局状态 |
+| vkApi2d | 104 | 初始化/关闭/resize + 2D API + scissor |
+| vkApi3d | 449 | 3D 渲染 API（GN_USING_3D 守卫原样） |
+| vkTestHooks | 83 | 测试钩子 |
+
+B4 余量：GN_FormatImgFile.cpp（1041）按编解码切。
+
 ## 2026-11-26 — B4 第一刀：GN_UiBase.cpp 2670 → 38 行转发 + 8 个实现片段
 
 move-only 拆分（REFACTOR_PLAN §13 B4），单测 943/0，符号名 diff 为零。

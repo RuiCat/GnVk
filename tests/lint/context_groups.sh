@@ -14,8 +14,9 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT" || exit 2
-HDR=src/graphics/_Vulkan/GN_Vk.h
-[ -f "$HDR" ] || { echo "[SKIP] 找不到 $HDR"; exit 2; }
+# 2026-11-26 B4：GN_Vk.h 拆成转发头 + .inc 片段，结构体随片段迁移；按内容定位而非写死路径
+HDR=$(grep -rl '^struct GN_VkContext {' src/graphics/_Vulkan/ 2>/dev/null | head -1)
+[ -n "$HDR" ] && [ -f "$HDR" ] || { echo "[SKIP] 找不到 GN_VkContext 定义"; exit 2; }
 
 # 提取结构体正文（到构造函数为止）
 BODY=$(awk '/^struct GN_VkContext \{/,/^    GN_VkContext\(\)/' "$HDR")
