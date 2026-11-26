@@ -2,6 +2,21 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B4 第三刀（B4 完结）：GN_FormatImgFile.cpp 1041 → 28 行转发
+
+move-only 按编解码拆分（REFACTOR_PLAN §13 B4），单测 943/0，符号名 diff 为零。
+
+| 片段（.inc） | 行数 | 内容 |
+|---|---:|---|
+| fmtBmp | 142 | BMP 头结构 + 加载/保存 |
+| fmtTga | 251 | TGA 头 + RLE 解包宏 + 加载/保存 |
+| fmtPng | 192 | PNG 读取器（libpng）+ 加载/保存 |
+| fmtHdr | 299 | HDR 头 + RGBE + 加载/保存 |
+| fmtPixelUtil | 135 | 像素工具（**全仓无调用的死代码，登记待删**） |
+
+**B4 完结**：三个超限文件全部拆完（GN_UiBase 2670→38 / GN_Vk.h 1122→49 / GN_FormatImgFile 1041→28）。
+下一步 B6（平台拆分 + Linux-only 声明）；B7/B8 可并行。
+
 ## 2026-11-26 — B4 第二刀：GN_Vk.h 1122 → 49 行转发 + 5 个片段
 
 move-only 拆分（REFACTOR_PLAN §13 B4），单测 943/0，符号名 diff 为零。
