@@ -166,3 +166,20 @@ TEST_CASE(stringDirName) {
 TEST_CASE(stringToKey) {
     CHECK_STREQ(GN_StrToKey("key=value", '='), "value");
 }
+
+// ── 2026-11-26 缺陷修复回归：GN_StrExtractToData 闭合符分支旧写法重复判 key，
+// 永远进不来，提取结果全是空串。──
+TEST_CASE(stringExtractToDataClosingKey) {
+    char buf[] = "{a} {bc} {d}";
+    P<P<char>> r = GN_StrExtractToData(buf, '{', '}');
+    CHECK_EQ(r.Num(), 3u);
+    CHECK_STREQ(r[0], "a");
+    CHECK_STREQ(r[1], "bc");
+    CHECK_STREQ(r[2], "d");
+}
+
+TEST_CASE(stringExtractToDataUnclosed) {
+    char buf[] = "{a";
+    P<P<char>> r = GN_StrExtractToData(buf, '{', '}');
+    CHECK_EQ(r.Num(), 0u); // 未闭合：计数循环提前返回，不产出半个结果
+}

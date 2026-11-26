@@ -38,6 +38,7 @@ inline T GN_Mix(T dst, T src, float a) {
 struct GN_API GT_sVALUE_CHANGE_BASE {
     static GN::sLIST<GT_sVALUE_CHANGE_BASE *> valueProcList; //变量插值处理列表 用来记录所有的变量插值任务
 
+    virtual ~GT_sVALUE_CHANGE_BASE() {} //经基类指针删除（GN_ValueChangeUpdateAll），析构必须虚
     virtual bool ValueChange() { return true; } //变量插值更变  返回插值是否完成
 };
 struct GN_API GT_sVALUE_CHANGE_CR : public GT_sVALUE_CHANGE_BASE //其它类型插值结构

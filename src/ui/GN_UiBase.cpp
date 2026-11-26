@@ -1027,7 +1027,7 @@ void GNu::cSLIDER::UpdateRun(unsigned int updatetime, sUI_LEVEL *parent) {
         } else {
             short iw2 = iw < 0 ? -iw : iw, ih2 = ih < 0 ? -ih : ih;
             zState = 0;
-            if(RecvInputUiObject == this && ((w > h ? GNg::ViewCur->HitRange(dx - (iw2 >> 1), dy + (rng.h - ih2 >> 1), rng.w + iw2, ih2) : GNg::ViewCur->HitRange(dx + (rng.w - iw2 >> 1), dy - (ih2 >> 1), iw2, rng.h + ih2)))) {
+            if(RecvInputUiObject == this && ((w > h ? GNg::ViewCur->HitRange(dx - (iw2 >> 1), dy + ((rng.h - ih2) >> 1), rng.w + iw2, ih2) : GNg::ViewCur->HitRange(dx + ((rng.w - iw2) >> 1), dy - (ih2 >> 1), iw2, rng.h + ih2)))) {
                 if(GN::Mouse1[GM_LEFT]) zState = 2;
                 else zState = 1;
             }
@@ -2495,9 +2495,9 @@ unsigned int GNu::cPALETTE::DataLoad(cSHARE_DATA *share_objs, const uint8 *data)
     rpos = zNearAreaDataLoad(rpos);
     memcpy(&zOffsetSheep, rpos, 4);
     rpos += 4;
-    memcpy(&zColor, rpos, 4);
+    memcpy((void *)&zColor, rpos, 4); //sCOLOR 是 4 字节 POD 布局的 union
     rpos += 4;
-    memcpy(&zColorArrow, rpos, 4);
+    memcpy((void *)&zColorArrow, rpos, 4);
     rpos += 4;
     memcpy(&aAlphaSet, rpos, 1);
     rpos += 1;
@@ -2512,7 +2512,7 @@ unsigned int GNu::cPALETTE::DataLoad(cSHARE_DATA *share_objs, const uint8 *data)
     rpos += 4;
     if(csize) {
         aTable.New(csize >> 2);
-        memcpy((GNg::sCOLOR *)aTable, rpos, csize);
+        memcpy((void *)(GNg::sCOLOR *)aTable, rpos, csize);
         rpos += csize;
     }
     GT_TMP_PALETTE_INIT_TO_DATA(zColor)

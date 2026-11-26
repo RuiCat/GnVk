@@ -171,3 +171,10 @@ TEST_CASE(clothNormalsUnitAfterStep) {
         CHECK_NEAR(vecLength(normals[i]), 1.0f, 1e-3f);
     }
 }
+
+// ── 2026-11-26：create 封顶回归（nx*ny 按 int 相乘，防溢出）──
+TEST_CASE(clothCreateRejectsOversizedGrid) {
+    cCLOTH cloth;
+    CHECK(!cloth.create(makeDesc(5000, 5000)));
+    CHECK(!cloth.create(makeDesc(2, 5000)));
+}

@@ -267,7 +267,7 @@ void GNu::cTEXT_INPUT::InputText(const char *text, unsigned short len) {
 #endif
                         } //过滤掉其它未知字符 未知字符用■来代替
                         if((text_code[0] & 128) && ai + 1 < add_num) {
-                            if(text_code[0] < 0xa1 || text_code[0] > 0xf7 || !(text_code[1] & 128) || text_code[1] < (char)0xa0) {
+                            if(text_code[0] < 0xa1 || text_code[0] > 0xf7 || !(text_code[1] & 128) || text_code[1] < 0xa0) { //尾字节下限：旧写法 (char)0xa0=-96，对 uint8 恒假，检查是死代码
                                 filter_text[in_count++] = 0xa1;
                                 filter_text[in_count++] = 0xf6;
                             } else {
@@ -369,10 +369,8 @@ void GNu::cTEXT_INPUT::SetPrimary(float nearU, float nearV, bool refer_focusU, b
             int fx = _rw_range->x, fy = _rw_range->y,
                 fw = _rw_range->w, fh = _rw_range->h;
             if(zTextOut.zParame.erect_print) {
-                if(zTextOut.zParame.overturn_print) //竖向翻转输出
-                    fh = fh < 0 ? (zDlgh >> 2) + 1 : (fh >> 2) + 1;
-                else //竖向顺向输出
-                    fh = fh < 0 ? (zDlgh >> 2) + 1 : (fh >> 2) + 1;
+                //竖向输出：翻转/顺向只改方向不改高度占用，两分支本就相同
+                fh = fh < 0 ? (zDlgh >> 2) + 1 : (fh >> 2) + 1;
             } else {
                 if(zTextOut.zParame.overturn_print) { //横向翻转输出
                     if(fw < 0) fw = zDlgw;
@@ -597,7 +595,7 @@ void GNu::cTEXT_INPUT::zOffsetBidForErectPrint(bool is_enter, bool is_back) {
             }
         } else {
             GNg::sDRAW_RANGE *_rng_data = zTextOut.zDrawRngData + zVid;
-            if(is_back ? (_rng_data->x > (zDlgx + zDlgw - (_rng_data->w << 1))) : (_rng_data->x < (zDlgx + (_rng_data->w << 3 - ((zBuf[_rng_data->strid] & 128) >> 7))))) {
+            if(is_back ? (_rng_data->x > (zDlgx + zDlgw - (_rng_data->w << 1))) : (_rng_data->x < (zDlgx + (_rng_data->w << (3 - ((zBuf[_rng_data->strid] & 128) >> 7)))))) {
                 zOffsetxtg -= (zDlgw >> zOffsetN1);
             }
         }
@@ -627,7 +625,7 @@ void GNu::cTEXT_INPUT::zOffsetBidForErectPrint(bool is_enter, bool is_back) {
     GT_TMP_TEXTIN_NEXT_BIT(XY, IS_ENTER, RXY, RWH, ___, _T_, +, zTextOut.zDrawRngData[zVid].RXY < (zDlg##RXY + (zTextOut.zDrawRngData[zVid].RWH << 1)))
 
 void GNu::cTEXT_INPUT::zOffsetCtrlNextForErectPrint(bool is_enter) {
-    GT_TMP_TEXTIN_NEXT_BIT(y, is_enter, x, w, zDlgh, -zDlgh, -, zTextOut.zDrawRngData[zVid].x > (zDlgx + zDlgw - (zTextOut.zDrawRngData[zVid].w << 3 - ((zBuf[zTextOut.zDrawRngData[zVid].strid] & 128) >> 7))));
+    GT_TMP_TEXTIN_NEXT_BIT(y, is_enter, x, w, zDlgh, -zDlgh, -, zTextOut.zDrawRngData[zVid].x > (zDlgx + zDlgw - (zTextOut.zDrawRngData[zVid].w << (3 - ((zBuf[zTextOut.zDrawRngData[zVid].strid] & 128) >> 7)))));
 }
 void GNu::cTEXT_INPUT::zOffsetCtrlNext(bool is_enter, short ead, short ad) {
     GT_TMP_TEXTIN_NEXT_BIT(x, is_enter, y, h, ead, ad, -, zTextOut.zDrawRngData[zVid].y > (zDlgy + zDlgh - (zTextOut.zDrawRngData[zVid].h << 1)));
@@ -691,9 +689,9 @@ void GNu::cTEXT_INPUT::zOffsetCtrlMouseSelectErectPrint(short mousem_x, short mo
             GT_GOTO_TextInSetSelectOfs##XY : zMousePass = true;                                                                                    \
             zVmx = mousem_x, zVmy = mousem_y;                                                                                                      \
             if(mousem_##XY - zDlg##XY > (short)((float)zDlg##WH * ParamUV) + zOffset##XY) /*选到看不到的字符后面*/                                 \
-                zOffset##XY##tg += (zDlg##WH >> zOffsetN2 + 1);                                                                                    \
+                zOffset##XY##tg += ((zDlg##WH >> zOffsetN2) + 1);                                                                                    \
             else /*选到看不到的字符前面*/                                                                                                          \
-                zOffset##XY##tg -= (zDlg##WH >> zOffsetN2 + 1);                                                                                    \
+                zOffset##XY##tg -= ((zDlg##WH >> zOffsetN2) + 1);                                                                                    \
         }                                                                                                                                          \
         /*-------------------------------------------------------------------------------------------------------------*/                          \
         if(zVid < zTextOut.GetVisualStrCount()) {                                                                                                  \

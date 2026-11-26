@@ -71,12 +71,6 @@ bool deepestAt(const GNg::sVEC3 &center, const sCAPSULE_SWEEP_PARAMS &p,
                 any = true;
             }
         }
-        if(!any) {
-            // 全部点的穿透量都是 0：仍然算命中（贴上了），法线用它
-            best = 0.0f;
-            bestNormal = m.aNormal;
-            any = true;
-        }
     }
     if(!any) return false;
     outNormal = bestNormal;
@@ -111,6 +105,81 @@ float pointSegmentDistSq(const GNg::sVEC3 &p, const GNg::sVEC3 &s0, const GNg::s
     if(t < 0.0f) t = 0.0f;
     if(t > 1.0f) t = 1.0f;
     return lenSq(sub(p, add(s0, mul(d, t))));
+}
+
+// 两线段最近距离平方（Ericson 算法）：覆盖"最近点对都在线段内部"的斜交情形。
+float segmentSegmentDistSq(const GNg::sVEC3 &p1, const GNg::sVEC3 &q1,
+                           const GNg::sVEC3 &p2, const GNg::sVEC3 &q2) {
+    const GNg::sVEC3 d1 = sub(q1, p1);
+    const GNg::sVEC3 d2 = sub(q2, p2);
+    const GNg::sVEC3 r = sub(p1, p2);
+    const float a = lenSq(d1);
+    const float e = lenSq(d2);
+    const float f = dot(d2, r);
+    float sc, tc;
+    if(a <= 1.0e-12f && e <= 1.0e-12f) return lenSq(r); // 都退化成点
+    if(a <= 1.0e-12f) {
+        sc = 0.0f;
+        tc = f / e;
+        if(tc < 0.0f) tc = 0.0f;
+        if(tc > 1.0f) tc = 1.0f;
+    } else {
+        const float c = dot(d1, r);
+        if(e <= 1.0e-12f) {
+            tc = 0.0f;
+            sc = -c / a;
+            if(sc < 0.0f) sc = 0.0f;
+            if(sc > 1.0f) sc = 1.0f;
+        } else {
+            const float b = dot(d1, d2);
+            const float denom = a * e - b * b;
+            if(denom > 1.0e-12f) {
+                sc = (b * f - c * e) / denom;
+                if(sc < 0.0f) sc = 0.0f;
+                if(sc > 1.0f) sc = 1.0f;
+            } else {
+                sc = 0.0f; // 平行：任取一端，下面按 t 钳制重算
+            }
+            tc = (b * sc + f) / e;
+            if(tc < 0.0f) {
+                tc = 0.0f;
+                sc = -c / a;
+                if(sc < 0.0f) sc = 0.0f;
+                if(sc > 1.0f) sc = 1.0f;
+            } else if(tc > 1.0f) {
+                tc = 1.0f;
+                sc = (b - c) / a;
+                if(sc < 0.0f) sc = 0.0f;
+                if(sc > 1.0f) sc = 1.0f;
+            }
+        }
+    }
+    const GNg::sVEC3 c1 = add(p1, mul(d1, sc));
+    const GNg::sVEC3 c2 = add(p2, mul(d2, tc));
+    return lenSq(sub(c1, c2));
+}
+
+// 线段是否穿过三角形内部（Möller–Trumbore，交点参数 t∈[0,1]）。
+// 穿过时轴到三角形距离为 0，而端点/顶点/边距离全都 >0，必须单独测。
+bool segmentIntersectsTriangle(const GNg::sVEC3 &p0, const GNg::sVEC3 &p1,
+                               const GNg::sVEC3 &a, const GNg::sVEC3 &b, const GNg::sVEC3 &c) {
+    const GNg::sVEC3 dir = sub(p1, p0);
+    const GNg::sVEC3 e1 = sub(b, a);
+    const GNg::sVEC3 e2 = sub(c, a);
+    const GNg::sVEC3 h = v3(dir.y * e2.z - dir.z * e2.y, dir.z * e2.x - dir.x * e2.z,
+                            dir.x * e2.y - dir.y * e2.x);
+    const float det = dot(e1, h);
+    if(std::fabs(det) < 1.0e-12f) return false; // 平行/共面：交给端点与边距离
+    const float inv = 1.0f / det;
+    const GNg::sVEC3 sv = sub(p0, a);
+    const float u = inv * dot(sv, h);
+    if(u < 0.0f || u > 1.0f) return false;
+    const GNg::sVEC3 q = v3(sv.y * e1.z - sv.z * e1.y, sv.z * e1.x - sv.x * e1.z,
+                            sv.x * e1.y - sv.y * e1.x);
+    const float v = inv * dot(dir, q);
+    if(v < 0.0f || u + v > 1.0f) return false;
+    const float t = inv * dot(e2, q);
+    return t >= 0.0f && t <= 1.0f;
 }
 
 // 点到三角形的最近距离平方。
@@ -178,27 +247,37 @@ float capsuleMinDistance(const GNg::sVEC3 &center, const sCAPSULE_SWEEP_PARAMS &
     GNg::sVEC3 e0, e1;
     capsuleSegment(center, params.aHalfHeight, e0, e1);
 
-    // **精确计算**：胶囊表面到三角形的最短距离 = min over 三角形上所有点到胶囊轴的距离
-    // 减去半径。点到三角形的最近点用三分支解析解；对胶囊轴取端点与中点做采样
-    // （胶囊轴是一条线段，三角形是平面片，两者最近点必在"某端点到三角形"或
-    //  "三角形某点到轴线段"上；两点采样 + 三角形三顶点到轴的距离可覆盖）。
+    // **精确计算**：胶囊表面到三角形的最短距离 = 轴线段到三角形的距离减去半径。
+    // 线段与三角形的最近点对只可能出现在四处，逐一精确计算：
+    //   轴端点→三角形（解析解）、三角形顶点→轴（点到线段）、
+    //   三角形边↔轴（线段到线段）、轴穿过三角形内部（相交测试，距离 0）。
+    // 旧版只采样"端点+中点"，会漏掉最近点对都在段内部的斜交位形：
+    // 实测轴 (5,-10,1)-(5,2,1) 对边 (-10,0,0)-(10,0,0)，真距离 1，采样给 2.24
+    // ⇒ 距离被高估，保守推进跨步过大，可能漏穿薄墙。
     //
     // **为什么不用"放大半径试探"**（第一版的做法）：它返回的是离散档位，
     // 误差可达 0.15 m，导致保守推进要么走太小（迭代用尽）要么跨过去（漏检）。
     float best = 1.0e30f;
     for(uint32_t i = 0; i < triangleCount; ++i) {
         const sSWEEP_TRIANGLE &t = triangles[i];
-        // 胶囊轴的两个端点 + 中点，到三角形的距离
-        const GNg::sVEC3 mid = mul(add(e0, e1), 0.5f);
-        const GNg::sVEC3 probes[3] = {e0, mid, e1};
-        for(int k = 0; k < 3; ++k) {
+        // 轴穿过三角形内部：距离 0（端点/顶点/边距离全都 >0，必须单独测）
+        if(segmentIntersectsTriangle(e0, e1, t.aA, t.aB, t.aC)) return -params.aRadius;
+        // 轴的两个端点到三角形（覆盖最近点在三角形内部/边上、轴侧取端点的情形）
+        const GNg::sVEC3 probes[2] = {e0, e1};
+        for(int k = 0; k < 2; ++k) {
             const float d2 = pointTriangleDistSq(probes[k], t.aA, t.aB, t.aC);
             if(d2 < best) best = d2;
         }
-        // 三角形三个顶点到胶囊轴的距离（覆盖"三角形很大、轴很短"的情形）
+        // 三角形三个顶点到胶囊轴（覆盖"三角形很大、轴很短"的情形）
         const GNg::sVEC3 verts[3] = {t.aA, t.aB, t.aC};
         for(int k = 0; k < 3; ++k) {
             const float d2 = pointSegmentDistSq(verts[k], e0, e1);
+            if(d2 < best) best = d2;
+        }
+        // 三角形三条边到轴：精确线段-线段距离（覆盖最近点对都在段内部的斜交情形）
+        const GNg::sVEC3 edgeEnds[3][2] = {{t.aA, t.aB}, {t.aB, t.aC}, {t.aC, t.aA}};
+        for(int k = 0; k < 3; ++k) {
+            const float d2 = segmentSegmentDistSq(e0, e1, edgeEnds[k][0], edgeEnds[k][1]);
             if(d2 < best) best = d2;
         }
     }
@@ -295,23 +374,38 @@ sCAPSULE_SWEEP_RESULT sweepCapsuleAgainstTriangles(const GNg::sVEC3 &from, const
         // 快接触：二分定位接触点，一次搞定（不再小步爬）
         if(clearance < kNearThreshold) {
             float lo = tSafe; // 已知 clearance > skin
-            float hi = 1.0f;
-            // 先找一个确认"接触"的 hi
+            float hi = lo;
+            // 找确认"接触"的 hi。探针间距**不超过半径**：正面撞墙时"clearance ≤ skin"
+            // 的窗口宽约 2×半径（含穿透侧），间距 ≤ 半径保证至少一个探针落进窗口。
+            // 旧版把剩余行程均分 8 份，行程大时间距远超墙厚，会"探穿"薄墙后
+            // 宣布剩余段全程安全 —— 穿墙漏洞。
+            // 不用保守推进（步长=clearance）：贴着地面滑行时 clearance 恒为毫米级，
+            // 步长趋于 0，迭代预算内走不到墙边。
+            // 已知边界：路径恰好擦过顶点/棱的掠射接触，窗口可能窄于探针间距而漏掉。
             bool foundHi = false;
-            float hiClear = 0.0f;
-            for(int probe = 1; probe <= 8; ++probe) {
-                const float cand = lo + (1.0f - lo) * (float)probe / 8.0f;
-                hiClear = capsuleMinDistance(lerp(from, to, cand), params, triangles, triangleCount);
-                if(!(hiClear > params.aSkinWidth)) {
+            const float probeStep = params.aRadius / travel;
+            for(int probe = 0; probe < 8; ++probe) {
+                float cand = hi + probeStep;
+                if(cand > 1.0f) cand = 1.0f;
+                const float c =
+                    capsuleMinDistance(lerp(from, to, cand), params, triangles, triangleCount);
+                if(!(c > params.aSkinWidth)) {
                     hi = cand;
                     foundHi = true;
                     break;
                 }
+                hi = cand;
+                if(hi >= 1.0f) break;
             }
             if(!foundHi) {
-                // 剩余段全程保持 clearance —— 直接走完
-                tSafe = 1.0f;
-                break;
+                if(hi >= 1.0f) {
+                    tSafe = 1.0f; // 探针以 ≤半径 的间距覆盖到终点：全程安全
+                    break;
+                }
+                // 探针预算用尽但没到终点：从已探明的安全点继续外层循环，
+                // 不能宣布剩余段安全（那正是旧版的穿墙路径）。
+                tSafe = hi;
+                continue;
             }
             for(uint32_t bisect = 0; bisect < 16; ++bisect) {
                 const float mid = (lo + hi) * 0.5f;

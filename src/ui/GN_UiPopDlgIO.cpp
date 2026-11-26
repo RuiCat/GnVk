@@ -247,7 +247,7 @@ P<GNu::iUI_OBJECT> GNu::cUI_SIM_DIALOG::Clone() {
     void *ts_items_bk = _ui_dlg->zTsItems;
     *_ui_dlg = *this;
     _ui_dlg->zTsItems = ts_items_bk;
-    memset(&(_ui_dlg->zChild), 0, sizeof(_ui_dlg->zChild));
+    memset((void *)&(_ui_dlg->zChild), 0, sizeof(_ui_dlg->zChild)); //浅拷贝后置零脱离所有权；sARRAY_VEC 是 POD 布局，无虚表
     _ui_dlg->zCaption = 0;
     GN_StrcpyData(_ui_dlg->zCaption, zCaption);
     _ui_dlg->zFileName = 0;
@@ -259,7 +259,7 @@ P<GNu::iUI_OBJECT> GNu::cUI_SIM_DIALOG::Clone() {
     _ui_dlg->zTmpRangeRect.Delete();
     _ui_dlg->zSetTool.Delete();
     _ui_dlg->zIsDetailSet = false;
-    memset(&(_ui_dlg->zSound), 0, sizeof(_ui_dlg->zSound));
+    memset((void *)&(_ui_dlg->zSound), 0, sizeof(_ui_dlg->zSound)); //cSOUND_SRC 仅一个 void* 成员，无虚表；置零脱离所有权
     if(zSouObj) _ui_dlg->zSound.InitToData(zSouObj);
     _ui_dlg->zValueChangeArg = (cSIM_DIALOGEX *)_ui_dlg;
     _ui_dlg->zFather = 0;

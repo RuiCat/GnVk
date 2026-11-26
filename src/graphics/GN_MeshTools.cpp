@@ -16,6 +16,8 @@ namespace {
 
 // 位置量化精度：0.1 mm。与 FBX/Blender 导出的顶点重合判定一致。
 const float kPositionQuantum = 10000.0f;
+// 可量化位置上限：×kPositionQuantum = 2e9 < INT32_MAX，防 lround→int32 回绕把无关顶点焊在一起。
+const float kMaxQuantizablePosition = 200000.0f;
 // 长度小于它就当零（float 下 1e-12 已是"完全抵消"的量级）。
 const float kEpsilon = 1.0e-12f;
 
@@ -141,6 +143,10 @@ bool weldNormalsByPosition(float *vertices, uint32_t vertexCount, const uint32_t
         const float *p = &vertices[v * layout.aStride + layout.aPositionOffset];
         if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) {
             return false;
+        }
+        if (std::fabs(p[0]) > kMaxQuantizablePosition || std::fabs(p[1]) > kMaxQuantizablePosition ||
+            std::fabs(p[2]) > kMaxQuantizablePosition) {
+            return false; // 量化键会溢出 int32：不修改数据，直接拒绝
         }
     }
 
@@ -374,7 +380,6 @@ bool matchNameFilter(const char *name, const char *filter) {
     }
     const size_t filterLength = std::strlen(filter);
     size_t cursor = 0;
-    bool sawPattern = false; // 只有逗号/空白的 filter 是笔误：不命中任何网格，暴露问题
     while (cursor < filterLength) {
         // 跳过逗号与空白
         while (cursor < filterLength && (filter[cursor] == ',' || filter[cursor] == ' ' ||
@@ -390,13 +395,12 @@ bool matchNameFilter(const char *name, const char *filter) {
             --end;
         }
         if (end > begin) {
-            sawPattern = true;
             if (equalsIgnoreCase(name, &filter[begin], end - begin)) {
                 return true;
             }
         }
     }
-    (void)sawPattern;
+    // 只有逗号/空白的 filter 是笔误：不命中任何网格，暴露问题
     return false;
 }
 

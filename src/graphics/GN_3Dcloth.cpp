@@ -155,6 +155,8 @@ cCLOTH::~cCLOTH() {}
 
 bool cCLOTH::create(const sCLOTH_DESC &desc) {
     if(desc.aNx < 2 || desc.aNy < 2) return false;
+    // nx*ny 按 int 相乘：封顶防溢出；4096²=16M 顶点已远超实用布料规模。
+    if(desc.aNx > 4096 || desc.aNy > 4096) return false;
     if(!(desc.aSpacing > 0.0f) || !std::isfinite(desc.aSpacing)) return false;
     if(!(desc.aMass > 0.0f) || !std::isfinite(desc.aMass)) return false;
     if(!(desc.aCompliance >= 0.0f) || !std::isfinite(desc.aCompliance)) return false;
@@ -461,7 +463,6 @@ bool cCLOTH::pushOutOfMesh(const sMESH_COLLIDER &mesh, GNg::sVEC3 &position,
                     const GNg::sVEC3 projected = subVec(position, scaleVec(normal, signedDistance));
                     if(lengthSqVec(subVec(projected, closest)) > kFootprintToleranceSq) continue;
                     const float penetration = -signedDistance;
-                    if(penetration + kMeshSlop < bestPenetration) continue;
                     if(penetration <= bestPenetration) continue;
                     bestPenetration = penetration;
                     bestNormal = normal;

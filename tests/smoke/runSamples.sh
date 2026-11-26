@@ -26,6 +26,12 @@ FRAMES="${GN_HEADLESS_FRAMES:-8}"
 FILTER="${SMOKE_FILTER:-}"
 LIB="${LD_LIBRARY_PATH:-}"
 
+# 未显式指定 VK_ICD_FILENAMES 时自动指向 sysroot 里的 lavapipe（与 tests/tools/gen_stats.sh 同一做法），
+# 容器里 make ci 不再因为没 export 环境变量而整体 SKIP。
+if [ -z "${VK_ICD_FILENAMES:-}" ] && [ -f /work/.sbx/sysroot/usr/share/vulkan/icd.d/lvp_icd.json ]; then
+    export VK_ICD_FILENAMES=/work/.sbx/sysroot/usr/share/vulkan/icd.d/lvp_icd.json
+fi
+
 pass=0
 fail=0
 skip=0

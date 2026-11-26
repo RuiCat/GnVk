@@ -953,9 +953,9 @@ GN_INIT_API void GN_InputProc(unsigned int nTime) {
     } else {
         for(; itv != etv; ++itv) {
             pv = (*itv);
-            pv->softKeyboardX = -100000;
+            pv->softKeyboardX = -32768; //short 装不下 -100000（溢出截断成 +31072，符号反了）；用 SHRT_MIN 当屏外哨兵
             pv->softKeyboardW = 0;
-            pv->softKeyboardY = -100000;
+            pv->softKeyboardY = -32768; //同上
             pv->softKeyboardH = 0;
         }
     }

@@ -471,3 +471,47 @@ TEST_CASE(characterSweptStepDoesNotClimbSteepSlope) {
     // 不该爬到高处（被当墙挡住）
     CHECK(character.Position().y < 2.5f);
 }
+
+// ── 2026-11-26 缺陷修复回归 ──
+
+TEST_CASE(capsuleMinDistanceSkewEdgeExact) {
+    // 最近点对都在段内部（斜交）：轴 (5,-10,1)-(5,2,1)，三角形边 (-10,0,0)-(10,0,0)。
+    // 真轴距 1 ⇒ 表面距离 0.7。旧"端点+中点"采样给 2.236（高估 ⇒ 保守推进可能穿墙）。
+    sCAPSULE_SWEEP_PARAMS p = makeParams();
+    p.aHalfHeight = 6.0f;
+    sSWEEP_TRIANGLE t;
+    t.aA = GNg::sVEC3{-10.0f, 0.0f, 0.0f};
+    t.aB = GNg::sVEC3{10.0f, 0.0f, 0.0f};
+    t.aC = GNg::sVEC3{10.0f, 0.0f, -10.0f};
+    const float d = capsuleMinDistance(GNg::sVEC3{5.0f, -4.0f, 1.0f}, p, &t, 1);
+    CHECK(std::fabs(d - 0.7f) < 1.0e-3f);
+}
+
+TEST_CASE(capsuleMinDistancePiercingIsNegativeRadius) {
+    // 轴穿过三角形内部：端点/顶点/边距离全都 >0，必须靠相交测试给出 0 轴距。
+    sCAPSULE_SWEEP_PARAMS p = makeParams();
+    sSWEEP_TRIANGLE floor = makeFloor(0.0f);
+    const float d = capsuleMinDistance(GNg::sVEC3{2.0f, 0.0f, -2.0f}, p, &floor, 1);
+    CHECK(std::fabs(d + kRadius) < 1.0e-4f);
+}
+
+TEST_CASE(sweepSlideAlongFloorIntoThinWall) {
+    // 贴地滑行（clearance 恒 0.01）撞薄墙：旧近接触分支把剩余行程均分 8 份探测，
+    // 探针间距 0.75m 全部落在接触窗口 [2.32,2.92] 之外 ⇒ 宣布全程安全、穿墙。
+    // 修复后探针间距 ≤ 半径，必有一个落进窗口。
+    sCAPSULE_SWEEP_PARAMS p = makeParams();
+    p.aMaxIterations = 64;
+    sSWEEP_TRIANGLE tris[3];
+    tris[0] = makeFloor(-0.86f); // 胶囊底 -0.85，缝隙 0.01
+    tris[1].aA = GNg::sVEC3{2.62f, -10.0f, -10.0f};
+    tris[1].aB = GNg::sVEC3{2.62f, 10.0f, 10.0f};
+    tris[1].aC = GNg::sVEC3{2.62f, 10.0f, -10.0f};
+    tris[2].aA = GNg::sVEC3{2.62f, -10.0f, -10.0f};
+    tris[2].aB = GNg::sVEC3{2.62f, -10.0f, 10.0f};
+    tris[2].aC = GNg::sVEC3{2.62f, 10.0f, 10.0f};
+    const sCAPSULE_SWEEP_RESULT r = sweepCapsuleAgainstTriangles(
+        GNg::sVEC3{0.0f, 0.0f, 0.0f}, GNg::sVEC3{6.0f, 0.0f, 0.0f}, p, tris, 3);
+    CHECK(r.aHit);
+    CHECK(r.aPosition.x > 2.2f);  // 停在 2.62-0.3-skin ≈ 2.319
+    CHECK(r.aPosition.x < 2.35f);
+}

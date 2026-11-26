@@ -61,7 +61,52 @@ make unit    # 438 cases / 0 failed，含 frameCopy* 4 例
 rg -n '^[A-Za-z_][A-Za-z0-9_:<>]*[ \*]+(GT_|z)[A-Za-z0-9_]+(\[[^]]*\])?\s*(=|;)' src -g '*.cpp' | wc -l   # 61
 ```
 
-## 5. 相关台账
+## 5. 2026-11-26 扩展警告审查批（DA-1126-*）
+
+方法：GCC 13 扩展警告（`-Wall -Wextra -Wshadow -Wduplicated-cond -Wduplicated-branches -Wlogical-op
+-Wuse-after-free=2 -Woverloaded-virtual`）全量语法检查（19385 条，多为头文件风格噪声）
++ `-fanalyzer` 对 13 个高风险模块的跨过程分析（**0 报告**）+ 近两周新增模块人工审查。
+修复明细与回归测试见 `docs/CHANGELOG.md` 2026-11-26 条目；本节只留锚点与复算入口。
+
+### 5.1 已修复（13）
+
+| ID | 锚点 | 复算 |
+|---|---|---|
+| DA-1126-01 提取闭合符分支恒不进入 | `src/core/GN_String.cpp:356` | `make unit` → `stringExtractToData*` 2 例 |
+| DA-1126-02 HDR 保存格式判定恒真 | `src/core/GN_FormatImgFile.cpp:839` | `make unit` → `hdrSave*` 2 例 |
+| DA-1126-03 软键盘哨兵 short 溢出变正 | `src/input/GN_Input.cpp:956,958` | `grep -n 'softKeyboard[XY] = ' src/input/GN_Input.cpp` → -32768 |
+| DA-1126-04 声音宏实参自初始化 UB | `src/core/GN_FrameRc.cpp:512` | 扩展警告 `-Wsequence-point` → 0 |
+| DA-1126-05 函数地址当条件恒真 | `src/ui/GN_UI.cpp:735,740` | `grep -n 'RenderTargetSupport()' src/ui/GN_UI.cpp` → 2 处调用 |
+| DA-1126-06 基类析构非虚 | `src/core/GN_Frame.h:140,315`、`src/core/GN_Linear.h:41` | `grep -n 'virtual ~' src/core/GN_Frame.h src/core/GN_Linear.h` |
+| DA-1126-07 胶囊距离采样高估（斜交漏算） | `src/graphics/GN_CapsuleSweep.cpp`（capsuleMinDistance） | `make unit` → `capsuleMinDistance*` 2 例 |
+| DA-1126-08 近接触等距探针探穿薄墙 | `src/graphics/GN_CapsuleSweep.cpp`（近接触分支） | `make unit` → `sweepSlideAlongFloorIntoThinWall` |
+| DA-1126-09 边框缝隙优先级 >>3 | `src/ui/GN_UiPopDlgSetup.cpp:707` | `grep -n 'zBorderW =' src/ui/GN_UiPopDlgSetup.cpp` |
+| DA-1126-10 鼠标滚动步进减半 | `src/ui/GN_UiTextIn.cpp:694,696` | `grep -n 'zOffsetN2) + 1' src/ui/GN_UiTextIn.cpp` → 2 处 |
+| DA-1126-11 焊接量化键 int32 回绕 | `src/graphics/GN_MeshTools.cpp`（weldNormalsByPosition 校验） | `make unit` → `meshWeldRejectsUnquantizablePosition` |
+| DA-1126-12 布料网格 int 乘法溢出 | `src/graphics/GN_3Dcloth.cpp`（create） | `make unit` → `clothCreateRejectsOversizedGrid` |
+| DA-1126-13 GBK 尾字节下限检查恒假 | `src/ui/GN_UiTextIn.cpp:270` | `grep -n "text_code\[1\] < " src/ui/GN_UiTextIn.cpp` → `< 0xa0`（无 (char) 转换） |
+
+### 5.2 已核安全 / 刻意保留（有警告但不是缺陷）
+
+- `src/graphics/GN_2Dscene.cpp:147-149`、`src/core/GN_FormatAudio.cpp:250,254`（`delete this`）、
+  `src/core/GN_Parallel.h:122,136,139`：`-Wdelete-non-virtual-dtor` 警告，但均为**按精确类型删除**，
+  且无更深层派生类；今后若新增派生类需补虚析构。
+- `src/ui/GN_UiTextIn.cpp:600,630` `w << (3 - bit)`：意图存疑（也可能是 `(w<<3)-bit`），
+  已加显式括号**保持现行为**，待真机文本框验证后再定口径。
+- `src/ui/GN_UiBase.cpp:1030` `(rng.h - ih2) >> 1`：语义是"箭头区域居中"，现行为正确，仅加显式括号。
+- 7 处 `memset`/`memcpy` 非平凡类型（`GN_ShadowCascade.cpp:131`、`GN_UI.cpp:767`、
+  `GN_UiPopDlgIO.cpp:250,262`、`GN_UiBase.cpp:2498,2500,2515`）：已核全 POD 布局 / 无虚表，
+  `(void*)` 转换明示意图。
+
+### 5.3 批量风格警告（本批不动，DA-L1 口径更新）
+
+扩展警告扫描 19385 条（2026-11-26，语法检查口径）：`-Wreorder` 7860、`-Wignored-qualifiers` 5316、
+`-Wmissing-field-initializers` 2734、`-Wdeprecated` 1440（access declarations）、`-Wunknown-pragmas` 641
+（`#pragma comment`）、`-Wshadow` 496、`-Wclass-conversion` 320、`-Wwrite-strings` 180、
+`-Wsign-compare` 167、`-Wswitch` 61（多有 default 兜底）。
+复算：`find src -name '*.cpp' | xargs -P2 -I{} g++ <扩展flags> -fsyntax-only {}`（flags 见 CHANGELOG 本轮条目）。
+
+## 6. 相关台账
 
 - `docs/DEFECT_AUDIT_2026-11-21.md` — B5e 逐条复核（判定、锚点、17 条差集、越界发现）。
 - `docs/STRCPY_AUDIT_2026-11-21.md` — 71 处裸 `strcpy`/`strcat` 逐处登记（加固 9 / 契约 22 / 已核 39 / 非代码 1）。

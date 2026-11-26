@@ -137,7 +137,7 @@ class GN_API cFRAME_RC : public sAM_CTRL //★★★ 正规动画图筐 这个�
 
     cFRAME_RC();
     cFRAME_RC &operator=(const cFRAME_RC &src);
-    ~cFRAME_RC() { this->Release(); }
+    virtual ~cFRAME_RC() { this->Release(); } //虚析构：派生类(cFRAME)会经基类指针删除
     virtual int GetClassSize(); //获得该类对象所占用的内存大小
 
     //释放内部资源
@@ -312,7 +312,7 @@ class GN_API cFRAME_LAUNCHER_ //动画图筐发射器基类 用来随机产生�
     cFRAME_LAUNCHER_();
     cFRAME_LAUNCHER_(const cFRAME_LAUNCHER_ &src);
     cFRAME_LAUNCHER_ &operator=(const cFRAME_LAUNCHER_ &src);
-    ~cFRAME_LAUNCHER_() { this->Release(); }
+    virtual ~cFRAME_LAUNCHER_() { this->Release(); } //虚析构：派生类会经基类指针删除
 
     //释放内部资源
     void Release();

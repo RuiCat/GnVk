@@ -353,7 +353,7 @@ GN_API P< P<char> > GN_StrExtractToData(const char *str, char key, char key2){
     while(*pstr){ //把括号里的内容复制到新字符串里
 		if      (*pstr == key){
 			st = pstr + 1;
-		}else if(*pstr == key){
+		}else if(*pstr == key2){ //闭合符是 key2：旧写法重复判 key，分支永远进不来，提取结果全是空串
 			*pstr = 0;
             (sub_strs[sn])(st, 0);
 			++sn;

@@ -194,6 +194,10 @@ bool cVISIBILITY_SET::Build(const char *const *names, uint32_t count,
 }
 
 void cVISIBILITY_SET::RebuildMembership(const sVISIBILITY_DESC &desc) {
+    // 幂等：族成员表先清空再登记（当前只由 Build 调用，但重复调用不应累积重复成员）。
+    for (uint32_t family = 0; family < aFamilies.size(); ++family) {
+        aFamilies[family].aMeshes.clear();
+    }
     // ── 组：一个网格可以属于多个组 ──
     for (uint32_t mesh = 0; mesh < aMeshes.size(); ++mesh) {
         aMeshes[mesh].aGroups.clear();

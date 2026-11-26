@@ -128,7 +128,7 @@ sSHADOW_CASCADE_DESC::sSHADOW_CASCADE_DESC()
 }
 
 sSHADOW_CASCADE_RESULT::sSHADOW_CASCADE_RESULT() {
-    std::memset(this, 0, sizeof(*this));
+    std::memset((void *)this, 0, sizeof(*this)); //成员全为 float 数组/uint32（sMAT44 默认构造为空），置零是契约
 }
 
 void computeCascadeSplits(float nearZ, float farZ, uint32_t count, float lambda,

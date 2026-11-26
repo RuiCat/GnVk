@@ -722,3 +722,16 @@ TEST_CASE(nameFilterRejectsNullNameUnlessFilterEmpty) {
     CHECK(matchNameFilter(0, ""));
     CHECK_EQ(matchNameFilter(0, "hair"), false);
 }
+
+// ── 2026-11-26：量化键溢出防护回归（|pos|×10000 超 int32 会回绕，把无关顶点焊在一起）──
+TEST_CASE(meshWeldRejectsUnquantizablePosition) {
+    float verts[22];
+    for(int i = 0; i < 22; ++i) verts[i] = 0.0f;
+    verts[0] = 300000.0f; // ×10000 = 3e9 > INT32_MAX
+    verts[11] = 0.0f;
+    const uint32_t indices[3] = {0, 1, 0};
+    sNORMAL_WELD_STATS stats;
+    CHECK(!GN3d::weldNormalsByPosition(verts, 2, indices, 3, 0.5f,
+                                       GN3d::sVERTEX_FLOATS::Standard(), &stats));
+    CHECK(verts[0] == 300000.0f); // 拒绝时不修改数据
+}

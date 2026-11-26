@@ -2,6 +2,47 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — 代码缺陷审查批：13 处修复 + 9 条回归测试，单测 931 → 940
+
+方法：GCC 13 扩展警告（`-Wshadow -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wuse-after-free=2
+-Woverloaded-virtual`，139 个 .cpp 全量语法检查）+ `-fanalyzer` 对 13 个高风险模块（布料/物理/角色/IK/
+新抽离模块等）的跨过程分析（**0 报告**）+ 人工审查。台账锚点见 `docs/DEFECT_ANALYSIS.md` §5。
+
+### 逻辑缺陷（13）
+
+| # | 缺陷 | 修复与验证 |
+|---|---|---|
+| 01 | `GN_StrExtractToData` 闭合分支重复判 `key`，永远进不来，提取结果全是空串 | 改 `key2`；`stringExtractToData*` 2 例 |
+| 02 | `SaveHdrFile` 的 `(CR_RGB \|\| CR_RGBA)` 是枚举常量求或，恒真 ⇒ 灰度等 ≤4 字节格式从不转换，按 3 字节/像素读 1 字节/像素的行（越界+错色） | 比较 `srcformat`；`hdrSave*` 2 例（往返精确到 1/256） |
+| 03 | 软键盘哨兵 `-100000` 赋给 `short` 溢出成 **+31072**（符号反了） | `-32768`（SHRT_MIN） |
+| 04 | `GT_TMP_FRAME_SOUND_PROC` 实参带 `sp_y =`，展开成 `float sp_y = sp_y = ...` 自初始化 UB | 实参去掉赋值 |
+| 05 | `if(sIMAGE::RenderTargetSupport)` 测的是函数地址，恒真，无渲染目标平台的兜底分支是死代码 | 改为调用 `RenderTargetSupport()` |
+| 06 | `cFRAME_RC` / `cFRAME_LAUNCHER_` / `GT_sVALUE_CHANGE_BASE` 析构非虚，经基类指针 delete 跳过派生析构 | 虚化（本已多态，sizeof 不变，序列化口径不受影响） |
+| 07 | `capsuleMinDistance` "端点+中点"采样漏掉最近点对都在段内部的斜交位形（实测真距离 1 报 2.24，高估 ⇒ 保守推进可能穿墙） | 精确四项：端点→三角形、顶点→轴、边↔轴线段距离、轴穿三角形相交测试；`capsuleMinDistance*` 2 例 |
+| 08 | 扫掠近接触分支把剩余行程均分 8 份探测，间距超墙厚时"探穿"薄墙后宣布全程安全 | 探针间距 ≤ 半径（正面接触窗口宽约 2×半径）；预算用尽从已探明安全点继续，不宣布剩余安全；`sweepSlideAlongFloorIntoThinWall` 1 例 |
+| 09 | `zBorderW = aLineWidth >> 1 + 2` 按优先级是 `>>3`，注释要的"2 像素缝隙"丢了 | `(aLineWidth >> 1) + 2` |
+| 10 | 文本框鼠标滚动步进 `>> zOffsetN2 + 1` 实为 `>>(N2+1)`，步进减半（与键盘步进口径不一致） | `(>> N2) + 1` |
+| 11 | `weldNormalsByPosition` 量化键 `lround(pos×10000)→int32` 在 \|pos\|>214km 时回绕，把无关顶点焊在一起 | 拒绝 \|pos\|>200000（不修改数据）；`meshWeldRejectsUnquantizablePosition` |
+| 12 | `cCLOTH::create` 的 `nx*ny` 按 int 相乘可溢出 | 封顶 4096×4096；`clothCreateRejectsOversizedGrid` |
+| 13 | GBK 过滤的尾字节下限 `text_code[1] < (char)0xa0`：`(char)0xa0=-96`，对 `uint8` 恒假，检查是死代码 | 改 `< 0xa0`（复查批新增发现） |
+
+### 清理与加固（不改行为）
+
+- 死代码清除：`pushOutOfMesh` 冗余比较、`deepestAt` 不可达分支、`matchNameFilter` 未用变量；
+  两对相同分支合并（`GN_AnimBlend` / `GN_UiTextIn`，口径注释保留）。
+- `cVISIBILITY_SET::RebuildMembership` 先清空族成员表再登记（幂等，防未来重复调用累积）。
+- 7 处 `memset`/`memcpy` 非平凡类型警告：已核 POD 布局 / 无虚表，`(void*)` 转换明示意图。
+- 2 处意图存疑的移位表达式（`GN_UiTextIn.cpp:600/630`）：加显式括号**保持现行为**，台账 §5.2 待验。
+- `tests/smoke/runSamples.sh` 在未设 `VK_ICD_FILENAMES` 时自动探测 lavapipe ICD（与 gen_stats.sh 同一做法），
+  容器里 `make ci` 不再因没 export 环境变量而整体 SKIP。
+
+### 已知边界
+
+- 扫掠的掠射接触（路径恰好擦过顶点/棱）窗口可能窄于探针间距，仍可能漏 —— 已写进代码注释。
+- 批量风格警告（-Wreorder 7860 / -Wmissing-field-initializers 2734 / -Wdeprecated 1440 等）本批不动，
+  定量与复算口径见台账 §5.3。
+- 03/04/05/06/09/10/13 无自动化回归（依赖 UI/音频/视图运行时），锚点与复算命令在台账 §5.1。
+
 ## 2026-11-25 — imoScene 接入肌肉动画：解码 → 重定向 → 每帧重蒙皮，角色按移动方向转身
 
 Unity humanoid 动画在 `m_MuscleClip` 里存的是 95 个肌肉值而不是骨骼旋转，本轮把它变成引擎可播的骨骼动画。

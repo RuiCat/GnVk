@@ -732,12 +732,12 @@ void GNu::cUI_SCENE::UpdateRun(unsigned int updatetime, sUI_LEVEL *parent) {
         if(GNg::cVIEW2D::screenImgUpdateFps != GN::TimeGetRunFpsCount()) {
             GNg::cVIEW2D::screenImgUpdateFps = GN::TimeGetRunFpsCount();
             if(!GNg::cVIEW2D::screenImg) {
-                if(GNg::sIMAGE::RenderTargetSupport) {
+                if(GNg::sIMAGE::RenderTargetSupport()) { //要调用：只写函数名测的是函数地址，恒真
                     GNg::cVIEW2D::screenImg.New(2);
                     GNg::cVIEW2D::screenImg->CreateEmptyToData(128, 128);
                 } else GNg::cVIEW2D::screenImg.New(1);
             }
-            if(GNg::sIMAGE::RenderTargetSupport) {
+            if(GNg::sIMAGE::RenderTargetSupport()) { //要调用：只写函数名测的是函数地址，恒真
                 GNg::sIMAGE *scr_img = GNg::cVIEW2D::screenImg;
                 GNg::sIMAGE *scr_img1 = scr_img + 1;
                 GNg::ViewCur->SaveToImageData(scr_img1, 0, 0, 0, 0, false, true);
@@ -764,7 +764,7 @@ void GNu::cUI_SCENE::UpdatePlay(unsigned int updatetime) {
     h = lh;
 
     sUI_LEVEL uilv0;
-    memset(&uilv0, 0, sizeof(uilv0));
+    memset((void *)&uilv0, 0, sizeof(uilv0)); //全 POD 布局（坐标/颜色字段），置零是契约
     uilv0.c = 0xffffffff;
     UpdateRun(updatetime, &uilv0);
 }

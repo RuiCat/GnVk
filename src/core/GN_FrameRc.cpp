@@ -509,7 +509,8 @@ unsigned int GNg::cFRAME_RC::PlayFrame(unsigned int updatetime, cFRAME_RC *fathe
     }
 #ifdef _GN_SOUND_H_
     //处理声音定位( 图筐中心X , 图筐中心Y , 图框缩放比例 )
-    GT_TMP_FRAME_SOUND_PROC(aLevel_range.left + (float)(dw >> 1), sp_y = aLevel_range.top + (float)(dh >> 1), aLevel_ts.sx)
+    // 宏展开是 float sp_y = SPY;：实参里再带 "sp_y =" 会变成 float sp_y = sp_y = ...（自初始化，UB）。
+    GT_TMP_FRAME_SOUND_PROC(aLevel_range.left + (float)(dw >> 1), aLevel_range.top + (float)(dh >> 1), aLevel_ts.sx)
 #endif
     return zRuntime;
 }

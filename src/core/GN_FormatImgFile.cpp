@@ -836,7 +836,9 @@ extern "C" FILE *__cdecl __iob_func(unsigned i) {
         col_turn = !col_turn;
         if(!comps_lv) comps_lv = 1;
         int px_byten = GNg::ImgFmtGetByteNum(srcformat);
-        bool not_rgb_a = !(px_byten <= 4 && (GNg::CR_RGB || GNg::CR_RGBA));
+        // 判断"源格式不是 RGB/RGBA"要比较 srcformat；旧写法 (CR_RGB || CR_RGBA) 是枚举常量求或，
+        // 恒为真 ⇒ 灰度/调色板等 ≤4 字节格式从不转换，PackRGBE0 按 3 字节/像素读 1 字节/像素的行（越界+错色）。
+        bool not_rgb_a = !(px_byten <= 4 && (srcformat == GNg::CR_RGB || srcformat == GNg::CR_RGBA));
 
         uint8 locbuf[16000];
         GN::sTBUF_INT tbuf(locbuf, 16000);

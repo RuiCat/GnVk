@@ -294,14 +294,9 @@ bool cANIM_LAYER_STACK::Sample(uint32_t node, sANIM_TRANSFORM &out) const {
         if(!layer.aSource->Sample(node, local)) continue; // 这层没这个节点
         if(!any) {
             // 基础层没有该节点：上层直接以自己的权重"接管"
-            if(w >= 1.0f) {
-                out = local;
-            } else {
-                // 部分权重时与单位变换混合？不 —— 与"没有基础值"混合没有意义，
-                // 直接采用上层（否则会把关节拉到原点）。这条与 Sample 的
-                // "缺失不当单位变换"口径一致。
-                out = local;
-            }
+            // 无论权重满不满都直接采用上层：与"没有基础值"混合没有意义，
+            // 与单位变换混合会把关节拉到原点。与 Sample 的"缺失不当单位变换"口径一致。
+            out = local;
             any = true;
             continue;
         }

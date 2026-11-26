@@ -704,7 +704,7 @@ void GNu::cSIM_DIALOG::zStatisticsDlgSize(float ratio_w, float ratio_h) {
     zNameW = (short)((float)zNameNum * char_w);
     zEnumNameW = (short)((float)zEnumNameNum * char_w);
     zFuncButtonW = (short)((float)zFuncButtonNum * char_w);
-    zBorderW = aLineWidth >> 1 + 2; //标题距线筐缝隙2个象素宽
+    zBorderW = (aLineWidth >> 1) + 2; //旧写法按优先级是 >>(1+2)=>>3，注释要的"半线宽+2像素缝隙"丢了 //标题距线筐缝隙2个象素宽
 
     zIconW = (short)((float)zIconNW * ratio_w);
     zIconH = (short)((float)zIconNH * ratio_h);
