@@ -8,7 +8,13 @@
 // 契约：
 //   * 布料是一张 (nx × ny) 的规则网格，初始位于 XY 平面（z = 0），顶点 (i,j) 在
 //     (i*spacing, j*spacing, 0)；三角形索引 (nx-1)*(ny-1)*2 个、每三角形 3 个索引，绕序一致。
-//   * `aPinCorners=true` 时固定四个角（invMass = 0）：这些顶点在 Step 后位置不变。
+//   * `aPinMode` 决定哪些顶点固定（invMass = 0，Step 后位置不变）：
+//       - `eCLOTH_PIN_NONE`     不固定（一块自由落下的布）
+//       - `eCLOTH_PIN_CORNERS`  固定四个角（从角上掛下来的布）
+//       - `eCLOTH_PIN_TOP_EDGE` 固定整个顶边（旗子 —— 一面边挂住、其余被风吹）
+//   * 初始网格永远建在 **XY 平面、原点为左下角**；要放到场景别处请调 `place()`。
+//     之所以不在 desc 里给 origin：同一个 desc 可以复用多次（多块一样的布摆在不同位置），
+//     摆位是"放置"而不是"布料属性"。
 //   * XPBD 距离约束：结构（横/竖）、剪切（两条对角线）、弯曲（间隔 2 的横/竖）；
 //     `aCompliance` 为柔度（0 = 刚性），内部固定 8 次约束迭代、`aSubsteps` 个子步。
 //   * 外力：v += (aGravity + aWind) * h（风当作加速度，不做面积/法线投影 —— 见下方边界）。
@@ -37,6 +43,13 @@
 
 namespace GN3d {
 
+// 哪些顶点被固定。
+enum eCLOTH_PIN_MODE {
+    eCLOTH_PIN_NONE = 0,
+    eCLOTH_PIN_CORNERS, // 四个角
+    eCLOTH_PIN_TOP_EDGE, // 整个顶边（y 最大的那一排）
+};
+
 struct sCLOTH_DESC {
     int aNx; // 顶点列数（>= 2）
     int aNy; // 顶点行数（>= 2）
@@ -46,7 +59,7 @@ struct sCLOTH_DESC {
     int aSubsteps; // 子步数（>= 1；内部钳到 1..16）
     GNg::sVEC3 aGravity; // 默认 (0,-9.81,0)
     GNg::sVEC3 aWind; // 默认 (0,0,0)
-    bool aPinCorners; // 固定四个角
+    eCLOTH_PIN_MODE aPinMode; // 固定哪些顶点（默认 eCLOTH_PIN_NONE）
     // 切向摩擦系数（0..1）。接触时切向速度乘以 (1 - aFriction)。
     // 默认 **0**（保持 v1 的"无摩擦"行为，老代码与老测试不受影响）；
     // 实际场景建议 0.2~0.5 —— 否则布料落在球/桌面上会一直往下滑。
@@ -67,6 +80,12 @@ class cCLOTH {
 
     bool create(const sCLOTH_DESC &desc); // 失败返回 false（参数非法），不修改既有布料
     void reset(); // 回到初始网格与零速度（保留碰撞球）
+    // 把网格整体平移 offset（相对"XY 平面原点"的初始网格），并清零速度。
+    // 用于把布放到场景里的指定位置；等价于"重新 create 之后再平移"，
+    // 但保留已添加的碰撞体。浮点非有限时忽略。
+    void place(const GNg::sVEC3 &offset);
+    // 当前网格相对初始网格的平移量（place 设置的值）。
+    const GNg::sVEC3 &origin() const { return aOrigin; }
     bool isCreated() const { return !aPositions.empty(); }
     void step(float dt); // 固定子步积分（dt 钳在 0.1s 内）
 
@@ -150,6 +169,7 @@ class cCLOTH {
     std::vector<sCOLLIDER> aColliders;
     std::vector<sMESH_COLLIDER> aMeshes;
     // 每个顶点本子步累积的接触法线（摩擦用，求解前清零）。
+    GNg::sVEC3 aOrigin; // place() 设置的平移（buildGrid 时加在初始位置上）
     std::vector<GNg::sVEC3> aContactNormals;
     std::vector<uint8_t> aContacted;
 };

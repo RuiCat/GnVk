@@ -382,6 +382,32 @@ $(PHYSICS_VIDEO_BIN): $(PHYSICS_VIDEO_SRC) $(TARGET)
 	@mkdir -p build
 	$(CXX) $(PHYSICS_VIDEO_FLAGS) $(PHYSICS_VIDEO_SRC) $(TEST_LIBS) -o $(PHYSICS_VIDEO_BIN)
 
+# ── 布料碰撞演示视频（球/胶囊/斜坡三角网/风中的旗）──
+# 这个目标同时是**验收**：程序内部逐帧检查 NaN / 穿地 / "布压根没动"，
+# 任何一项不过就以非 0 退出 —— 所以 `make clothVideo` 成功就意味着布料真的在工作。
+CLOTH_VIDEO_SRC   := $(wildcard tests/clothDemo/*.cpp)
+CLOTH_VIDEO_BIN   := build/clothDemo
+CLOTH_VIDEO_FLAGS := -O2 -std=c++11 -fpermissive $(DEFINES) $(INCLUDES)
+CLOTH_VIDEO_OUT   ?= .local/video
+CLOTH_VIDEO_FRAMES ?= 300
+CLOTH_VIDEO_SIZE  ?= 1280 720
+
+.PHONY: clothVideo
+clothVideo: $(CLOTH_VIDEO_BIN)
+	@echo "$(YELLOW)🧵 渲染布料碰撞演示（$(CLOTH_VIDEO_FRAMES) 帧 @ $(CLOTH_VIDEO_SIZE)）...$(RESET)"
+	@LD_LIBRARY_PATH=.:$$LD_LIBRARY_PATH ./$(CLOTH_VIDEO_BIN) --out $(CLOTH_VIDEO_OUT)/cloth-frames \
+		--frames $(CLOTH_VIDEO_FRAMES) --size $(CLOTH_VIDEO_SIZE)
+	@echo "$(YELLOW)🎞  编码 mp4...$(RESET)"
+	@$(FFMPEG) -y -loglevel error -framerate 30 -i $(CLOTH_VIDEO_OUT)/cloth-frames/frame_%05d.png \
+		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart \
+		$(CLOTH_VIDEO_OUT)/cloth-collision.mp4
+	@ls -lh $(CLOTH_VIDEO_OUT)/cloth-collision.mp4
+
+$(CLOTH_VIDEO_BIN): $(CLOTH_VIDEO_SRC) $(TARGET)
+	@echo "$(YELLOW)🧵 编译布料碰撞演示...$(RESET)"
+	@mkdir -p build
+	$(CXX) $(CLOTH_VIDEO_FLAGS) $(CLOTH_VIDEO_SRC) $(TEST_LIBS) -o $(CLOTH_VIDEO_BIN)
+
 # ── 灯光 / 火焰场景视频（光照对比 + GPU 粒子）──
 FIRE_VIDEO_SRC   := $(wildcard tests/fireLighting/*.cpp)
 FIRE_VIDEO_BIN   := build/fireLighting

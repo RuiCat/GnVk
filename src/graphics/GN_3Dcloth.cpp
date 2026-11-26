@@ -113,7 +113,8 @@ cCLOTH::cCLOTH() {
     aDesc.aSubsteps = 1;
     aDesc.aGravity = makeVec3(0.0f, -9.81f, 0.0f);
     aDesc.aWind = makeVec3(0.0f, 0.0f, 0.0f);
-    aDesc.aPinCorners = false;
+    aOrigin = makeVec3(0.0f, 0.0f, 0.0f);
+    aDesc.aPinMode = eCLOTH_PIN_NONE;
     aDesc.aFriction = 0.0f; // 默认保持 v1 的"无摩擦"行为
 }
 
@@ -184,14 +185,19 @@ void cCLOTH::buildGrid() {
     for(int y = 0; y < aDesc.aNy; ++y) {
         for(int x = 0; x < aDesc.aNx; ++x) {
             aPositions[(size_t)y * aDesc.aNx + x] =
-                makeVec3((float)x * aDesc.aSpacing, (float)y * aDesc.aSpacing, 0.0f);
+                makeVec3(aOrigin.x + (float)x * aDesc.aSpacing,
+                         aOrigin.y + (float)y * aDesc.aSpacing, aOrigin.z);
         }
     }
-    if(aDesc.aPinCorners) {
+    if(aDesc.aPinMode == eCLOTH_PIN_CORNERS) {
         aInvMass[0] = 0.0f;
         aInvMass[(size_t)aDesc.aNx - 1u] = 0.0f;
         aInvMass[(size_t)(aDesc.aNy - 1) * aDesc.aNx] = 0.0f;
         aInvMass[count - 1u] = 0.0f;
+    } else if(aDesc.aPinMode == eCLOTH_PIN_TOP_EDGE) {
+        // 顶边 = y 最大的那一排（索引 y = aNy-1）
+        const size_t row = (size_t)(aDesc.aNy - 1) * (size_t)aDesc.aNx;
+        for(int x = 0; x < aDesc.aNx; ++x) aInvMass[row + (size_t)x] = 0.0f;
     }
     aPrevious = aPositions;
 
@@ -236,6 +242,13 @@ void cCLOTH::buildConstraints() {
             if(y + 2 < ny) addDistance(index, index + (uint32_t)nx * 2u);
         }
     }
+}
+
+void cCLOTH::place(const GNg::sVEC3 &offset) {
+    if(!finiteVec(offset)) return;
+    aOrigin = offset;
+    if(aPositions.empty()) return; // 还没 create：只记下位置，buildGrid 时生效
+    reset(); // reset 会按新的 aOrigin 重建网格并清零速度
 }
 
 void cCLOTH::reset() {

@@ -23,7 +23,7 @@ sCLOTH_DESC makeDesc(int nx, int ny) {
     desc.aSubsteps = 4;
     desc.aGravity = GNg::sVEC3{0.0f, -9.81f, 0.0f};
     desc.aWind = GNg::sVEC3{0.0f, 0.0f, 0.0f};
-    desc.aPinCorners = true;
+    desc.aPinMode = eCLOTH_PIN_CORNERS;
     return desc;
 }
 
