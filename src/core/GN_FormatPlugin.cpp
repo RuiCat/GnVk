@@ -1,27 +1,28 @@
 // GN_FormatPlugin.cpp — 文件格式插件链与格式表：图像格式注册表/缓存、iFILE_IMAGE 插件基类与增删（原 GN_Format.cpp 拆分）。
 #include "GN.h"
 #include "GN_FormatInternal.h"
+#include "GN_CoreContext.h" // B7-3：图像扩展名缓存收敛进 GNg::GN_Core
 #ifdef _GN_FORMAT_H_
     GN_API bool GNg::CheckImgFmtSupportFromFileName(const char *filename) {
         char *ext_name = GN_StrGetExtName(filename);
         if(ext_name) return FileImage->CheckFmtSupportFromExtName(ext_name) ? true : false;
         return false;
     }
-    static char GT_SupportExtNamesImage[160];
+    // B7-3：扩展名缓存（原 static GT_SupportExtNamesImage[160]）已并入 GNg::GN_Core.aImageExtNames。
     GN_API char *const GNg::GetSupportImgFmtFileExtName(bool upper) {
-        if(!GT_SupportExtNamesImage[0]) FileImage->GetSupportFmtFileExtName(GT_SupportExtNamesImage, upper);
-        return (char *const)GT_SupportExtNamesImage;
+        if(!GNg::GN_Core.aImageExtNames[0]) FileImage->GetSupportFmtFileExtName(GNg::GN_Core.aImageExtNames, upper);
+        return (char *const)GNg::GN_Core.aImageExtNames;
     }
     GN_API const char *GNg::ImgFileTypeNames[] = {"bmp", "png", "tga", "gim", "hdr"};
 
     /*----------------------------------------------------- 默认图像文件插件功能 --------------------------------------------------------------*/
     GNg::iFILE_IMAGE::iFILE_IMAGE() : module(0) {
         GT_MX_PushFront(FileImage, this);
-        GT_SupportExtNamesImage[0] = 0;
+        GNg::GN_Core.aImageExtNames[0] = 0;
     }
     GNg::iFILE_IMAGE::~iFILE_IMAGE() {
         GT_TMP_REMOVE_PLUGINS_NODE(iFILE_IMAGE, FileImage)
-        GT_SupportExtNamesImage[0] = 0;
+        GNg::GN_Core.aImageExtNames[0] = 0;
     }
     uint8 *GNg::iFILE_IMAGE::LoadInfo(char *filename_mem, COLOR_FORMAT *format, int *w, int *h, bool min_out, int memsize) {
 #define GT_TMP_FILE_IMAGE_LOAD(PROC, ARG1, ARG2, ADDPROC)                                  \
@@ -105,7 +106,7 @@
         return 0;
     }
     void GNg::iFILE_IMAGE::GetSupportFmtFileExtName(char *out, bool upper) {
-        // 已核（STRCPY 审计）：调用方缓存 160 字节（GT_SupportExtNamesImage），本函数写 20+16=36 字节。
+        // 已核（STRCPY 审计）：调用方缓存 160 字节（GNg::GN_Core.aImageExtNames），本函数写 20+16=36 字节。
         strcpy(out, "png,bmp,tga,hdr,gim");
         if(upper) strcpy(out + 19, ",PNG,BMP,TGA,HDR");
     }

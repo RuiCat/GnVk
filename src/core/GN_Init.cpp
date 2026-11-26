@@ -24,27 +24,15 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
  ****************************************************************************/
 
 #include "GN.h"
+#include "GN_CoreContext.h" // B7-3：core 子系统上下文（用户模块/路径目录/格式扩展名缓存/缩放边界）
 #ifdef _GN_INIT_H
 /********************************************************* 动态库模块 **************************************************************************/
-class GN_cMODULE //动态库程度模块
-{
-    int *zModule; //模块
+// B7-3：GN_cMODULE 类声明与其上下文结构（原 sUserModuleContext/sPathDirContext）已迁
+// GN_CoreContext.h；本文件保留方法定义，状态经全局 GN_Core 访问。
+namespace GNg {
+GN_CoreContext GN_Core; // 默认 core 上下文（仿 GN_Vk；多实例随 c4 逐步开放）
+} // namespace GNg
 
-  public:
-    inline GN_cMODULE() : zModule(0) {}
-    inline ~GN_cMODULE() {
-        if(zModule) {
-            GT_ModuleClose(zModule);
-            zModule = 0;
-        }
-    }
-
-    //初始化装载一个程序模块(模块名)返回是否成功
-    bool InitToData(const char *mod_name);
-
-    //从模块里获取一个函数( 函数名 ) 失败返回0, 成功返回该函数指针
-    GT_PFUNC_VOID GetFunction(const char *func_name);
-};
 bool GN_cMODULE::InitToData(const char *mod_name) {
     if(zModule) GT_ModuleClose(zModule);
     zModule = GT_ModuleOpen(mod_name);
@@ -54,57 +42,42 @@ GT_PFUNC_VOID GN_cMODULE::GetFunction(const char *func_name) {
     if(zModule) return GT_ModuleGetFunction(zModule, func_name);
     else return 0;
 }
-// DA-M2 批 3：用户程序模块句柄/路径文件名收敛进文件内上下文。
-struct sUserModuleContext {
-    P<char> aModuleFileName; //用户程序模块路径文件名 不包含.dll等
-    P<GN_cMODULE> aModule; //用户程序模块
-};
-static sUserModuleContext gUserModuleContext;
+// B7-3：用户程序模块句柄/路径文件名（原 sUserModuleContext）已并入 GNg::GN_Core。
 
 /************************************************************* 特殊目录与文件 ****************************************************************************/
-// DA-M2 批 3：系统资源目录 + 写入游标（原 char[]/char* 别名对）收敛进上下文；游标在构造里指向各自缓冲区。
-struct sPathDirContext {
-    char aSysDir[384];
-    char *aSysFile;
-    char aAppDir[384];
-    char *aAppFile;
-    sPathDirContext() : aSysFile(aSysDir + 7), aAppFile(aAppDir) {
-        memcpy(aSysDir, "assets/", 8); //含结尾 0，与原 "assets/" 初值一致
-        aAppDir[0] = 0;
-    }
-};
-static sPathDirContext gPathDirContext;
+// B7-3：系统资源目录 + 写入游标（原 sPathDirContext 的 char[]/char* 别名对）已并入 GNg::GN_Core；
+// 游标在 GN_CoreContext 构造里指向各自缓冲区（sys="assets/"、app 空）。
 
 GN_INIT_API char *const GN_SysDir(const char *pathfile) {
     if(pathfile) {
-        strncpy(gPathDirContext.aSysFile, pathfile, sizeof(gPathDirContext.aSysDir) - (gPathDirContext.aSysFile - gPathDirContext.aSysDir) - 1);
-        gPathDirContext.aSysFile[sizeof(gPathDirContext.aSysDir) - (gPathDirContext.aSysFile - gPathDirContext.aSysDir) - 1] = 0;
+        strncpy(GNg::GN_Core.aSysFile, pathfile, sizeof(GNg::GN_Core.aSysDir) - (GNg::GN_Core.aSysFile - GNg::GN_Core.aSysDir) - 1);
+        GNg::GN_Core.aSysFile[sizeof(GNg::GN_Core.aSysDir) - (GNg::GN_Core.aSysFile - GNg::GN_Core.aSysDir) - 1] = 0;
     }
-    return (char *const)gPathDirContext.aSysDir;
+    return (char *const)GNg::GN_Core.aSysDir;
 }
 /*------------------------------------------------------------ 用户应用资源目录 -------------------------------------------------------------------------*/
-// 应用资源目录与其写入游标已并入上方 sPathDirContext（aAppDir/aAppFile 两字段）。
+// 应用资源目录与其写入游标已并入 GNg::GN_Core（aAppDir/aAppFile 两字段，B7-3）。
 
 GN_INIT_API char *const GN_AppDir(const char *pathfile) {
     if(pathfile) {
-        strncpy(gPathDirContext.aAppFile, pathfile, sizeof(gPathDirContext.aAppDir) - 1);
-        gPathDirContext.aAppFile[sizeof(gPathDirContext.aAppDir) - 1] = 0;
-    } else *gPathDirContext.aAppFile = 0;
-    return (char *const)gPathDirContext.aAppDir;
+        strncpy(GNg::GN_Core.aAppFile, pathfile, sizeof(GNg::GN_Core.aAppDir) - 1);
+        GNg::GN_Core.aAppFile[sizeof(GNg::GN_Core.aAppDir) - 1] = 0;
+    } else *GNg::GN_Core.aAppFile = 0;
+    return (char *const)GNg::GN_Core.aAppDir;
 }
 GN_INIT_API void GN_AppDirSet(const char *dir) {
-    if(dir && dir[0]) gPathDirContext.aAppFile = sprintf(gPathDirContext.aAppDir, "%s/", dir) + gPathDirContext.aAppDir;
+    if(dir && dir[0]) GNg::GN_Core.aAppFile = sprintf(GNg::GN_Core.aAppDir, "%s/", dir) + GNg::GN_Core.aAppDir;
     else {
-        gPathDirContext.aAppDir[0] = 0;
-        gPathDirContext.aAppFile = gPathDirContext.aAppDir;
+        GNg::GN_Core.aAppDir[0] = 0;
+        GNg::GN_Core.aAppFile = GNg::GN_Core.aAppDir;
     }
 }
 GN_INIT_API void GN_AppDirGet(char *dir_out) {
-    if(gPathDirContext.aAppFile == gPathDirContext.aAppDir) *dir_out = 0;
+    if(GNg::GN_Core.aAppFile == GNg::GN_Core.aAppDir) *dir_out = 0;
     else {
-        char *_end = gPathDirContext.aAppFile - 1;
+        char *_end = GNg::GN_Core.aAppFile - 1;
         *_end = 0; //临时断开文件名
-        strncpy(dir_out, gPathDirContext.aAppDir, 383);
+        strncpy(dir_out, GNg::GN_Core.aAppDir, 383);
         dir_out[383] = 0;
         *_end = '/';
     }
@@ -181,10 +154,10 @@ GN_INIT_API bool GN_LoadCallBackFuncFromModule(const char *mod_name, GT_PFUNC_VO
     md_name[sizeof(md_name) - 1] = 0;
     strncat(md_name, GN_StrGetModuleExtName(GN_eMODULE_DLL), sizeof(md_name) - strlen(md_name) - 1);
     {
-        gUserModuleContext.aModule.New(1);
-        GN_cMODULE *_md = gUserModuleContext.aModule;
+        GNg::GN_Core.aModule.New(1);
+        GN_cMODULE *_md = GNg::GN_Core.aModule;
         if(_md->InitToData(md_name)) { //加载用户应用程序动态库
-            gUserModuleContext.aModuleFileName(mod_name, 0);
+            GNg::GN_Core.aModuleFileName(mod_name, 0);
             load_func = (GT_PFUNC_VOID)_md->GetFunction("AppInit");
             exit_func = (GT_PFUNC_VOID)_md->GetFunction("AppUnInit");
             display2D_func = (GT_VOID_PFUNC_UINT)_md->GetFunction("AppDisplay2D");
@@ -207,8 +180,8 @@ GN_INIT_API bool GN_InitCallBackFuncFromModule(const char *mod_name) {
     return false;
 }
 GN_INIT_API void GN_CallBackFuncModuleRelease() {
-    gUserModuleContext.aModuleFileName.Delete();
-    gUserModuleContext.aModule.Delete();
+    GNg::GN_Core.aModuleFileName.Delete();
+    GNg::GN_Core.aModule.Delete();
 }
 /*************************************************************** 供循环框架调用的处理 ***********************************************************************************************************/
 GN_INIT_API void GF_FrameCycleProc1(unsigned int nTime) {

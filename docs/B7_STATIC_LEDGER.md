@@ -1,6 +1,6 @@
 # B7 static 收敛账本（c4）
 
-> **状态**：🚧 进行中 — B7-1/B7-2 完成（门面 + 2D 帧状态 + 渲染状态余量）；余资源/输入UI/审计批次
+> **状态**：🚧 进行中 — B7-1/B7-2/B7-3 完成（门面 + 2D 帧状态 + 渲染状态 + 资源缓存）；余输入UI/审计批次
 
 ## 口径
 
@@ -15,7 +15,7 @@
 |---|---|---|
 | B7-1 | sEngineContext 门面 + vkFrame2d.cpp 2D 帧状态（16 变量 → GN_Vk.s2DRes） | ✅ 2026-11-26，945/0，ABI 登记 3 移除 3 新增 |
 | B7-2 | 渲染状态余量：vk3dPasses/vk3dShutdown/vkRenderTarget/vkImageData 等 file static + 3D pass extern | ✅ 2026-11-26，24 变量 → GN_Vk（s3DPassRes/sRtRes/sSwapchainRes/s2DRes + 3 顶层命名成员），948/0，ABI 登记 1 移除；范围与留后续批见文末登记 |
-| B7-3 | 资源缓存：core（GN_Init/GN_Format*）+ file（GN_File） | 待做 |
+| B7-3 | 资源缓存：core（GN_Init/GN_Format*）+ file（GN_File） | ✅ 2026-11-26，6 变量 → GNg::GN_Core / GN_FileState（新品 2 头），950/0，ABI 登记 2 强新增 + 弱变更 2/2；公共配置变量保留见文末登记 |
 | B7-4 | 输入/UI/平台：GN_Input、GN_UiFBrowser、GN_Main（9 static）、GN_Sound | 待做 |
 | B7-5 | 函数内 static 审计 + 全仓复审 + 多实例测试 | 待做 |
 
@@ -26,19 +26,19 @@
 
 - L856 `gSoundAlContext`
 
-### src/core/GN_FormatAudio.cpp（1，待迁）
+### src/core/GN_FormatAudio.cpp（1，✅ B7-3 迁 GNg::GN_Core.aAudioExtNames）
 
 - L11 `GT_SupportExtNamesAudio`
 
-### src/core/GN_FormatPlugin.cpp（1，待迁）
+### src/core/GN_FormatPlugin.cpp（1，✅ B7-3 迁 GNg::GN_Core.aImageExtNames）
 
 - L10 `GT_SupportExtNamesImage`
 
-### src/core/GN_FormatScale.cpp（1，待迁）
+### src/core/GN_FormatScale.cpp（1，✅ B7-3 迁 GNg::GN_Core.aImgRowEndID）
 
 - L8 `gFormatScaleContext`
 
-### src/core/GN_Init.cpp（2，待迁）
+### src/core/GN_Init.cpp（2，✅ B7-3 迁 GNg::GN_Core：aModuleFileName/aModule、aSysDir/aAppDir 等）
 
 - L62 `gUserModuleContext`
 - L76 `gPathDirContext`
@@ -47,7 +47,7 @@
 
 - L34 `gParallelContext`
 
-### src/file/GN_File.cpp（1，待迁）
+### src/file/GN_File.cpp（1，✅ B7-3 迁 GNg::GN_FileState.aRunLogOpenMode）
 
 - L894 `gFileLogContext`
 
@@ -242,3 +242,20 @@ sysEncoding.inc 应用目录（GT_CurAppDir*）。vkImageTypes.inc 的 7 个为�
 - 各子系统自有 GPU 资源（vkBloom/vkCloudCube/vkParticle*/vkCloth*/vkAtmosphereLut/vkSkinSsbo 等）：
   vkContext.inc 设计注释明确保留文件内静态，不在 B7 收敛范围（B7-5 审计复核该决定）。
 - GN_Parallel/GN_NetTrans/sysProcess.inc 等非渲染模块 static：未分批，B7-5 审计盘点。
+
+## B7-3 范围登记（2026-11-26）
+
+**已迁（6 变量 → GNg::GN_Core / GNg::GN_FileState；原均为文件内 static，引用全在定义文件内）**：
+
+- GN_Core（新头 core/GN_CoreContext.h）：用户程序模块句柄/文件名（原 sUserModuleContext；GN_cMODULE 类声明随迁，方法定义留 GN_Init.cpp）、
+  系统/用户资源目录与写入游标（原 sPathDirContext：aSysDir/aSysFile/aAppDir/aAppFile）、格式扩展名缓存（原 GT_SupportExtNamesAudio/Image）、
+  缩放临时边界（原 gFormatScaleContext.aImgRowEndID）。
+- GN_FileState（新头 file/GN_FileContext.h）：运行日志打开模式（原 gFileLogContext.aRunLogOpenMode）。
+- 门面：sEngineContext 增加 core/file 指针（默认指向上述全局实例）；两个新内部头自包含通过（headers.sh 0/2 失败），
+  abi/headers-baseline.txt 基线未增（66 条不变）。
+- ABI：新增导出 GNg::GN_Core/ GN_FileState；弱符号 2 移除（sUserModuleContext 析构）/2 新增（GN_CoreContext 析构）；见 abi/changes.md。
+
+**保留为公共 API（不迁，理由）**：GN_Init.h 的 GT_AppDefault_*（8）与 GT_pFunc*/GT_SYS_* 回调表、GN_File.cpp 的
+GN_RunErrorFileName/GN_RunErrorOutputOn/GN_ErrorLast/GN_ErrorList/GN_Words 等——均为 extern GN_API 导出、仓外应用可直接读写（U1），
+与 DA-M2 保留 GT_MainWindow 同一判据；多实例化需先给出兼容层（后续批次）。
+

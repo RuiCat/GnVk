@@ -24,6 +24,7 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
  ****************************************************************************/
 
 #include "GN.h"
+#include "GN_FileContext.h" // B7-3：file 子系统上下文（运行日志打开模式）
 #ifdef _GN_FILE_H_
 #ifdef GN_USING_UNZIP
 extern "C" {
@@ -887,11 +888,10 @@ GN_API void GN_ErrorInfoClear() {
 }
 GN_API bool GN_RunErrorOutputOn = true;
 
-// DA-M2 批 4：运行日志打开模式收敛进文件内上下文。
-struct sFileLogContext {
-    char aRunLogOpenMode[2] = "w";
-};
-static sFileLogContext gFileLogContext;
+// B7-3：运行日志打开模式（原 sFileLogContext）已并入 GNg::GN_FileState。
+namespace GNg {
+GN_FileContext GN_FileState; // 默认 file 上下文（仿 GN_Vk / GN_Core）
+} // namespace GNg
 GN_API void GN_Log(const char *fmt, ...) {
     if(!GN_RunErrorOutputOn) return;
 
@@ -908,9 +908,9 @@ GN_API void GN_Log(const char *fmt, ...) {
         GNf_DirStatePush(false);
         GN_StrToSysFilePath(run_filename, want, "w", false);
         GNf_DirStatePop();
-        gFileLogContext.aRunLogOpenMode[0] = 'w'; // 换了文件就重新开头写
+        GNg::GN_FileState.aRunLogOpenMode[0] = 'w'; // 换了文件就重新开头写
     }
-    FILE *fp = fopen(run_filename, gFileLogContext.aRunLogOpenMode);
+    FILE *fp = fopen(run_filename, GNg::GN_FileState.aRunLogOpenMode);
     if(fp) {
         va_list va;
         va_start(va, fmt);
@@ -919,7 +919,7 @@ GN_API void GN_Log(const char *fmt, ...) {
         fclose(fp);
 
 #if defined GT_USING_ANDROID_JNI || defined GT_USING_ANDROID
-        fp = fopen(GN_DocDir(GN_RunErrorFileName), gFileLogContext.aRunLogOpenMode); //Android 多输出个文件到Sdcard 以方便查阅
+        fp = fopen(GN_DocDir(GN_RunErrorFileName), GNg::GN_FileState.aRunLogOpenMode); //Android 多输出个文件到Sdcard 以方便查阅
         if(fp) {
             va_start(va, fmt);
             vfprintf(fp, fmt, va);
@@ -927,7 +927,7 @@ GN_API void GN_Log(const char *fmt, ...) {
             fclose(fp);
         }
 #endif
-        gFileLogContext.aRunLogOpenMode[0] = 'a';
+        GNg::GN_FileState.aRunLogOpenMode[0] = 'a';
     }
 }
 GN_API char *GN_RunErrorFileName = "RunLog.txt";

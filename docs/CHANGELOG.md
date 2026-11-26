@@ -2,6 +2,26 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B7-3：资源缓存上下文（c4 第三批）
+
+**迁移**（6 个文件级 static → 子系统上下文；引用全在定义文件内，沿用现有访问器语义）：
+- 新头 `src/core/GN_CoreContext.h` + 全局实例 `GNg::GN_Core`：用户程序模块句柄/文件名（原 sUserModuleContext；
+  GN_cMODULE 类声明随迁，方法定义留 GN_Init.cpp）、系统/用户资源目录与写入游标（原 sPathDirContext）、
+  格式支持扩展名缓存（原 GT_SupportExtNamesAudio/Image）、缩放临时边界（原 gFormatScaleContext.aImgRowEndID）
+- 新头 `src/file/GN_FileContext.h` + 全局实例 `GNg::GN_FileState`：运行日志打开模式（原 gFileLogContext）
+- 门面 `sEngineContext` 增加 core/file 指针（默认指向上述全局实例）；头文件前向声明避免跨层包含
+- 两个新内部头自包含通过（headers.sh 0/2 失败；abi/headers-baseline.txt 66 条不变）
+
+**保留为公共 API（不迁，理由）**：GT_AppDefault_*、GT_pFunc*/GT_SYS_* 回调表、GN_RunErrorFileName/
+GN_RunErrorOutputOn/GN_ErrorLast/GN_ErrorList/GN_Words —— 均为 extern GN_API 导出、仓外应用可直接读写（U1），
+与 DA-M2 保留 GT_MainWindow 同一判据；多实例化需先有兼容层（登记后续批）。
+
+**ABI**（D2，已登记 abi/changes.md）：新增导出 GNg::GN_Core（B）/ GNg::GN_FileState（D）；
+弱符号 2 移除（旧 sUserModuleContext 析构 D1/D2）/2 新增（GN_CoreContext 析构 D1/D2）；无其他强符号变更。
+
+验证：单测 **950/0**（+engineContextCoreAndFilePointers/coreFileContextDefaults 2 例）；make ci 全绿
+（构建+物理/角色场景+无窗口渲染 smoke 13/0+doc-check+spv-check+lint-strict）。
+
 ## 2026-11-26 — B7-2：渲染状态余量收敛（c4 第二批）
 
 **迁移**（24 个文件级全局/static → GN_VkContext，NSDMI 初值与原一致；30 文件约 280 处引用改 GN_Vk.*）：

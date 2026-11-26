@@ -1,17 +1,14 @@
 // GN_FormatScale.cpp — 图像缩放/位块传送/混合（ImgScale/ImgBlt/ImgBlend 与像素插值/混合内核）。
 #include "GN.h"
+#include "GN_CoreContext.h" // B7-3：缩放临时边界收敛进 GNg::GN_Core
 #ifdef _GN_FORMAT_H_
-// DA-M2 批 4：行尾像素编号（缩放内核的临时边界）收敛进文件内上下文。
-struct sFormatScaleContext {
-    unsigned int aImgRowEndID = 0;
-};
-static sFormatScaleContext gFormatScaleContext;
+// B7-3：行尾像素编号（原 sFormatScaleContext.aImgRowEndID）已并入 GNg::GN_Core。
 static float GT_ImgPixLinear4(unsigned char *pdata, float i_, float i2_, float wr, float *c_add) {
 #define GT_TMP_IMG_LINEAR_FACTOR_GET(PB, PB1) \
     unsigned int i = (unsigned int)i_;        \
     float i__ = i_ - (float)i;                \
     unsigned char *pd = pdata + (i PB);       \
-    if(i__ > 0.0f && i < gFormatScaleContext.aImgRowEndID) {    \
+    if(i__ > 0.0f && i < GNg::GN_Core.aImgRowEndID) {    \
         float inv = 1.0f - i__;               \
         unsigned char *pd1 = pd + PB1;
 
@@ -152,7 +149,7 @@ GN_API void GNg::ImgScale(uint8 *pdesc_data, int desc_w, int desc_h, const uint8
         if(smooth > 2 && (desc_w < src_w || desc_h < src_h)) {
             bool is_min_scl = false;
             if(desc_w < src_w) is_min_scl = true;
-            else gFormatScaleContext.aImgRowEndID = src_w - 1;
+            else GNg::GN_Core.aImgRowEndID = src_w - 1;
             float (*pf_line_pix_merge)(uint8 *, float, float, float, float *) = is_min_scl ? GT_ImgLinePixMerge4 : GT_ImgPixLinear4;
             void (*pf_tg_pix_color_cpt)(uint8 *, float *, float) = GT_ImgTgPixColorCpt4;
             switch(pix_byte) {

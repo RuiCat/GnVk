@@ -4,6 +4,8 @@
 #include <GN.h>
 #include "GN_EngineContext.h"
 #include "GN_Vk.h"
+#include "GN_CoreContext.h" // B7-3：core 上下文默认值
+#include "GN_FileContext.h" // B7-3：file 上下文默认值
 
 using GNg::GN_Vk;
 
@@ -26,4 +28,21 @@ TEST_CASE(engineContextScissorState) {
     CHECK(!GN_Vk.scissorEnabled);
     CHECK(GN_Vk.scissorRect.offset.x == 0);
     CHECK(GN_Vk.scissorRect.offset.y == 0);
+}
+
+TEST_CASE(engineContextCoreAndFilePointers) {
+    // B7-3：core/file 子系统上下文接入默认门面
+    sEngineContext &ctx = GN_GetEngineContext();
+    CHECK(ctx.core == &GNg::GN_Core);
+    CHECK(ctx.file == &GNg::GN_FileState);
+}
+
+TEST_CASE(coreFileContextDefaults) {
+    // B7-3：路径目录/格式缓存/日志模式的初值与原文件内 static 一致
+    CHECK(std::strcmp(GN_SysDir(0), "assets/") == 0);
+    CHECK(GN_AppDir(0)[0] == 0);
+    CHECK(GNg::GN_Core.aImgRowEndID == 0);
+    CHECK(GNg::GN_Core.aAudioExtNames[0] == 0);
+    CHECK(GNg::GN_Core.aImageExtNames[0] == 0);
+    CHECK(GNg::GN_FileState.aRunLogOpenMode[0] == 'w');
 }

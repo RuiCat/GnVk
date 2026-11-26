@@ -1,6 +1,7 @@
 // GN_FormatAudio.cpp — 音频格式：WAV/MP3 读取与保存、音频流实现、音频文件插件链（原 GN_Format.cpp 拆分）。
 #include "GN.h"
 #include "GN_FormatInternal.h"
+#include "GN_CoreContext.h" // B7-3：音频扩展名缓存收敛进 GNg::GN_Core
 #ifdef _GN_FORMAT_H_
     /*-----------------------------------------------------------------------------------------------------------------------------------------*/
     GN_API bool GNa::CheckAudioFmtSupportFromFileName(const char *filename) {
@@ -8,10 +9,10 @@
         if(ext_name) return FileAudio->CheckFmtSupportFromExtName(ext_name);
         return false;
     }
-    static char GT_SupportExtNamesAudio[128];
+    // B7-3：扩展名缓存（原 static GT_SupportExtNamesAudio[128]）已并入 GNg::GN_Core.aAudioExtNames。
     GN_API char *const GNa::GetSupportAudioFmtFileExtName(bool upper) {
-        if(!GT_SupportExtNamesAudio[0]) FileAudio->GetSupportFmtFileExtName(GT_SupportExtNamesAudio, upper);
-        return (char *const)GT_SupportExtNamesAudio;
+        if(!GNg::GN_Core.aAudioExtNames[0]) FileAudio->GetSupportFmtFileExtName(GNg::GN_Core.aAudioExtNames, upper);
+        return (char *const)GNg::GN_Core.aAudioExtNames;
     }
     GN_API unsigned int GNa::LoadWavFileInfo(char *filename_mem, unsigned short *format, unsigned short *channels, unsigned short *bit, unsigned int *freq, unsigned int *size, int memsize) {
 #define GT_TMP_SET_WAV_INFO                              \
@@ -324,11 +325,11 @@
     }
     GNa::iFILE_AUDIO::iFILE_AUDIO() : module(0) {
         GT_MX_PushFront(FileAudio, this);
-        GT_SupportExtNamesAudio[0] = 0;
+        GNg::GN_Core.aAudioExtNames[0] = 0;
     }
     GNa::iFILE_AUDIO::~iFILE_AUDIO() {
         GT_TMP_REMOVE_PLUGINS_NODE(iFILE_AUDIO, FileAudio)
-        GT_SupportExtNamesAudio[0] = 0;
+        GNg::GN_Core.aAudioExtNames[0] = 0;
     }
     unsigned int GNa::iFILE_AUDIO::LoadInfo(char *filename_mem, unsigned short *format, unsigned short *channels, unsigned short *bit, unsigned int *freq, unsigned int *size, int memsize) {
         int yes = GNf::IsTypeFile(filename_mem, *format, "wav", "RIFF", 4, memsize); //判断提供的文件名或文件内容是否指定类型的文件
@@ -366,7 +367,7 @@
 	strcpy(out, upper?"ogg,OGG,":"ogg,");
 	next_node->GetSupportFmtFileExtName(out+(upper?8:4), upper); //调用之前默认的方法
 */
-        // 已核（STRCPY 审计）：调用方缓存 128 字节（GT_SupportExtNamesAudio），本函数只写 16 或 8 字节；
+        // 已核（STRCPY 审计）：调用方缓存 128 字节（GNg::GN_Core.aAudioExtNames），本函数只写 16 或 8 字节；
         // 该接口无容量参数，插件链扩展时须自行遵守调用方容量（见 docs/STRCPY_AUDIT_2026-11-21.md）。
         if(upper) strcpy(out, "wav,WAV,mp3,MP3");
         else strcpy(out, "wav,mp3");
