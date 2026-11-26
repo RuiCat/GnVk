@@ -6,7 +6,7 @@
 // 且不报错，很难从画面反推，所以做成可断言的计数器而不是靠人看代码。
 //
 // 判定口径：
-//   * 渲染通道活跃（s_inRenderPass）时改写**规范集**（引擎对外公开、会在通道内被绑定的
+//   * 渲染通道活跃（GN_Vk.inRenderPass）时改写**规范集**（引擎对外公开、会在通道内被绑定的
 //     那几个）→ 计为违规，记录首个站点并打一次 stderr；
 //   * 环集（按纹理组合分配的私有 set）不计：它们在首次使用前写入，且从未被绑定录制过。
 //
@@ -59,7 +59,7 @@ void GuardedUpdateDescriptorSets(const char *file, int line, VkDevice device,
         }
         if(touchedCanonical) ++s_canonicalGen;
     }
-    if(s_inRenderPass) {
+    if(GN_Vk.inRenderPass) {
         const char *hit = nullptr;
         for(uint32_t i = 0; i < writeCount && hit == nullptr; ++i) {
             hit = canonicalSetName(writes[i].dstSet);

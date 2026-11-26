@@ -2,6 +2,25 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B7-1：引擎上下文门面 + 2D 帧状态收敛（c4 第一批）
+
+**static 精确盘点**（旧口径 136 含 static 函数）：文件级 static 变量 33 + 函数内 static 30，
+账本 `docs/B7_STATIC_LEDGER.md`（批次计划 + 逐变量清单）。
+
+**sEngineContext 门面**（src/graphics/GN_EngineContext.h/.cpp）：
+默认上下文单例 `GN_GetEngineContext()`，持有渲染子系统指针 vk（默认 &GNg::GN_Vk）；
+老 API 行为不变。头文件前向声明避免 L2→L3 越级；cpp 包含 GN_Vk.h 入分层白名单（GN_3Dmodel 同例）。
+
+**2D 帧状态迁移**：vkFrame2d.cpp 的 16 个文件级全局/static（scissor 3、延迟上传 2、
+inRenderPass、顶点批 6、staging 3）→ GN_VkContext.s2DRes（NSDMI 初值与原全局一致）；
+10 个 cpp 共 255 处引用改 GN_Vk.*；vkInternal.h 删 10 个 extern；
+sPendingUpload 定义迁 vkImageTypes.inc（上下文数组成员需完整类型）。
+
+**ABI**（D2，已登记 abi/changes.md）：移除 GNg::s_currentScissor/s_scissorEnabled/s_scissorDirty
+3 个导出；新增 GN_GetEngineContext + sEngineContext 构造 3 个。
+
+验证：单测 **945/0**（+engineContextDefaultFacade/engineContextScissorState 2 例）。
+
 ## 2026-11-26 — B8 阶段1：CMake 构建 + 双构建 parity 全过
 
 新增 `CMakeLists.txt` + `CMakePresets.json`（default=Release/-O3 无 NDEBUG、debug），

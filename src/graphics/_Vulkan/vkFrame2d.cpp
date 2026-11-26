@@ -8,88 +8,76 @@
 
 namespace GNg {
 
-// ── Scissor 裁剪状态 ──────────────────────────────────────
-VkRect2D s_currentScissor = {{0, 0}, {0, 0}};
-bool s_scissorEnabled = false;
-bool s_scissorDirty = false; // 首次由 GN_VkBeginFrame 设置
+// ── Scissor 裁剪状态：已收敛进 GN_Vk.s2DRes（B7-1）──────────
 
-// ── 延迟纹理上传队列（帧首处理）──────────────────────────
-sPendingUpload s_pendingUploads[256]; // 支持大量纹理(文件浏览器等)
-int s_pendingUploadCnt = 0;
+// ── 延迟纹理上传队列（帧首处理）：GN_Vk.s2DRes.pendingUploads ──
 
-// ── 渲染通道状态 ─────────────────────────────────────────
-bool s_inRenderPass = false;
+// ── 渲染通道状态：GN_Vk.s2DRes.inRenderPass ─────────────────
 
-// ── 顶点批状态 ───────────────────────────────────────────
-VkVertex *gVBuf = 0;
-uint32_t gVMax = 0, gVCnt = 0;
-VkDescriptorSet s_lastDS = VK_NULL_HANDLE;
-VkDescriptorSet s_batchDS[256];
-uint32_t s_batchEnd[256]; // cumulative vertex count at each batch boundary
-uint32_t s_batchCount = 0;
+// ── 顶点批状态：GN_Vk.s2DRes.vbuf/vmax/vcnt/lastDS/batch* ───
 
 void GN_VkSetScissor(int x, int y, int w, int h, bool enable) {
-    s_scissorEnabled = enable;
+    GN_Vk.scissorEnabled = enable;
     if(enable) {
-        s_currentScissor.offset = {x, y};
-        s_currentScissor.extent = {(uint32_t)w, (uint32_t)h};
+        GN_Vk.scissorRect.offset = {x, y};
+        GN_Vk.scissorRect.extent = {(uint32_t)w, (uint32_t)h};
     } else {
-        s_currentScissor.offset = {0, 0};
-        s_currentScissor.extent = GN_Vk.swapchainExtent;
+        GN_Vk.scissorRect.offset = {0, 0};
+        GN_Vk.scissorRect.extent = GN_Vk.swapchainExtent;
     }
-    s_scissorDirty = true;
+    GN_Vk.scissorDirty = true;
 }
 
 // Record batch boundary when descriptor set changes
 void BatchSwitch(VkDescriptorSet ds) {
-    if(ds == s_lastDS) return;
-    if(gVCnt > 0 && s_batchCount < 255) {
-        s_batchEnd[s_batchCount] = gVCnt;
-        s_batchDS[s_batchCount] = s_lastDS;
-        s_batchCount++;
+    if(ds == GN_Vk.lastDS) return;
+    if(GN_Vk.vcnt > 0 && GN_Vk.batchCount < 255) {
+        GN_Vk.batchEnd[GN_Vk.batchCount] = GN_Vk.vcnt;
+        GN_Vk.batchDS[GN_Vk.batchCount] = GN_Vk.lastDS;
+        GN_Vk.batchCount++;
     }
-    s_lastDS = ds;
+    GN_Vk.lastDS = ds;
 }
 
 // Flush current batch and apply new scissor if it changed
 void FlushBatchIfScissorDirty() {
-    if(!s_scissorDirty) return;
+    if(!GN_Vk.scissorDirty) return;
     // Force batch boundary before scissor change
-    if(gVCnt > 0 && s_batchCount < 255 && s_lastDS != VK_NULL_HANDLE) {
-        s_batchEnd[s_batchCount] = gVCnt;
-        s_batchDS[s_batchCount] = s_lastDS;
-        s_batchCount++;
-        s_lastDS = VK_NULL_HANDLE; // force new batch
+    if(GN_Vk.vcnt > 0 && GN_Vk.batchCount < 255 && GN_Vk.lastDS != VK_NULL_HANDLE) {
+        GN_Vk.batchEnd[GN_Vk.batchCount] = GN_Vk.vcnt;
+        GN_Vk.batchDS[GN_Vk.batchCount] = GN_Vk.lastDS;
+        GN_Vk.batchCount++;
+        GN_Vk.lastDS = VK_NULL_HANDLE; // force new batch
     }
-    vkCmdSetScissor(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &s_currentScissor);
-    s_scissorDirty = false;
+    vkCmdSetScissor(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &GN_Vk.scissorRect);
+    GN_Vk.scissorDirty = false;
 }
 
 void FlushVertexBatch() {
-    if(gVCnt == 0) return;
-    if(s_batchCount < 256 && s_lastDS != VK_NULL_HANDLE) {
-        s_batchEnd[s_batchCount] = gVCnt;
-        s_batchDS[s_batchCount] = s_lastDS;
-        s_batchCount++;
+    if(GN_Vk.vcnt == 0) return;
+    if(GN_Vk.batchCount < 256 && GN_Vk.lastDS != VK_NULL_HANDLE) {
+        GN_Vk.batchEnd[GN_Vk.batchCount] = GN_Vk.vcnt;
+        GN_Vk.batchDS[GN_Vk.batchCount] = GN_Vk.lastDS;
+        GN_Vk.batchCount++;
     }
     void *d;
-    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, gVCnt * sizeof(VkVertex), 0, &d);
-    memcpy(d, gVBuf, gVCnt * sizeof(VkVertex));
+    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, GN_Vk.vcnt * sizeof(VkVertex), 0, &d);
+    memcpy(d, GN_Vk.vbuf, GN_Vk.vcnt * sizeof(VkVertex));
     vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory);
     uint32_t prevEnd = 0;
-    for(uint32_t i = 0; i < s_batchCount; i++) {
-        uint32_t count = s_batchEnd[i] - prevEnd;
+    for(uint32_t i = 0; i < GN_Vk.batchCount; i++) {
+        uint32_t count = GN_Vk.batchEnd[i] - prevEnd;
         if(count == 0) continue;
         vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame],
-                                VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &s_batchDS[i], 0, 0);
+                                VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &GN_Vk.batchDS[i], 0, 0);
         VkDeviceSize offs[] = {prevEnd * sizeof(VkVertex)};
         vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &GN_Vk.vertexBuffer, offs);
         vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], count, 1, 0, 0);
-        prevEnd = s_batchEnd[i];
+        prevEnd = GN_Vk.batchEnd[i];
     }
-    gVCnt = 0;
-    s_batchCount = 0;
-    s_lastDS = VK_NULL_HANDLE;
+    GN_Vk.vcnt = 0;
+    GN_Vk.batchCount = 0;
+    GN_Vk.lastDS = VK_NULL_HANDLE;
 }
 
 // Ensure CPU vertex buffer can hold 'need' more vertices
@@ -98,15 +86,15 @@ void FlushVertexBatch() {
 //    CreateBuf 内部 vkCreateBuffer/vkAllocateMemory 可能分配失败
 //    但不做错误处理(函数为void, 调用者不检查) — 依赖 vulkan validation layers 捕获。
 void GrowVBufIfNeeded(uint32_t need) {
-    if(gVCnt + need <= gVMax) return;
-    while(gVCnt + need > gVMax) gVMax *= 2;
-    VkVertex *nb = new VkVertex[gVMax];
-    memcpy(nb, gVBuf, gVCnt * sizeof(VkVertex));
-    delete[] gVBuf;
-    gVBuf = nb;
+    if(GN_Vk.vcnt + need <= GN_Vk.vmax) return;
+    while(GN_Vk.vcnt + need > GN_Vk.vmax) GN_Vk.vmax *= 2;
+    VkVertex *nb = new VkVertex[GN_Vk.vmax];
+    memcpy(nb, GN_Vk.vbuf, GN_Vk.vcnt * sizeof(VkVertex));
+    delete[] GN_Vk.vbuf;
+    GN_Vk.vbuf = nb;
     vkDestroyBuffer(GN_Vk.device, GN_Vk.vertexBuffer, 0);
     vkFreeMemory(GN_Vk.device, GN_Vk.vertexMemory, 0);
-    CreateBuf(gVMax * sizeof(VkVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    CreateBuf(GN_Vk.vmax * sizeof(VkVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
               GN_Vk.vertexBuffer, GN_Vk.vertexMemory);
 }
@@ -128,14 +116,14 @@ bool GN_VkBeginFrame() {
     refreshForwardTextureSets(); // 前向 Blinn-Phong 的纹理环集
     refreshGBufferTextureSets(); // G-Buffer 的纹理环集
     // 处理pass内延迟的纹理上传 (必须在vkWaitForFences之后)
-    for(int i = 0; i < s_pendingUploadCnt; i++) {
-        if(s_pendingUploads[i].img && s_pendingUploads[i].data) {
-            s_pendingUploads[i].img->DataFill(s_pendingUploads[i].data,
-                                              s_pendingUploads[i].fmt, s_pendingUploads[i].w, s_pendingUploads[i].h, 0, 0);
+    for(int i = 0; i < GN_Vk.pendingUploadCnt; i++) {
+        if(GN_Vk.pendingUploads[i].img && GN_Vk.pendingUploads[i].data) {
+            GN_Vk.pendingUploads[i].img->DataFill(GN_Vk.pendingUploads[i].data,
+                                              GN_Vk.pendingUploads[i].fmt, GN_Vk.pendingUploads[i].w, GN_Vk.pendingUploads[i].h, 0, 0);
         }
-        delete[] s_pendingUploads[i].data;
+        delete[] GN_Vk.pendingUploads[i].data;
     }
-    s_pendingUploadCnt = 0;
+    GN_Vk.pendingUploadCnt = 0;
     vkResetFences(GN_Vk.device, 1, &GN_Vk.inFlightFence);
     if(GN_Vk.headless) {
         // 无窗口：没有交换链可 acquire，离屏图按帧轮转（fence 已在上面等过，复用安全）
@@ -157,7 +145,7 @@ bool GN_VkBeginFrame() {
     rpi.clearValueCount = 1;
     rpi.pClearValues = &cv;
     vkCmdBeginRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame], &rpi, VK_SUBPASS_CONTENTS_INLINE);
-    s_inRenderPass = true; // 标记2D渲染通道活跃
+    GN_Vk.inRenderPass = true; // 标记2D渲染通道活跃
     vkValidationBeginLabel(GN_Vk.commandBuffers[GN_Vk.currentFrame], "frame-2D");
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipeline);
     // 初始化动态 scissor 为全视口
@@ -177,45 +165,45 @@ bool GN_VkBeginFrame() {
     memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(GN_Vk.device, GN_Vk.uniformMemory);
     GN_Vk.vertexCount = 0;
-    gVCnt = 0;
-    s_batchCount = 0;
-    s_lastDS = VK_NULL_HANDLE; // reset for new frame
+    GN_Vk.vcnt = 0;
+    GN_Vk.batchCount = 0;
+    GN_Vk.lastDS = VK_NULL_HANDLE; // reset for new frame
     return true;
 }
 
 void GN_VkEndFrame() {
     if(!GN_Vk.initialized) return;
     // Close final batch
-    if(gVCnt > 0 && s_batchCount < 256) {
-        s_batchEnd[s_batchCount] = gVCnt;
-        s_batchDS[s_batchCount] = s_lastDS;
-        s_batchCount++;
+    if(GN_Vk.vcnt > 0 && GN_Vk.batchCount < 256) {
+        GN_Vk.batchEnd[GN_Vk.batchCount] = GN_Vk.vcnt;
+        GN_Vk.batchDS[GN_Vk.batchCount] = GN_Vk.lastDS;
+        GN_Vk.batchCount++;
     }
     // Upload all vertices at once
-    if(gVCnt > 0) {
+    if(GN_Vk.vcnt > 0) {
         void *d;
-        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, gVCnt * sizeof(VkVertex), 0, &d);
-        memcpy(d, gVBuf, gVCnt * sizeof(VkVertex));
+        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, GN_Vk.vcnt * sizeof(VkVertex), 0, &d);
+        memcpy(d, GN_Vk.vbuf, GN_Vk.vcnt * sizeof(VkVertex));
         vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory);
     }
     // Draw each batch with its own descriptor set and vertex offset
     uint32_t prevEnd = 0;
-    for(uint32_t i = 0; i < s_batchCount; i++) {
-        uint32_t count = s_batchEnd[i] - prevEnd;
+    for(uint32_t i = 0; i < GN_Vk.batchCount; i++) {
+        uint32_t count = GN_Vk.batchEnd[i] - prevEnd;
         if(count == 0) continue;
         vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame],
-                                VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &s_batchDS[i], 0, 0);
+                                VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &GN_Vk.batchDS[i], 0, 0);
         VkDeviceSize offs[] = {prevEnd * sizeof(VkVertex)};
         vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &GN_Vk.vertexBuffer, offs);
         vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], count, 1, 0, 0);
-        prevEnd = s_batchEnd[i];
+        prevEnd = GN_Vk.batchEnd[i];
     }
-    gVCnt = 0;
-    s_batchCount = 0;
+    GN_Vk.vcnt = 0;
+    GN_Vk.batchCount = 0;
     // 仅在有活跃渲染通道时结束它
-    if(s_inRenderPass) {
+    if(GN_Vk.inRenderPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_inRenderPass = false;
+        GN_Vk.inRenderPass = false;
     }
     vkEndCommandBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     if(GN_Vk.headless) {
@@ -246,7 +234,7 @@ void GN_VkEndFrame() {
 }
 
 void GN_VkBegin2DPass() {
-    if(!GN_Vk.initialized || s_inRenderPass) return; // 已有活跃通道时不重复开
+    if(!GN_Vk.initialized || GN_Vk.inRenderPass) return; // 已有活跃通道时不重复开
     if(s_renderPass2DOverlay == VK_NULL_HANDLE || s_framebuffers2DOverlay == nullptr) return;
     VkCommandBuffer commandBuffer = GN_Vk.commandBuffers[GN_Vk.currentFrame];
     VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
@@ -255,16 +243,13 @@ void GN_VkBegin2DPass() {
     rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
     rpi.clearValueCount = 0; // loadOp=LOAD：沿用 3D 的结果
     vkCmdBeginRenderPass(commandBuffer, &rpi, VK_SUBPASS_CONTENTS_INLINE);
-    s_inRenderPass = true;
+    GN_Vk.inRenderPass = true;
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipeline);
     VkRect2D fullScreen = {{0, 0}, GN_Vk.swapchainExtent};
     vkCmdSetScissor(commandBuffer, 0, 1, &fullScreen);
 }
 
 // 历史遗留：pass 内 DataFill 的 staging 暂存数组（当前未使用；释放逻辑已并入 vkFrame2d.cpp）
-static VkBuffer s_pendingStagingBufs[32];
-static VkDeviceMemory s_pendingStagingMems[32];
-static int s_pendingStagingCnt = 0;
 
 // ── 帧结束入口：转发到 vkFrame2d.cpp 的 GN_VkEndFrame ──
 void RenderFinish(bool only3d) {

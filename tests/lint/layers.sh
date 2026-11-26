@@ -51,6 +51,7 @@ level_of_dir() {
 KNOWN_VIOLATIONS='
 src/graphics/GN_3Dmodel.h:GN_Vk.h
 src/graphics/GN_3Dmodel.cpp:GN_Vk.h
+src/graphics/GN_EngineContext.cpp:GN_Vk.h
 src/graphics/GN_3Dasset.cpp:cgltf.h
 src/ui/GN_UiPopDlgIO.cpp:GN_EdPlugin.h
 src/core/GN_RunRec.cpp:GN_FontFT.h

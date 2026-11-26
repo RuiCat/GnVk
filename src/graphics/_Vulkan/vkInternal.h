@@ -83,23 +83,10 @@ struct VkUBO {
     float proj[16];
 };
 
-// pass 内延迟纹理上传项
-struct sPendingUpload {
-    sIMAGE *img;
-    unsigned char *data;
-    int w, h, fmt;
-};
+// sPendingUpload 定义已迁入 vkImageTypes.inc（B7-1，GN_VkContext 成员需要）
 
-GN_VK_INTERNAL extern VkVertex *gVBuf;
-GN_VK_INTERNAL extern uint32_t gVMax;
-GN_VK_INTERNAL extern uint32_t gVCnt;
-GN_VK_INTERNAL extern VkDescriptorSet s_lastDS;
-GN_VK_INTERNAL extern VkDescriptorSet s_batchDS[256];
-GN_VK_INTERNAL extern uint32_t s_batchEnd[256];
-GN_VK_INTERNAL extern uint32_t s_batchCount;
-GN_VK_INTERNAL extern bool s_inRenderPass;
-GN_VK_INTERNAL extern sPendingUpload s_pendingUploads[256];
-GN_VK_INTERNAL extern int s_pendingUploadCnt;
+
+// B7-1：2D 帧状态 extern 已删除——收敛进 GN_Vk.s2DRes（scissorRect/vbuf/pendingUploads 等）。
 
 // 3D pass 状态（vk3dPasses 与 GN_Vk.cpp 共享）
 GN_VK_INTERNAL extern bool s_in3DPass;

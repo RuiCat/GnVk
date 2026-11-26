@@ -492,7 +492,7 @@ void GN_VkSetAtmosphere(const GN3d::sATMOSPHERE_PARAMS &params, const float sunD
 
 void recordAtmosphereLutUpdate(VkCommandBuffer cb) {
     if(!s_computeReady || !s_dirty || !cb) return;
-    if(s_inRenderPass) {
+    if(GN_Vk.inRenderPass) {
         // 契约 §1：必须在 render pass 之外录制；此处保留脏标记，等待合法调用点。
         if(!s_warnedInRenderPass) {
             fprintf(stderr, "[GN_Vk] 警告: recordAtmosphereLutUpdate 在 render pass 内被跳过\n");

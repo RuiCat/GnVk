@@ -148,3 +148,13 @@ struct VkSkyParams {
 };
 static_assert(sizeof(VkSkyParams) == 80, "VkSkyParams 必须为 80 字节");
 #endif // GN_USING_3D
+
+// B7-1（2026-11-26）：VkVertex 完整定义在 vkInternal.h；这里前向声明供 GN_VkContext 指针成员用。
+struct VkVertex;
+
+// B7-1：pass 内延迟纹理上传项（原 vkInternal.h 定义迁入，GN_VkContext.s2DRes 数组成员需要完整类型）
+struct sPendingUpload {
+    sIMAGE *img;
+    unsigned char *data;
+    int w, h, fmt;
+};

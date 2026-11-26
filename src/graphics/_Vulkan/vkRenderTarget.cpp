@@ -48,9 +48,9 @@ static VkRenderPass CreateRTRenderPass() {
 void BeginRTRenderPass() {
     if(!s_activeRT || !s_activeRT->vkImage || s_rtInProgress) return;
     FlushVertexBatch();
-    if(s_inRenderPass) {
+    if(GN_Vk.inRenderPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_inRenderPass = false;
+        GN_Vk.inRenderPass = false;
     }
     {
         VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
@@ -163,7 +163,7 @@ void EndRTRenderPass() {
     }
     GN_Vk.vertexCount = 0;
     s_rtInProgress = false;
-    s_inRenderPass = true; // 已切回主渲染通道
+    GN_Vk.inRenderPass = true; // 已切回主渲染通道
     s_activeRT = nullptr;
 }
 

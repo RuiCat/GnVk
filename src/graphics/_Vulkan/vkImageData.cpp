@@ -247,14 +247,14 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
 
         // pass内: 延迟上传到帧首 (must copy before unmap!)
         // skipDefer: FreeType字体atlas等需即时更新的纹理不走延迟
-        if(s_inRenderPass && s_pendingUploadCnt < 256 && !skipDefer) {
-            s_pendingUploads[s_pendingUploadCnt].img = this;
-            s_pendingUploads[s_pendingUploadCnt].data = new uint8[dstSz];
-            memcpy(s_pendingUploads[s_pendingUploadCnt].data, d, dstSz);
-            s_pendingUploads[s_pendingUploadCnt].w = w;
-            s_pendingUploads[s_pendingUploadCnt].h = h;
-            s_pendingUploads[s_pendingUploadCnt].fmt = CR_RGBA; // staging已展开为RGBA
-            s_pendingUploadCnt++;
+        if(GN_Vk.inRenderPass && GN_Vk.pendingUploadCnt < 256 && !skipDefer) {
+            GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].img = this;
+            GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].data = new uint8[dstSz];
+            memcpy(GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].data, d, dstSz);
+            GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].w = w;
+            GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].h = h;
+            GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].fmt = CR_RGBA; // staging已展开为RGBA
+            GN_Vk.pendingUploadCnt++;
             return;
         }
         EndImageUpload(vkImage, (uint32_t)w, (uint32_t)h, offset_x, offset_y, false);
@@ -327,14 +327,14 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         memcpy(d, data, dstSz);
     }
     // pass内延迟: 新纹理创建也需要避免pass内queue submit
-    if(s_inRenderPass && s_pendingUploadCnt < 256 && !skipDefer) {
-        s_pendingUploads[s_pendingUploadCnt].img = this;
-        s_pendingUploads[s_pendingUploadCnt].data = new uint8[dstSz];
-        memcpy(s_pendingUploads[s_pendingUploadCnt].data, d, dstSz);
-        s_pendingUploads[s_pendingUploadCnt].w = w;
-        s_pendingUploads[s_pendingUploadCnt].h = h;
-        s_pendingUploads[s_pendingUploadCnt].fmt = CR_RGBA;
-        s_pendingUploadCnt++;
+    if(GN_Vk.inRenderPass && GN_Vk.pendingUploadCnt < 256 && !skipDefer) {
+        GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].img = this;
+        GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].data = new uint8[dstSz];
+        memcpy(GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].data, d, dstSz);
+        GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].w = w;
+        GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].h = h;
+        GN_Vk.pendingUploads[GN_Vk.pendingUploadCnt].fmt = CR_RGBA;
+        GN_Vk.pendingUploadCnt++;
         width = w;
         height = h;
         uRange = 1.0f;

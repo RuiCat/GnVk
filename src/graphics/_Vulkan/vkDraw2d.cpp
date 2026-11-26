@@ -13,9 +13,9 @@ void ImageDraw(sIMAGE *img, int x, int y, int w, int h, unsigned int color, unsi
     if(!GN_Vk.initialized) return;
     // Allow null image for solid color drawing (used by text/line drawing)
     if(img && !img->vkImageView) return;
-    if(!gVBuf) {
-        gVMax = 65536;
-        gVBuf = new VkVertex[gVMax];
+    if(!GN_Vk.vbuf) {
+        GN_Vk.vmax = 65536;
+        GN_Vk.vbuf = new VkVertex[GN_Vk.vmax];
     }
     FlushBatchIfScissorDirty();
     VkDescriptorSet ds;
@@ -79,8 +79,8 @@ void ImageDraw(sIMAGE *img, int x, int y, int w, int h, unsigned int color, unsi
     float x2 = x + dw, y2 = y + dh;
     VkVertex vv[6] = {{x, y, u0, v0, r, g, b, a}, {x2, y, ue, v0, r, g, b, a}, {x2, y2, ue, ve, r, g, b, a}, {x, y, u0, v0, r, g, b, a}, {x2, y2, ue, ve, r, g, b, a}, {x, y2, u0, ve, r, g, b, a}};
     GrowVBufIfNeeded(6);
-    memcpy(gVBuf + gVCnt, vv, sizeof(vv));
-    gVCnt += 6;
+    memcpy(GN_Vk.vbuf + GN_Vk.vcnt, vv, sizeof(vv));
+    GN_Vk.vcnt += 6;
 }
 
 void LineFrame2dDraw(int x, int y, int w, int h, int lw, unsigned int color, unsigned short blend) {
@@ -101,9 +101,9 @@ void ImageDraw4P(sIMAGE *img, int x, int y, int w, int h,
                  unsigned short blend) {
     if(!GN_Vk.initialized) return;
     if(img && !img->vkImageView) return;
-    if(!gVBuf) {
-        gVMax = 65536;
-        gVBuf = new VkVertex[gVMax];
+    if(!GN_Vk.vbuf) {
+        GN_Vk.vmax = 65536;
+        GN_Vk.vbuf = new VkVertex[GN_Vk.vmax];
     }
     FlushBatchIfScissorDirty();
     VkDescriptorSet ds;
@@ -128,8 +128,8 @@ void ImageDraw4P(sIMAGE *img, int x, int y, int w, int h,
         {(float)x2, (float)y2, ue, ve, fr(c2), fg(c2), fb(c2), fc(c2)},
         {(float)x, (float)y2, u0, ve, fr(c3), fg(c3), fb(c3), fc(c3)}};
     GrowVBufIfNeeded(6);
-    memcpy(gVBuf + gVCnt, vv, sizeof(vv));
-    gVCnt += 6;
+    memcpy(GN_Vk.vbuf + GN_Vk.vcnt, vv, sizeof(vv));
+    GN_Vk.vcnt += 6;
 }
 
 // Float-vertex overload: uses caller-provided vertex positions
@@ -137,9 +137,9 @@ void ImageDraw4P(sIMAGE *img, float *vt, unsigned int color, unsigned short texI
                  unsigned short blend, float u1, float v1, float u2, float v2) {
     if(!GN_Vk.initialized) return;
     if(img && !img->vkImageView) return;
-    if(!gVBuf) {
-        gVMax = 65536;
-        gVBuf = new VkVertex[gVMax];
+    if(!GN_Vk.vbuf) {
+        GN_Vk.vmax = 65536;
+        GN_Vk.vbuf = new VkVertex[GN_Vk.vmax];
     }
     FlushBatchIfScissorDirty();
     VkDescriptorSet ds;
@@ -155,8 +155,8 @@ void ImageDraw4P(sIMAGE *img, float *vt, unsigned int color, unsigned short texI
     VkVertex vv[6] = {
         {vt[0], vt[1], u1, v1, r, g, b, a}, {vt[2], vt[3], u2, v1, r, g, b, a}, {vt[4], vt[5], u2, v2, r, g, b, a}, {vt[0], vt[1], u1, v1, r, g, b, a}, {vt[4], vt[5], u2, v2, r, g, b, a}, {vt[6], vt[7], u1, v2, r, g, b, a}};
     GrowVBufIfNeeded(6);
-    memcpy(gVBuf + gVCnt, vv, sizeof(vv));
-    gVCnt += 6;
+    memcpy(GN_Vk.vbuf + GN_Vk.vcnt, vv, sizeof(vv));
+    GN_Vk.vcnt += 6;
 }
 
 // Rotation drawing: apply 2D rotation around center point (cx,cy within 0..1)
@@ -180,28 +180,28 @@ void ImageDrawRot(sIMAGE *img, int x, int y, int w, int h,
     float r = ((color >> 16) & 0xff) / 255.0f, g = ((color >> 8) & 0xff) / 255.0f, b = (color & 0xff) / 255.0f, a = ((color >> 24) & 0xff) / 255.0f;
     VkVertex vv[6] = {
         {px[0], py[0], u0, v0, r, g, b, a}, {px[1], py[1], ue, v0, r, g, b, a}, {px[2], py[2], ue, ve, r, g, b, a}, {px[0], py[0], u0, v0, r, g, b, a}, {px[2], py[2], ue, ve, r, g, b, a}, {px[3], py[3], u0, ve, r, g, b, a}};
-    if(!gVBuf) {
-        gVMax = 65536;
-        gVBuf = new VkVertex[gVMax];
+    if(!GN_Vk.vbuf) {
+        GN_Vk.vmax = 65536;
+        GN_Vk.vbuf = new VkVertex[GN_Vk.vmax];
     }
     if(img && img->vkDescriptorSet) {
-        // using shared s_lastDS
-        if(img->vkDescriptorSet != s_lastDS && gVCnt > 0) {
+        // using shared GN_Vk.lastDS
+        if(img->vkDescriptorSet != GN_Vk.lastDS && GN_Vk.vcnt > 0) {
             void *d;
-            vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, gVCnt * sizeof(VkVertex), 0, &d);
-            memcpy(d, gVBuf, gVCnt * sizeof(VkVertex));
+            vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, GN_Vk.vcnt * sizeof(VkVertex), 0, &d);
+            memcpy(d, GN_Vk.vbuf, GN_Vk.vcnt * sizeof(VkVertex));
             vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory);
             VkDeviceSize o[] = {0};
             vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &GN_Vk.vertexBuffer, o);
-            vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], gVCnt, 1, 0, 0);
-            gVCnt = 0;
+            vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], GN_Vk.vcnt, 1, 0, 0);
+            GN_Vk.vcnt = 0;
         }
-        s_lastDS = img->vkDescriptorSet;
+        GN_Vk.lastDS = img->vkDescriptorSet;
         vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &img->vkDescriptorSet, 0, 0);
     }
     GrowVBufIfNeeded(6);
-    memcpy(gVBuf + gVCnt, vv, sizeof(vv));
-    gVCnt += 6;
+    memcpy(GN_Vk.vbuf + GN_Vk.vcnt, vv, sizeof(vv));
+    GN_Vk.vcnt += 6;
 }
 
 void ImageDrawDitherBlur(sIMAGE *img, int x, int y, int w, int h,

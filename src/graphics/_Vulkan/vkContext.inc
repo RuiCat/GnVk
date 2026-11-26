@@ -89,6 +89,24 @@ struct GN_VkContext {
         VkDeviceMemory defaultImageMemory;                                     // 1×1 白色默认纹理内存
         VkImageView defaultImageView;                                          // 1×1 白色默认纹理视图 (纯色/无纹理绘制降级)
         VkDescriptorSet defaultDS;
+        // B7-1（2026-11-26）：2D 帧状态，自 vkFrame2d.cpp 文件级全局/static 收敛（c4）。
+        // 初值用 NSDMI 与原全局初值一致；原导出符号 s_currentScissor/s_scissorEnabled/s_scissorDirty 移除（abi/changes.md 登记）。
+        VkRect2D scissorRect = {{0, 0}, {0, 0}};
+        bool scissorEnabled = false;
+        bool scissorDirty = false; // 首次由 GN_VkBeginFrame 设置
+        sPendingUpload pendingUploads[256] = {}; // 支持大量纹理(文件浏览器等)
+        int pendingUploadCnt = 0;
+        bool inRenderPass = false;
+        VkVertex *vbuf = nullptr;
+        uint32_t vmax = 0;
+        uint32_t vcnt = 0;
+        VkDescriptorSet lastDS = VK_NULL_HANDLE;
+        VkDescriptorSet batchDS[256] = {};
+        uint32_t batchEnd[256] = {}; // cumulative vertex count at each batch boundary
+        uint32_t batchCount = 0;
+        VkBuffer pendingStagingBufs[32] = {};
+        VkDeviceMemory pendingStagingMems[32] = {};
+        int pendingStagingCnt = 0;
     };
 
     // ── sForwardRes：3D 前向：MSAA/深度、3D 管线与 UBO、PBR（含透明变体）、阴影 CSM、3D 动态顶点索引

@@ -267,31 +267,31 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     vkValidationEndLabel(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     vkValidationBeginLabel(GN_Vk.commandBuffers[GN_Vk.currentFrame], "flush2D");
     // 刷新当前 2D 批次
-    if(gVCnt > 0) {
+    if(GN_Vk.vcnt > 0) {
         void *d;
-        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, gVCnt * sizeof(VkVertex), 0, &d);
-        memcpy(d, gVBuf, gVCnt * sizeof(VkVertex));
+        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, GN_Vk.vcnt * sizeof(VkVertex), 0, &d);
+        memcpy(d, GN_Vk.vbuf, GN_Vk.vcnt * sizeof(VkVertex));
         vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory);
         uint32_t prevEnd = 0;
-        for(uint32_t i = 0; i < s_batchCount; i++) {
-            uint32_t count = s_batchEnd[i] - prevEnd;
+        for(uint32_t i = 0; i < GN_Vk.batchCount; i++) {
+            uint32_t count = GN_Vk.batchEnd[i] - prevEnd;
             if(count > 0) {
-                vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &s_batchDS[i], 0, 0);
+                vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &GN_Vk.batchDS[i], 0, 0);
                 VkDeviceSize offs[] = {prevEnd * sizeof(VkVertex)};
                 vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &GN_Vk.vertexBuffer, offs);
                 vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], count, 1, 0, 0);
             }
-            prevEnd = s_batchEnd[i];
+            prevEnd = GN_Vk.batchEnd[i];
         }
-        gVCnt = 0;
-        s_batchCount = 0;
-        s_lastDS = VK_NULL_HANDLE;
+        GN_Vk.vcnt = 0;
+        GN_Vk.batchCount = 0;
+        GN_Vk.lastDS = VK_NULL_HANDLE;
     }
 
     // 结束当前渲染通道 (2D 或 空)
-    if(s_inRenderPass) {
+    if(GN_Vk.inRenderPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_inRenderPass = false;
+        GN_Vk.inRenderPass = false;
     }
 
     // 更新 3D 场景 UBO
@@ -353,7 +353,7 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                             GN_Vk.pipelineLayout3D, 0, 1, &GN_Vk.descriptorSet3D, 0, 0);
 
     s_in3DPass = true;
-    s_inRenderPass = true; // 3D 渲染通道活跃
+    GN_Vk.inRenderPass = true; // 3D 渲染通道活跃
 }
 
 bool GN_VkIsIn3DPass() {
@@ -366,7 +366,7 @@ void GN_VkEnd3DPass() {
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
 
     s_in3DPass = false;
-    s_inRenderPass = false; // 3D pass 结束，不重启 2D pass（避免 CLEAR 清掉 3D 内容）
+    GN_Vk.inRenderPass = false; // 3D pass 结束，不重启 2D pass（避免 CLEAR 清掉 3D 内容）
     // L1：3D 输出统一线性 HDR → 合成（曝光/色调映射/Bloom）到 swapchain；
     // 2D 叠层随后以 LOAD 方式画在其上。
     GN_VkCompositeToSwapchain();

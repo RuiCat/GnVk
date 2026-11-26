@@ -41,29 +41,29 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
     // 偏移由 GN_VkBeginFrame 每帧归零，退休缓冲只在该处 fence 之后释放。
 
     // 刷新 2D 批次并结束当前渲染通道
-    if(gVCnt > 0) {
+    if(GN_Vk.vcnt > 0) {
         void *d;
-        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, gVCnt * sizeof(VkVertex), 0, &d);
-        memcpy(d, gVBuf, gVCnt * sizeof(VkVertex));
+        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, GN_Vk.vcnt * sizeof(VkVertex), 0, &d);
+        memcpy(d, GN_Vk.vbuf, GN_Vk.vcnt * sizeof(VkVertex));
         vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory);
         uint32_t prevEnd = 0;
-        for(uint32_t i = 0; i < s_batchCount; i++) {
-            uint32_t count = s_batchEnd[i] - prevEnd;
+        for(uint32_t i = 0; i < GN_Vk.batchCount; i++) {
+            uint32_t count = GN_Vk.batchEnd[i] - prevEnd;
             if(count > 0) {
-                vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &s_batchDS[i], 0, 0);
+                vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &GN_Vk.batchDS[i], 0, 0);
                 VkDeviceSize offs[] = {prevEnd * sizeof(VkVertex)};
                 vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &GN_Vk.vertexBuffer, offs);
                 vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], count, 1, 0, 0);
             }
-            prevEnd = s_batchEnd[i];
+            prevEnd = GN_Vk.batchEnd[i];
         }
-        gVCnt = 0;
-        s_batchCount = 0;
-        s_lastDS = VK_NULL_HANDLE;
+        GN_Vk.vcnt = 0;
+        GN_Vk.batchCount = 0;
+        GN_Vk.lastDS = VK_NULL_HANDLE;
     }
-    if(s_inRenderPass) {
+    if(GN_Vk.inRenderPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_inRenderPass = false;
+        GN_Vk.inRenderPass = false;
     }
 
     // 写入本级的 light VP 槽（每级 64 B，槽距 256 B；常驻映射，逐级不互相覆盖）。
@@ -86,7 +86,7 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
                             GN_Vk.shadowPipelineLayout, 0, 1, &cascadeSet, 0, 0);
     s_inShadowPass = true;
     s_shadowPassPipeline = VK_NULL_HANDLE; // CSM 用默认那条
-    s_inRenderPass = true; // 阴影渲染通道活跃
+    GN_Vk.inRenderPass = true; // 阴影渲染通道活跃
 }
 
 
@@ -133,32 +133,32 @@ bool GN_VkCubeShadowBeginForLight(uint32_t lightIndex, const sVEC3 &lightPos, fl
 
     // 与 CSM 的 ShadowPassBegin 同理：先把挂起的 2D 批次刷掉、结束当前 render pass，
     // 否则在 render pass 内再 BeginRenderPass 是非法的。
-    if(gVCnt > 0) {
+    if(GN_Vk.vcnt > 0) {
         void *d;
-        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, gVCnt * sizeof(VkVertex), 0, &d);
-        memcpy(d, gVBuf, gVCnt * sizeof(VkVertex));
+        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, GN_Vk.vcnt * sizeof(VkVertex), 0, &d);
+        memcpy(d, GN_Vk.vbuf, GN_Vk.vcnt * sizeof(VkVertex));
         vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory);
         uint32_t prevEnd = 0;
-        for(uint32_t i = 0; i < s_batchCount; i++) {
-            uint32_t count = s_batchEnd[i] - prevEnd;
+        for(uint32_t i = 0; i < GN_Vk.batchCount; i++) {
+            uint32_t count = GN_Vk.batchEnd[i] - prevEnd;
             if(count > 0) {
                 vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame],
                                         VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0,
-                                        1, &s_batchDS[i], 0, 0);
+                                        1, &GN_Vk.batchDS[i], 0, 0);
                 VkDeviceSize offs[] = {prevEnd * sizeof(VkVertex)};
                 vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1,
                                        &GN_Vk.vertexBuffer, offs);
                 vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], count, 1, 0, 0);
             }
-            prevEnd = s_batchEnd[i];
+            prevEnd = GN_Vk.batchEnd[i];
         }
-        gVCnt = 0;
-        s_batchCount = 0;
-        s_lastDS = VK_NULL_HANDLE;
+        GN_Vk.vcnt = 0;
+        GN_Vk.batchCount = 0;
+        GN_Vk.lastDS = VK_NULL_HANDLE;
     }
-    if(s_inRenderPass) {
+    if(GN_Vk.inRenderPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_inRenderPass = false;
+        GN_Vk.inRenderPass = false;
     }
     s_inCubeShadowPass = true;
     return true;
@@ -224,14 +224,14 @@ void GN_VkCubeShadowFaceBegin(const sVEC3 &lightPos, uint32_t face, float nearZ,
     }
     s_shadowPassPipeline = GN_Vk.cubeShadowPipeline; // 让 GN_VkShadowDraw 用 cube 那条
     s_inShadowPass = true; // 让 GN_VkShadowDraw 认这个 pass
-    s_inRenderPass = true;
+    GN_Vk.inRenderPass = true;
 }
 
 void GN_VkCubeShadowFaceEnd() {
     if(!s_inCubeShadowPass || !s_inShadowPass) return;
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     s_inShadowPass = false;
-    s_inRenderPass = false;
+    GN_Vk.inRenderPass = false;
 }
 
 void GN_VkCubeShadowEnd() {
@@ -253,7 +253,7 @@ void GN_VkShadowPassEnd() {
     if(!GN_Vk.initialized || !s_inShadowPass) return;
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     s_inShadowPass = false;
-    s_inRenderPass = false; // 阴影渲染通道结束，无活跃通道
+    GN_Vk.inRenderPass = false; // 阴影渲染通道结束，无活跃通道
 }
 
 void GN_VkShadowDraw(const void *vertices, uint32_t vertexCount,
@@ -346,7 +346,7 @@ void GN_VkCompositeToSwapchain() {
     vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], 3, 1, 0, 0);
 
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-    s_inRenderPass = false;
+    GN_Vk.inRenderPass = false;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -389,30 +389,30 @@ void GN_VkBegin3DPassPBR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     // 偏移不按 pass 归零：同一帧可能先录 4 级 shadow pass，归零会覆盖其顶点数据
     // （已录制命令在提交时才读取缓冲）。帧首由 GN_VkBeginFrame 归零。
     // 刷新 2D 批次 (与 GN_VkBegin3DPass 相同逻辑)
-    if(gVCnt > 0) {
+    if(GN_Vk.vcnt > 0) {
         void *d;
-        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, gVCnt * sizeof(VkVertex), 0, &d);
-        memcpy(d, gVBuf, gVCnt * sizeof(VkVertex));
+        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, GN_Vk.vcnt * sizeof(VkVertex), 0, &d);
+        memcpy(d, GN_Vk.vbuf, GN_Vk.vcnt * sizeof(VkVertex));
         vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory);
         uint32_t prevEnd = 0;
-        for(uint32_t i = 0; i < s_batchCount; i++) {
-            uint32_t count = s_batchEnd[i] - prevEnd;
+        for(uint32_t i = 0; i < GN_Vk.batchCount; i++) {
+            uint32_t count = GN_Vk.batchEnd[i] - prevEnd;
             if(count > 0) {
-                vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &s_batchDS[i], 0, 0);
+                vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &GN_Vk.batchDS[i], 0, 0);
                 VkDeviceSize offs[] = {prevEnd * sizeof(VkVertex)};
                 vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &GN_Vk.vertexBuffer, offs);
                 vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], count, 1, 0, 0);
             }
-            prevEnd = s_batchEnd[i];
+            prevEnd = GN_Vk.batchEnd[i];
         }
-        gVCnt = 0;
-        s_batchCount = 0;
-        s_lastDS = VK_NULL_HANDLE;
+        GN_Vk.vcnt = 0;
+        GN_Vk.batchCount = 0;
+        GN_Vk.lastDS = VK_NULL_HANDLE;
     }
     // 结束当前渲染通道 (2D 或 空 — 阴影 Pass 后可能已无活跃通道)
-    if(s_inRenderPass) {
+    if(GN_Vk.inRenderPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_inRenderPass = false;
+        GN_Vk.inRenderPass = false;
     }
 
     // 更新场景 UBO
@@ -468,7 +468,7 @@ void GN_VkBegin3DPassPBR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
                             GN_Vk.pipelineLayoutPBR, 0, 1, &GN_Vk.descriptorSetPBR, 0, 0);
     s_in3DPass = true;
-    s_inRenderPass = true; // 3D 渲染通道活跃
+    GN_Vk.inRenderPass = true; // 3D 渲染通道活跃
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -490,24 +490,24 @@ void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     s_hasDeferredViewProj = true;
     // 同 PBR 路径：偏移按帧单调追加，帧首归零（避免覆盖同帧阴影 pass 的顶点数据）。
     // 刷新 2D 批次
-    if(gVCnt > 0) {
+    if(GN_Vk.vcnt > 0) {
         void *d;
-        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, gVCnt * sizeof(VkVertex), 0, &d);
-        memcpy(d, gVBuf, gVCnt * sizeof(VkVertex));
+        vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory, 0, GN_Vk.vcnt * sizeof(VkVertex), 0, &d);
+        memcpy(d, GN_Vk.vbuf, GN_Vk.vcnt * sizeof(VkVertex));
         vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory);
         uint32_t prevEnd = 0;
-        for(uint32_t i = 0; i < s_batchCount; i++) {
-            uint32_t count = s_batchEnd[i] - prevEnd;
+        for(uint32_t i = 0; i < GN_Vk.batchCount; i++) {
+            uint32_t count = GN_Vk.batchEnd[i] - prevEnd;
             if(count > 0) { vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], count, 1, 0, 0); }
-            prevEnd = s_batchEnd[i];
+            prevEnd = GN_Vk.batchEnd[i];
         }
-        gVCnt = 0;
-        s_batchCount = 0;
-        s_lastDS = VK_NULL_HANDLE;
+        GN_Vk.vcnt = 0;
+        GN_Vk.batchCount = 0;
+        GN_Vk.lastDS = VK_NULL_HANDLE;
     }
-    if(s_inRenderPass) {
+    if(GN_Vk.inRenderPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_inRenderPass = false;
+        GN_Vk.inRenderPass = false;
     }
     // 上传 SceneUBO
     {
@@ -544,7 +544,7 @@ void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.gBufferPipeline);
     vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.gBufferPipelineLayout, 0, 1, &GN_Vk.gBufferDescriptorSet, 0, 0);
     s_in3DPass = true;
-    s_inRenderPass = true;
+    GN_Vk.inRenderPass = true;
 }
 
 // G2b：SSAO Pass（在 GN_VkDraw3D_GBuffer 之后、GN_VkDeferredLighting 之前调用）。
@@ -555,11 +555,11 @@ void GN_VkSSAOPass() {
     if(s_in3DPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
         s_in3DPass = false;
-        s_inRenderPass = false;
+        GN_Vk.inRenderPass = false;
     }
     updateSsaoUniforms(s_deferredViewProj);
     recordSsaoPasses(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-    s_inRenderPass = false;
+    GN_Vk.inRenderPass = false;
 }
 
 // G4：SSGI Pass（在 GN_VkSSAOPass 之后、GN_VkDeferredLighting 之前调用）。
@@ -570,11 +570,11 @@ void GN_VkSSGIPass() {
     if(s_in3DPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
         s_in3DPass = false;
-        s_inRenderPass = false;
+        GN_Vk.inRenderPass = false;
     }
     updateSsgiUniforms(s_deferredViewProj);
     recordSsgiPasses(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-    s_inRenderPass = false;
+    GN_Vk.inRenderPass = false;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -755,7 +755,7 @@ void GN_VkDeferredLighting(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     if(s_in3DPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
         s_in3DPass = false;
-        s_inRenderPass = false;
+        GN_Vk.inRenderPass = false;
     }
     // G2b：写 GI UBO 的 invViewProj（偏移 192）——延迟 shader 用它重建世界位置，
     // 替代每像素 inverse(vp)。用修复后的 Mat44Inverse（纯平移矩阵也已正确）。
@@ -818,7 +818,7 @@ void GN_VkDeferredLighting(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.deferredLightPipelineLayout, 0, 1, &GN_Vk.deferredLightDescriptorSet, 0, 0);
     vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], 3, 1, 0, 0);
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-    s_inRenderPass = false;
+    GN_Vk.inRenderPass = false;
     // L1：延迟光照写入 HDR 目标后统一走合成（曝光/色调映射/Bloom）。
     GN_VkCompositeToSwapchain();
 }
