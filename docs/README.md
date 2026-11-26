@@ -72,7 +72,7 @@
 | [CORNELLBOX_PLAN.md](CORNELLBOX_PLAN.md) | 📋 已完成 | 独立 Cornell Box（`tests/cornellBox`），自由相机 + 光追预览 |
 | [MULTILAYER_RENDER_PIPELINE_PLAN.md](MULTILAYER_RENDER_PIPELINE_PLAN.md) | 📋 已完成 | 多层渲染设计；CPU 侧（`GN_RenderPipeline` / `GN_RenderQueue`）已落地，GPU 全路径分期推进 |
 | [LINUX_CLIPBOARD_VOLUME_PLAN.md](LINUX_CLIPBOARD_VOLUME_PLAN.md) | 📋 已完成 | X11 剪贴板 + ALSA 音量（OSS `/dev/mixer` 已废弃） |
-| [REFACTOR_PLAN.md](REFACTOR_PLAN.md) | 🚧 进行中 | `GN_Vk.cpp` 拆分等工程化重构，阶段 2 未收口 |
+| [REFACTOR_PLAN.md](REFACTOR_PLAN.md) | 🚧 进行中 | 工程化重构：C 彻底粒度已裁决（2026-11-26），G2 复核完成，冻结任务图 §13 |
 | [ENGINE_RT_GI_PLAN.md](ENGINE_RT_GI_PLAN.md) | 🚧 规划 | 把屏幕空间 GI 升级为 ray query；目前只在 `tests/cornellBox` 里验证过，引擎侧未接 |
 | [GI_RT_TYNDALL_PLAN.md](GI_RT_TYNDALL_PLAN.md) | 🚧 规划 | 光追 GI + 丁达尔；**无对应着色器，未实现** |
 | [NEXT_PHASE_PLAN.md](NEXT_PHASE_PLAN.md) | 🚧 规划 | 审查批（620bd0e）后的执行顺序：P0 遗留小修 → P1 容器内功能 → P2 真机/资产 → P3 设计批次 |
@@ -100,6 +100,7 @@
 | [BUFFER_SIZE_AUDIT.md](BUFFER_SIZE_AUDIT.md) | 📊 快照 | 2026-11-21 | 36 处 TODO → 0 |
 | [REMAINING_WORK_SUMMARY_2026-11-21.md](REMAINING_WORK_SUMMARY_2026-11-21.md) | 📊 快照 | 2026-11-21 | 那一轮的收敛单页 |
 | [CORNELL_RT_EXPOSURE_FIX.md](CORNELL_RT_EXPOSURE_FIX.md) | 📊 快照 | 2026-11-20 | 过曝/二次 sRGB 编码，已修复 |
+| [REFACTOR_REDTEAM_2026-11-26.md](REFACTOR_REDTEAM_2026-11-26.md) | 📊 快照 | 2026-11-26 | C 粒度裁决后六攻击面复核；发现项回写 REFACTOR_PLAN §13/§4 |
 | [LIGHT_PROBE_RT_ACCEL_ANALYSIS.md](LIGHT_PROBE_RT_ACCEL_ANALYSIS.md) | 📊 快照 | — | 光追探针加速结构分析 |
 
 ## 七、外部资料

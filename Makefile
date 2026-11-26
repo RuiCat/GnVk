@@ -644,11 +644,20 @@ smoke: $(TARGET) $(HEADLESS_BIN) $(GPU_CHECK_BIN) cornellBox mmdViewer imoScene 
 # ── CI 一条命令：构建 + 单测 + 无窗口渲染验收 + 示例冒烟 ──
 # 与 check 的区别：check 只跑纯逻辑单测（不需要 GPU）；ci 额外验真实渲染。
 .PHONY: ci
-ci: check smoke doc-check spv-check
+ci: check smoke doc-check spv-check lint-strict
 	@echo "$(GREEN)✅ ci 通过: 构建 + 单测 + 物理场景 + 无窗口渲染 + 示例冒烟 + 文档（数字 + 索引） + 内嵌 SPIR-V 一致$(RESET)"
 
 # ── 分层依赖检查（只报告；架构重组完成后改 --strict 进 make ci）──
 .PHONY: lint
+# 严格分层门禁（G3-0，2026-11-26）：白名单外越级实测为 0，纳入 ci 阻断。
+.PHONY: lint-strict
+lint-strict:
+	@echo "$(YELLOW)🧭 分层依赖检查（strict）...$(RESET)"
+	@bash tests/lint/layers.sh --strict
+	@bash tests/lint/output.sh
+	@bash tests/lint/context_groups.sh
+	@bash tests/lint/input.sh
+
 lint:
 	@echo "$(YELLOW)🧭 分层依赖检查...$(RESET)"
 	@bash tests/lint/layers.sh $(LINT_FLAGS)

@@ -1,12 +1,16 @@
 # GN_mini 工程化重构方案（候选 v0.1）
 
-> **状态**：🚧 进行中 — `GN_Vk.cpp` 拆分等工程化重构；阶段 2 尚未收口，本文是候选方案而非已冻结契约。
+> **状态**：🚧 进行中 — C 彻底粒度已裁决（2026-11-26），G2 红队复核完成（`REFACTOR_REDTEAM_2026-11-26.md`），冻结任务图见 §13。
 
-> **状态：候选，未冻结。** 本文是 G0–G3 草案：三个裁决点见第 10 节，独立红队复核留到执行启动前。
-> **进度**：阶段 0 完成；阶段 1 部分完成（67 用例 + `make check` + ASan/UBSan；headless 受环境阻塞）；阶段 2 进行中（`vkDevice.cpp` / `vkImageIo.cpp` / `vkImage.cpp` / `vkDraw2d.cpp` / `vkFrame2d.cpp` / `vk3dMesh.cpp` / `vk3dPasses.cpp` / `vk3dForward.cpp` / `vk3dInit.cpp` / `vk3dShutdown.cpp` 已抽出，`GN_Vk.cpp` 3690→1054 行，有效代码 <1000）。
-> **依据**：2026-10-26 本仓库实测——干净构建 0 error / 10,083 warnings；工作区 `libGN_mini.so` 链接 FFmpeg 8 已无法加载；
-> `samples/08_cube3d.cpp` 当前编译失败；未提交改动 9 文件 / +571 −68。
-> **范围**：本仓库 98 个 C++ 文件 / 58,359 物理行。**不新增渲染特性、不改 UI 视觉、不重写语言。**
+> **已裁决（2026-11-26，用户）**：D1=C 彻底 / D2=允许破坏式重命名 / D3=Linux-only 并如实声明 / D4=CMake + make 封装。见 §10。
+> **G2 红队复核**：`REFACTOR_REDTEAM_2026-11-26.md`（六攻击面；同一助手新上下文复核，非真正独立智能体，见该文档诚实性声明）。
+> **进度（2026-11-26 实测基线，取代 10-26 旧数）**：阶段 0/1 大部分已完成——`make ci` 门禁已建
+> （单测 **943**/0、gpuCheck **126**/0、smoke **13**/0、doc-check、spv-check），lavapipe 无窗口渲染每日可用；
+> 阶段 2 进行中：`GN_Vk.cpp` 3690→**1421** 行（已抽出 20+ 个 vk*.cpp），`GN_Format.cpp` 已按域拆成 6 文件；
+> 未拆超限文件：`GN_Array.h` **4016**、`GN_UiBase.cpp` **2669**、`GN_Vk.h` **1122**、`GN_FormatImgFile.cpp` **1041**。
+> 源文件 **185 cpp / 121 h**；文件级非常量 static **136**；扩展警告口径 **19385**（台账 §5.3）。
+> `samples/` 已不存在，消费者是 `tests/` 各 demo 与 `tests/imoScene` 资产管线。
+> **范围**：C 彻底 = c1–c8 全量（含 c4 上下文收敛、c6 CMake/平台、c7 质量门全量）。**不新增渲染特性、不改 UI 视觉、不重写语言。**
 
 ---
 
@@ -208,6 +212,14 @@ Vulkan 实现放 `graphics/vulkan/`；窗口/表面创建放 `platform/linux/win
 | C13 | 测试不得依赖真实 GPU | `make check` 在无 GPU CI 容器（Lavapipe）通过 | 硬 |
 | C14 | 版本号单一来源 | 构建生成的头 `GN_Version.h` 与文档一致；`make version-check` | 硬 |
 | C15 | 依赖与许可可追溯 | `external/` 每个目录有 `VERSION`/`LICENSE` 记录；根 `LICENSE` 存在 | 硬 |
+
+> **修订注（2026-11-26 裁决后）**：
+> - **C1 按 D2 修订**：不再要求「符号不减少、签名不变」。改为：每次破坏性符号变更必须
+>   ① 记入 `abi/changes.md`（旧名→新名/删除原因），② 仓内全部消费者（tests/demo/imoScene）同提交同步改，
+>   ③ CHANGELOG 记录。`abi/baseline.txt` 仍每批次更新，diff 非空时必须有对应登记。
+> - **C2 判定命令修正**：`lintCodeModularity.sh` 是外部 skill 工具，不在本仓库；仓内机检用
+>   `tests/lint/{layers,output,context_groups,input}.sh` + 行数统计。文件长度门禁以 `wc -l` 有效行口径登记。
+> - **A2 推翻**（D2）；**A1 生效**（D3）；§2.5「契约名冻结」改为「改名需登记 + 同步消费者」。
 
 ---
 
@@ -432,16 +444,16 @@ nm -D --defined-only libGN_mini.so | sort | diff abi/baseline.txt -   # 只允�
 
 ---
 
-## 10. 三关裁决点（待用户）
+## 10. 裁决记录（2026-11-26，用户已裁决）
 
-| 编号 | 决策 | 选项 | 推荐 | 代价 |
-|---|---|---|---|---|
-| D1 | 重构粒度 | A 保守 / B 标准 / C 彻底 | **B** | A 2–3 周、B 8–12 周、C 14–20 周（单人） |
-| D2 | 公共 API | 保持源码兼容 / 允许破坏式重命名 | **保持兼容** | 破坏式可少写兼容层，但示例与下游要同步改 |
-| D3 | 平台范围 | Linux-only 并如实声明 / 保留 4 平台目标 | **Linux-only** | 保留 4 平台需 +4–6 周且无验证环境 |
-| D4 | 构建系统 | CMake + make 封装 / 维持手写 Makefile | **CMake 封装** | 迁移 1–2 周；维护者需接受 CMake |
+| 编号 | 决策 | **裁决** | 对本文的影响 |
+|---|---|---|---|
+| D1 | 重构粒度 | **C 彻底**（c1–c8 全量，含上下文收敛 + CMake/平台 + 质量门全量） | §3 粒度表按 C 执行；工期口径 14–20 周（单人），执行体为助手会话时按批次推进 |
+| D2 | 公共 API | **允许破坏式重命名** | A2 假设推翻；C1 修订为「符号变更必须登记 + 仓内消费者同步改 + CHANGELOG 记录」（见 §4 修订注）；§2.5 契约名冻结改为「改名需登记」 |
+| D3 | 平台范围 | **Linux-only 并如实声明** | A1 生效；crosscheck/交叉编译目标标 experimental 并在文档如实声明（不静默删除能力）；**取代 2026-11-24 的「跨平台编译通过」验收口径** |
+| D4 | 构建系统 | **CMake + make 封装** | §2.6 生效；双构建 parity 期后删旧规则；现有 ci/lint/doc-check/stats 机制必须全部迁到 CMake 侧或经 make 封装保留 |
 
-> 裁决后进入 G2 独立红队（六攻击面），再冻结约束与任务图（G3）。
+> 裁决后流程：G2 红队复核（已完成，见 `REFACTOR_REDTEAM_2026-11-26.md`）→ G3 冻结任务图（§13）→ 按批次执行。
 
 ---
 
@@ -456,6 +468,26 @@ nm -D --defined-only libGN_mini.so | sort | diff abi/baseline.txt -   # 只允�
 7. 记录告警基线（按类），确定"新代码 0 新增告警"门禁（半天）。
 
 ---
+
+## 13. G3 冻结任务图（2026-11-26，C 粒度）
+
+> 阶段 0/1 的安全网大部分已建成（ci/unit/smoke/doc-check/spv-check），不再重做。
+> 每批次门禁：`make ci` 全绿 + `tests/lint/layers.sh --strict`（白名单收敛后）+ 符号 diff 有登记 + 行数机检。
+> move-only 提交用 `git diff --color-moved` 核对；单提交 ≤400 行、只动一个写域。
+
+| 批次 | 任务 | 写域 | 依赖 | 状态 |
+|---|---|---|---|---|
+| G3-0 | 门禁准备：建 `abi/baseline.txt`（nm -D）；layers.sh --strict 试跑并收敛白名单；自包含头测试脚本；C2 命令改仓内工具 | `abi/`、`tests/lint/`、`Makefile` | 无 | ✅ 2026-11-26：基线 4206 符号；--strict 越级 0 已进 ci；headers.sh 基线 67/121（abi/headers-baseline.txt，只许减）；C2 已修正 |
+| B2 | `GN_Vk.cpp` 1421 行拆完：vkRenderTarget（RT pass + sIMAGE 渲染目标）→ vkOffscreen（headless 离屏 swapchain）→ vkSwapchain（格式选择/Resize/2D 管线重建）→ vkInit 余量 | `src/graphics/_Vulkan/` | G3-0 | 🚧 第一刀完成：vkRenderTarget.cpp 206 行，GN_Vk.cpp 1421→1230；符号变更已登记 abi/changes.md |
+| B3 | `GN_Array.h` 4016 行 → containers/ 10 头 + 转发聚合头 | `src/core/containers/` | G3-0 | 待做 |
+| B4 | 其余超限：`GN_UiBase.cpp` 2669 按控件切；`GN_Vk.h` 1122 公共类型/内部声明分离；`GN_FormatImgFile.cpp` 1041 按编解码切 | `src/ui/`、`src/graphics/_Vulkan/`、`src/core/` | B2/B3 后 | 待做 |
+| B6 | 平台拆分 + Linux-only 如实声明（cross 目标标 experimental；README/GETTING_STARTED 同步） | `src/platform/`、`docs/` | B4 | 待做 |
+| B7 | 上下文收敛（c4）：sEngineContext + 默认上下文门面 → 渲染状态 → 资源缓存 → 输入/UI → 删 static（136 个） | 全仓（**串行**，一次一个模块） | B2–B6 | 待做 |
+| B8 | CMake + presets + make 薄封装；双构建 parity（同一单测/smoke 跑两套产物）后删旧规则 | `CMakeLists.txt`、`cmake/`、`Makefile` | B2–B6（可与 B7 并行） | 待做 |
+| B9 | 质量门全量（c7）：去 -fpermissive、C++17、告警预算 19385→<500、字符串安全清零、解析器 fuzz | 全仓 | B7/B8 | 待做 |
+| B10 | 文档与发布（c8）：版本单一来源、README 重写、ABI 基线随版本、过期文档退役 | `docs/`、`README.md` | 全部 | 待做 |
+
+**停止点**：每批次可独立停止，停止时保证绿构建 + 文档同步。B7 不得与拆分并行。
 
 ## 12. 不做什么
 

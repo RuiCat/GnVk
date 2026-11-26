@@ -2,6 +2,36 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — 重构裁决冻结（C 彻底）+ G3-0 门禁 + B2 第一刀 vkRenderTarget
+
+用户裁决 REFACTOR_PLAN 四决策：**D1=C 彻底 / D2=允许破坏式重命名 / D3=Linux-only 如实声明 / D4=CMake+make 封装**。
+按流程完成 G2 红队复核（`REFACTOR_REDTEAM_2026-11-26.md`，六攻击面；诚实性声明：同一助手新审查通道，非真正独立智能体）
+与 G3 冻结任务图（REFACTOR_PLAN §13，G3-0 → B2 → B3/B4 → B6 → B7∥B8 → B9 → B10）。
+
+### G3-0 门禁准备（已完成）
+
+| 项 | 结果 |
+|---|---|
+| ABI 基线 | `abi/baseline.txt` 4206 符号；比较按名不按地址；变更登记 `abi/changes.md` |
+| 分层 lint 进 ci | `layers.sh --strict` 实测白名单外越级 **0** ⇒ 新增 `lint-strict` 目标并纳入 `make ci` |
+| 头自包含测试 | `tests/lint/headers.sh`（C10）：基线 **67/121** 不能单独编译（`abi/headers-baseline.txt`，只许减）；--strict 供新目录用 |
+| C2 命令修正 | 原文引用仓外 skill 工具 ⇒ 改仓内 tests/lint/ 工具（§4 修订注） |
+| C1 修订 | D2 破坏式：符号变更须登记 + 仓内消费者同步 + CHANGELOG（不再要求符号不变） |
+
+### B2 第一刀：vkRenderTarget.cpp（move-only）
+
+`GN_Vk.cpp` **1421 → 1230** 行；拆出 `vkRenderTarget.cpp` **206** 行：
+RT 静态变量、`s_activeRT`/`s_rtInProgress` 定义、Create/Begin/EndRTRenderPass、
+`sIMAGE::BeginRender/EndRender/RenderTargetGet`、RT 销毁（`vkRenderTargetShutdown()`，GN_VkShutdown 调用）。
+接口声明进 `vkInternal.h`；Begin/End 去 static 改隐藏可见性。
+
+符号 diff（按名）：仅 `s_activeRT`/`s_rtInProgress` 移除导出（内部全局改隐藏，已登记 abi/changes.md）；
+公共 API 零变化。验收：单测 943/0、`make ci` 全绿（含新 lint-strict 门禁）。
+
+基线刷新：REFACTOR_PLAN 头部换 2026-11-26 实测（185 cpp/121 h、static 136、扩展警告 19385、
+GN_Array.h 4016 / GN_UiBase.cpp 2669 / GN_Vk.h 1122 待拆）；D3 取代 2026-11-24 跨平台编译验收口径，
+crosscheck 标 experimental 保留（不静默删除）。
+
 ## 2026-11-26 — P0 审查遗留小修（NEXT_PHASE_PLAN）：5 处修复，单测 940 → 943
 
 按 `docs/NEXT_PHASE_PLAN.md` P0 执行，台账 §5.4 全部转「已修复」。
