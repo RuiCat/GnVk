@@ -2,6 +2,25 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B4 第一刀：GN_UiBase.cpp 2670 → 38 行转发 + 8 个实现片段
+
+move-only 拆分（REFACTOR_PLAN §13 B4），单测 943/0，符号名 diff 为零。
+
+| 片段（.inc） | 行数 | 内容 |
+|---|---:|---|
+| uiScrollCtrl | 163 | cSCROLL_CTRL / cSCROLL_RECT |
+| uiScrollList | 271 | cSCROLL_LIST |
+| uiSelectList | 251 | cSELECT_LIST_ICON / TEXT |
+| uiPageSlider | 371 | cSELECT_CALL / cPAGE_BAR / cUI_PAGE_BAR / 选择按钮 / cSLIDER |
+| uiPalette | 461 | cPALETTE |
+| uiAxisBubble | 449 | sCTRL_AXIS / sBUBBLE |
+| uiTouchJoystick | 154 | cBUTTON_TOUCH / cJOYSTICK |
+| uiDataIO | 521 | 各控件序列化（zDataSave/zDataLoad/zSpecClone） |
+
+采用 .inc 实现片段 + 主文件按原顺序包含：**单编译单元语义不变**（static/宏跨段可见性原样保留），
+Makefile 的 *.cpp 通配不会重复编译片段。片段不是独立头（不进 headers.sh 扫描）。
+B4 余量：GN_Vk.h（1122）公共类型/内部声明分离、GN_FormatImgFile.cpp（1041）按编解码切。
+
 ## 2026-11-26 — B3：GN_Array.h 4016 行 → containers/ 11 片段（全自包含）
 
 move-only 拆分（REFACTOR_PLAN §13 B3），单测 943/0，符号名 diff 为零。
