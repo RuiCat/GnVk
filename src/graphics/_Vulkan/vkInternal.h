@@ -144,6 +144,14 @@ GN_VK_INTERNAL extern bool s_rtInProgress; // RT pass 进行中
 GN_VK_INTERNAL extern const uint32_t kHeadlessImageCount; // 离屏图张数（Init/Resize 用）
 GN_VK_INTERNAL bool createOffscreenSwapchain(uint32_t w, uint32_t h, uint32_t count);
 GN_VK_INTERNAL void destroyOffscreenSwapchain(); // 只释放图与显存；view 由调用方统一销毁
+
+// ── 交换链格式 / 2D 叠层 / resize（vkSwapchain.cpp）──────────────────
+GN_VK_INTERNAL extern VkRenderPass s_renderPass2DOverlay; // 2D 叠层 pass（Init 创建，Shutdown 销毁）
+GN_VK_INTERNAL extern VkFramebuffer *s_framebuffers2DOverlay; // 以 swapchainView 为附件，resize 重建
+GN_VK_INTERNAL bool isSrgbSwapchainFormat(VkFormat format);
+GN_VK_INTERNAL VkFormat chooseSwapchainFormat(const VkSurfaceFormatKHR *formats, uint32_t count);
+GN_VK_INTERNAL void createOverlayFramebuffers();
+GN_VK_INTERNAL void destroyOverlayFramebuffers();
 GN_VK_INTERNAL void Ensure3DBufferCapacity(uint32_t vtxSize, uint32_t idxSize);
 GN_VK_INTERNAL void init3DTargets();
 GN_VK_INTERNAL void init3DForward(const std::vector<uint32_t> &vertSpv,

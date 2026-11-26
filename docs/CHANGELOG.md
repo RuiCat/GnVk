@@ -2,6 +2,23 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B2 第二三刀：vkOffscreen + vkSwapchain（GN_Vk.cpp 1230 → 859）
+
+move-only 拆分（REFACTOR_PLAN §13 B2），单测 943/0，符号名 diff 为零。
+
+| 刀 | 新文件 | 内容 | GN_Vk.cpp |
+|---|---|---|---|
+| 二 | `vkOffscreen.cpp` 116 行 | 无窗口离屏目标：kHeadlessImageCount / chooseOffscreenFormat / create/destroyOffscreenSwapchain | 1230→1129 |
+| 三 | `vkSwapchain.cpp` 283 行 | 交换链格式选择（sRGB 优先）、2D 叠层 framebuffer 创建/销毁、recreate2DPipelines、GN_VkResize 完整重建编排 | 1129→859 |
+
+接口经 vkInternal.h 暴露（隐藏可见性）：create/destroyOffscreenSwapchain、kHeadlessImageCount、
+s_renderPass2DOverlay/s_framebuffers2DOverlay、chooseSwapchainFormat/isSrgbSwapchainFormat、
+create/destroyOverlayFramebuffers。GN_VkSwapchainIsSrgb/GN_VkResize 公共 API 原样保留。
+
+已知发现（登记不修）：`isSrgbSwapchainFormat` 在 vkPostProcess.cpp 另有一份全局定义（重复代码，
+链接无冲突）；后续去重批次处理。GN_Vk.cpp 余量：GN_VkInit ~540 行 + Begin2DPass/Shutdown/
+RenderFinish/Init3D 编排 + sIMAGE 上传，下一刀继续。
+
 ## 2026-11-26 — 重构裁决冻结（C 彻底）+ G3-0 门禁 + B2 第一刀 vkRenderTarget
 
 用户裁决 REFACTOR_PLAN 四决策：**D1=C 彻底 / D2=允许破坏式重命名 / D3=Linux-only 如实声明 / D4=CMake+make 封装**。
