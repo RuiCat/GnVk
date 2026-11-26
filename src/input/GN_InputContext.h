@@ -48,6 +48,14 @@ struct GN_InputContext {
     unsigned short aDitherRange = 16; //触摸映射为鼠标按下的防斗容忍范围
     unsigned int aTouch0DownTime = 0; //首个触摸点原位按紧不动还未映射为其它鼠键时的累计时间
     unsigned short *aIoMappingKeys = 0; //IO输入出映射键数据
+    // B7-5 审计迁入（原 GN_Input.cpp 函数内 static）：IME 上下文、静止判定时间戳、输出测试、感应器基准
+    GN::sIME_CONTEXT aImeContext = {false, false, 0, {0}}; // IME 上下文（GN::GetImeContext() 返回其引用）
+    unsigned int aLastMouseTime = 0; // 上次鼠标位置变化时间（250ms 静止判定）
+    unsigned int aLastTouchTime = 0; // 上次触摸位置变化时间
+    unsigned int aOutPutTestTime = 0; // 输出测试累计时间
+    unsigned int aOutPutTestChange = 10000; // 输出测试当前端口
+    float aSensorRx = 0.0f; // 感应器横向基准（首次有效值锚定）
+    float aSensorRz = 0.0f; // 感应器纵向基准
 };
 
 extern GN_InputContext GN_InputState; // 默认上下文（仿 GN_Vk / GN_Core）

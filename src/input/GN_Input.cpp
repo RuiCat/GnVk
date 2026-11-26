@@ -96,8 +96,8 @@ GN_InputContext GN_InputState; // 默认 input 上下文（仿 GN_Vk / GN_Core�
 
 // DA-M2 批 1b：IME 上下文（跨 TU 通过 GN::GetImeContext() 访问）。
 GN_INIT_API GN::sIME_CONTEXT &GN::GetImeContext() {
-    static GN::sIME_CONTEXT ctx = {false, false, 0, {0}};
-    return ctx;
+    // B7-5：IME 上下文存储已迁 GNg::GN_InputState.aImeContext（访问器语义不变）。
+    return GNg::GN_InputState.aImeContext;
 }
 
 GN_INIT_API unsigned int GT_RunTotalTime = 0;
@@ -466,9 +466,9 @@ GN_INIT_API void GF_SetMouseMoveState(unsigned short keys_state, int new_x, int 
         inp.parame[2] = new_y;
         GNg::GN_InputState.aInputRecList[GNg::GN_InputState.aInputRecId].push_back(inp);
     }
-    static unsigned int lastMouseTime = 0;
+    // B7-5：GNg::GN_InputState.aLastMouseTime 已迁 GNg::GN_InputState.aLastMouseTime。
     int vx, vy; /*模版代码:计算在额定时间内的位置差*/
-    if(GT_RunTotalTime - lastMouseTime > 250) {
+    if(GT_RunTotalTime - GNg::GN_InputState.aLastMouseTime > 250) {
         vx = 0;
         vy = 0;
     } else {
@@ -525,7 +525,7 @@ GN_INIT_API void GF_SetMouseMoveState(unsigned short keys_state, int new_x, int 
         }
     }
 #endif
-    lastMouseTime = GT_RunTotalTime;
+    GNg::GN_InputState.aLastMouseTime = GT_RunTotalTime;
     GT_IdleTime = 0;
 }
 /******************************************************** 触摸消息处理 ***************************************************************/
@@ -646,9 +646,9 @@ GN_INIT_API void GF_SetTouchMoveState(uint8 point_id, uint8 down_z, short new_x,
         inp.parame[3] = new_y;
         GNg::GN_InputState.aInputRecList[GNg::GN_InputState.aInputRecId].push_back(inp);
     }
-    static unsigned int lastTouchTime = 0;
+    // B7-5：GNg::GN_InputState.aLastTouchTime 已迁 GNg::GN_InputState.aLastTouchTime。
     short vx, vy; /*模版代码:计算在额定时间内的位置差*/
-    if(GT_RunTotalTime - lastTouchTime > 250) {
+    if(GT_RunTotalTime - GNg::GN_InputState.aLastTouchTime > 250) {
         vx = 0;
         vy = 0;
     } else {
@@ -671,7 +671,7 @@ GN_INIT_API void GF_SetTouchMoveState(uint8 point_id, uint8 down_z, short new_x,
         pv->touchSY[point_id] = (short)(vy * pv->zScreenRatioH);
     }
 #endif
-    lastTouchTime = GT_RunTotalTime;
+    GNg::GN_InputState.aLastTouchTime = GT_RunTotalTime;
     GT_IdleTime = 0;
 }
 /*************************************************************************************************************************************/
@@ -765,10 +765,10 @@ GN_INIT_API void GNio::OutPutAllOFF() {
     for(; i < n; ++i) OutPut(i, 0);
 }
 GN_INIT_API bool GNio::OutPutTestDisplay(unsigned int nTime, unsigned int port_chg_time) {
-    static unsigned int outPutTestIime = 0, change = 10000;
-    outPutTestIime += nTime;
-    unsigned int port = outPutTestIime / port_chg_time;
-    if(port != change) {
+    // B7-5：输出测试状态已迁 GNg::GN_InputState（aOutPutTestTime/aOutPutTestChange）。
+    GNg::GN_InputState.aOutPutTestTime += nTime;
+    unsigned int port = GNg::GN_InputState.aOutPutTestTime / port_chg_time;
+    if(port != GNg::GN_InputState.aOutPutTestChange) {
         if(port < 4) {
             switch(port) { //开头全部开两遍
                 case 0:
@@ -781,12 +781,12 @@ GN_INIT_API bool GNio::OutPutTestDisplay(unsigned int nTime, unsigned int port_c
             if(tp) OutPut(tp - 1, 0);
             if(tp < (int)GetOutPutNum()) OutPut(tp, 1);
             else {
-                outPutTestIime = 0;
-                change = 10000;
+                GNg::GN_InputState.aOutPutTestTime = 0;
+                GNg::GN_InputState.aOutPutTestChange = 10000;
                 return 0;
             }
         }
-        change = port;
+        GNg::GN_InputState.aOutPutTestChange = port;
     }
     if(port >= 4) GN_RunValueCheck(port - 4, "OUT PORT: ", port - 4);
     return 1;
@@ -862,13 +862,13 @@ GN_INIT_API void GN_InputProc(unsigned int nTime) {
             GN::Key[GK_W] = GNio::InFv[GI_WX] > -3.0f;
             GN::Key[GK_S] = GNio::InFv[GI_WX] < -5.0f;
 
-            static float Rx = 0.0f, Rz = 0.0f;
-            if(!Rx && GNio::InFv[GI_DX]) Rx = GNio::InFv[GI_DX];
-            if(!Rz && GNio::InFv[GI_DZ]) Rz = GNio::InFv[GI_DZ];
-            GN::Key[GK_LEFT] = GNio::InFv[GI_DX] - Rx < -1.0f;
-            GN::Key[GK_RIGHT] = GNio::InFv[GI_DX] - Rx > 1.0f;
-            GN::Key[GK_UP] = GNio::InFv[GI_DZ] - Rz > 1.0f;
-            GN::Key[GK_DOWN] = GNio::InFv[GI_DZ] - Rz < -1.0f;
+            // B7-5：感应器基准已迁 GNg::GN_InputState（aSensorRx/aSensorRz）。
+            if(!GNg::GN_InputState.aSensorRx && GNio::InFv[GI_DX]) GNg::GN_InputState.aSensorRx = GNio::InFv[GI_DX];
+            if(!GNg::GN_InputState.aSensorRz && GNio::InFv[GI_DZ]) GNg::GN_InputState.aSensorRz = GNio::InFv[GI_DZ];
+            GN::Key[GK_LEFT] = GNio::InFv[GI_DX] - GNg::GN_InputState.aSensorRx < -1.0f;
+            GN::Key[GK_RIGHT] = GNio::InFv[GI_DX] - GNg::GN_InputState.aSensorRx > 1.0f;
+            GN::Key[GK_UP] = GNio::InFv[GI_DZ] - GNg::GN_InputState.aSensorRz > 1.0f;
+            GN::Key[GK_DOWN] = GNio::InFv[GI_DZ] - GNg::GN_InputState.aSensorRz < -1.0f;
         }
     }
     if(GN::MouseT[0]) GN::MouseT[0] += nTime;

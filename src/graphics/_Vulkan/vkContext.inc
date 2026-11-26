@@ -124,6 +124,7 @@ struct GN_VkContext {
         VkDeviceMemory pendingStagingMems[32] = {};
         int pendingStagingCnt = 0;
         unsigned int alphaColorKey = 0; // B7-2：原 vkDraw2d.cpp s_alphaColorKey（SetAlphaColorKey 写入）
+        unsigned short lastBlendMode = 1; // B7-5：原 vkDraw2d.cpp ImageDraw 内 static（混排管线缓存）
     };
 
     // ── sForwardRes：3D 前向：MSAA/深度、3D 管线与 UBO、PBR（含透明变体）、阴影 CSM、3D 动态顶点索引
@@ -339,6 +340,7 @@ struct GN_VkContext {
         VkFramebuffer *deferredLightFramebuffers;
         VkPipelineLayout gBufferDebugPipelineLayout;
         VkPipeline gBufferDebugPipeline;
+        uint32_t probeCursor = 0; // B7-5：原 vkProbe.cpp 更新函数内 static（探针轮转游标）
     };
 
     // 说明：粒子 / 布料 / 贴花 / 降水的 GPU 资源不在本结构体内，

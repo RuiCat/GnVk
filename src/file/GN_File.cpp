@@ -895,22 +895,21 @@ GN_FileContext GN_FileState; // 默认 file 上下文（仿 GN_Vk / GN_Core）
 GN_API void GN_Log(const char *fmt, ...) {
     if(!GN_RunErrorOutputOn) return;
 
-    // run_filename 缓存的是「路径解析结果」，但 GN_RunErrorFileName 是可以被调用方改的
+    // GNg::GN_FileState.aRunLogFileName 缓存的是「路径解析结果」，但 GN_RunErrorFileName 是可以被调用方改的
     // （头文件注释明说了支持改日志名，服务器场景要带日期）。
-    // 旧实现只看 run_filename 是否为空，改了 GN_RunErrorFileName 不会重新解析，
+    // 旧实现只看 GNg::GN_FileState.aRunLogFileName 是否为空，改了 GN_RunErrorFileName 不会重新解析，
     // 日志继续写到旧文件——由 testLog 暴露。
-    static char run_filename[256] = {0};
-    static char cached_target[128] = {0};
+    // B7-5：GNg::GN_FileState.aRunLogFileName/GNg::GN_FileState.aRunLogCachedTarget 已迁 GNg::GN_FileState（aRunLogFileName/aRunLogCachedTarget）。
     const char *want = GN_RunErrorFileName ? GN_RunErrorFileName : "RunLog.txt";
-    if(!run_filename[0] || strncmp(cached_target, want, sizeof(cached_target) - 1) != 0) {
-        strncpy(cached_target, want, sizeof(cached_target) - 1);
-        cached_target[sizeof(cached_target) - 1] = 0;
+    if(!GNg::GN_FileState.aRunLogFileName[0] || strncmp(GNg::GN_FileState.aRunLogCachedTarget, want, sizeof(GNg::GN_FileState.aRunLogCachedTarget) - 1) != 0) {
+        strncpy(GNg::GN_FileState.aRunLogCachedTarget, want, sizeof(GNg::GN_FileState.aRunLogCachedTarget) - 1);
+        GNg::GN_FileState.aRunLogCachedTarget[sizeof(GNg::GN_FileState.aRunLogCachedTarget) - 1] = 0;
         GNf_DirStatePush(false);
-        GN_StrToSysFilePath(run_filename, want, "w", false);
+        GN_StrToSysFilePath(GNg::GN_FileState.aRunLogFileName, want, "w", false);
         GNf_DirStatePop();
         GNg::GN_FileState.aRunLogOpenMode[0] = 'w'; // 换了文件就重新开头写
     }
-    FILE *fp = fopen(run_filename, GNg::GN_FileState.aRunLogOpenMode);
+    FILE *fp = fopen(GNg::GN_FileState.aRunLogFileName, GNg::GN_FileState.aRunLogOpenMode);
     if(fp) {
         va_list va;
         va_start(va, fmt);
@@ -973,17 +972,17 @@ GN_API void GN_PluginFileAudioAdd(int *module, GT_PFUNC_VOID create_func) {
     (((GNa::iFILE_AUDIO * (*)()) create_func)())->module = module;
 }
 GN_API int GN_PluginsLoad_(const char *class_name, void (*add_plugin_func)(int *, GT_PFUNC_VOID)) {
-    static char pluginsDir[128] = "Plugins/";
-    char *pstr = pluginsDir + 8;
+    // B7-5：GNg::GN_FileState.aPluginsDir 已迁 GNg::GN_FileState.aPluginsDir（初值 "Plugins/"）。
+    char *pstr = GNg::GN_FileState.aPluginsDir + 8;
     strncpy(pstr, class_name, 128 - 8 - 1);
-    pluginsDir[128 - 1] = 0;
+    GNg::GN_FileState.aPluginsDir[128 - 1] = 0;
     pstr += strlen(class_name);
     *pstr = '/';
     ++pstr;
-    strncpy(pstr, "*.*", 128 - (int)(pstr - pluginsDir) - 1);
-    pluginsDir[128 - 1] = 0;
+    strncpy(pstr, "*.*", 128 - (int)(pstr - GNg::GN_FileState.aPluginsDir) - 1);
+    GNg::GN_FileState.aPluginsDir[128 - 1] = 0;
     GN::sLIST<P<GNf::sFILE_INFO>> files, dirs;
-    if(GNf::FindFileDirInfoData(pluginsDir, false, &files, &dirs, 0) || dirs.empty()) return 0;
+    if(GNf::FindFileDirInfoData(GNg::GN_FileState.aPluginsDir, false, &files, &dirs, 0) || dirs.empty()) return 0;
     int *mod, mod_num = 0;
     char *v__, *version = GN_INTERFACE_VERSION, *version1, *del_plugin_str = " 如您不想要该插件 可以前往该插件目录把它删除即可!";
     char *const (*vfunc)();
@@ -998,19 +997,19 @@ GN_API int GN_PluginsLoad_(const char *class_name, void (*add_plugin_func)(int *
             if(dir_name[1] == 0 || (dir_name[1] == '.' && dir_name[2] == 0)) continue;
         }
         sprintf(pstr, "%s/%s%s", dir_name, dir_name, GN_StrGetModuleExtName(GN_eMODULE_DLL));
-        mod = GT_ModuleOpen(pluginsDir);
+        mod = GT_ModuleOpen(GNg::GN_FileState.aPluginsDir);
         if(mod) {
             vfunc = (char *const (*)())GT_ModuleGetFunction(mod, "Version");
             if(vfunc) {
                 version1 = vfunc();
                 v__ = strchr(version, '.');
                 if(strncmp(version1, version, v__ - version)) {
-                    GN_Log("插件 %s 版本 %s 与引擎版本 %s 不兼容! 容易造成程序闪退 %s\n", pluginsDir, version1, version, del_plugin_str);
+                    GN_Log("插件 %s 版本 %s 与引擎版本 %s 不兼容! 容易造成程序闪退 %s\n", GNg::GN_FileState.aPluginsDir, version1, version, del_plugin_str);
                 } else if(atoi(strchr(version1, '.') + 1) > atoi(v__ + 1)) {
-                    GN_Log("插件 %s 次版本 %s 大于引擎次版本 %s ! 容易造成程序闪退 %s\n", pluginsDir, version1, version, del_plugin_str);
+                    GN_Log("插件 %s 次版本 %s 大于引擎次版本 %s ! 容易造成程序闪退 %s\n", GNg::GN_FileState.aPluginsDir, version1, version, del_plugin_str);
                 }
             } else {
-                GN_Log("未能获取到插件 %s 版本! 容易造成程序闪退 %s\n", pluginsDir, del_plugin_str);
+                GN_Log("未能获取到插件 %s 版本! 容易造成程序闪退 %s\n", GNg::GN_FileState.aPluginsDir, del_plugin_str);
             }
             pfunc = GT_ModuleGetFunction(mod, "Create");
             if(pfunc || vfunc) {
@@ -1018,9 +1017,9 @@ GN_API int GN_PluginsLoad_(const char *class_name, void (*add_plugin_func)(int *
                 ++mod_num;
             } else {
                 GT_ModuleClose(mod);
-                GN_Log("加载插件 %s 失败! 插件不完整 缺少创建方法 %s\n", pluginsDir, del_plugin_str);
+                GN_Log("加载插件 %s 失败! 插件不完整 缺少创建方法 %s\n", GNg::GN_FileState.aPluginsDir, del_plugin_str);
             }
-        } else GN_Log("加载插件 %s 失败! 插件损坏或与引擎版本 %s 不兼容! %s\n", pluginsDir, version, del_plugin_str);
+        } else GN_Log("加载插件 %s 失败! 插件损坏或与引擎版本 %s 不兼容! %s\n", GNg::GN_FileState.aPluginsDir, version, del_plugin_str);
     }
     return mod_num;
 }

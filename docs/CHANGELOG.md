@@ -2,6 +2,25 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-27 — B7-5：函数内 static 审计 + 全仓复审 + 多实例测试（c4 收尾）
+
+**审计裁决（30 项函数内 static，逐类理由见账本 B7-5 审计记录）**：
+- 迁入上下文（10）：GN_File `run_filename/cached_target/pluginsDir` → GN_FileState；
+  GN_Input IME 上下文/静止时间戳/输出测试/感应器基准 → GN_InputState；
+  vkDraw2d `s_lastBlendMode` → GN_Vk.s2DRes.lastBlendMode、vkProbe `cursor` → GN_Vk.sDeferredRes.probeCursor。
+- 保留（20）：warn-once 标记、strlen/容量常量缓存、thread_local/临时缓冲、平台分支字符串、进程级 RNG 与
+  色彩动画、访问器持有的 ui/网络上下文（留后续批）。
+
+**全仓复审**：文件级 static 33 项清单已迁 28、余 5（GN_2D/GN_2Dtype/GN_Parallel/GN_NetTrans/sysProcess）；
+补迁账本漏计的 GT_FileBrowserLast（B7-4）与新发现 sysProcClipboard.inc 两项（原扫描未覆盖 .inc）；
+非渲染模块（网络/媒体/平台/ui 弹窗）与 L2 图形 API 上下文、纹理环集缓存、公共 API 变量逐条登记为留后续批。
+
+**多实例测试（+3 例）**：门面多实例契约（第二门面与单例指向同一批默认子系统）、上下文结构本地实例独立性
+（GN_CoreContext/GN_MainContext/GN_FileContext）、迁入函数内 static 初值。
+
+验证：单测 **955/0**；make ci 全绿（构建+场景+smoke 13/0+doc-check+spv-check+lint-strict）；
+ABI **零变化**（无符号增删）；写域机检 0 违规 0 告警；文档索引状态更新为「已完成」。
+
 ## 2026-11-27 — B7-4：输入/UI/平台/音频上下文（c4 第四批）
 
 **迁移**（14 个文件级 static → 4 个子系统上下文，引用全在定义文件内）：

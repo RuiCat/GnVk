@@ -1,6 +1,6 @@
 # B7 static 收敛账本（c4）
 
-> **状态**：🚧 进行中 — B7-1…B7-4 完成（门面 + 2D 帧状态 + 渲染状态 + 资源缓存 + 输入/UI/平台/音频）；余审计批次
+> **状态**：✅ 已完成 — B7 全批（B7-1…B7-5）；口径、批次与审计记录见下。
 
 ## 口径
 
@@ -17,7 +17,7 @@
 | B7-2 | 渲染状态余量：vk3dPasses/vk3dShutdown/vkRenderTarget/vkImageData 等 file static + 3D pass extern | ✅ 2026-11-26，24 变量 → GN_Vk（s3DPassRes/sRtRes/sSwapchainRes/s2DRes + 3 顶层命名成员），948/0，ABI 登记 1 移除；范围与留后续批见文末登记 |
 | B7-3 | 资源缓存：core（GN_Init/GN_Format*）+ file（GN_File） | ✅ 2026-11-26，6 变量 → GNg::GN_Core / GN_FileState（新品 2 头），950/0，ABI 登记 2 强新增 + 弱变更 2/2；公共配置变量保留见文末登记 |
 | B7-4 | 输入/UI/平台：GN_Input、GN_UiFBrowser、GN_Main（9 static）、GN_Sound | ✅ 2026-11-27，14 变量 → GN_InputState/GN_UiBrowserState/GN_MainState/GN_SoundState（新品 4 头），952/0，ABI 登记 4 强新增 + 弱变更 4/4；预览上下文与公共变量保留见文末登记 |
-| B7-5 | 函数内 static 审计 + 全仓复审 + 多实例测试 | 待做 |
+| B7-5 | 函数内 static 审计 + 全仓复审 + 多实例测试 | ✅ 2026-11-27，30 项函数内 static 审计（迁 10 / 留 20，逐类登记）；全仓复审补 2 项漏计（sysProcClipboard.inc）；多实例契约测试 +3 例；955/0，ABI 零变化；留后续批清单见文末 |
 
 ## 文件级 static 变量清单（33）
 
@@ -113,7 +113,7 @@
 - L206 `gFbPreviewContext`
 
 
-## 函数内 static 清单（30，B7-5 审计）
+## 函数内 static 清单（30，B7-5 审计结果见文末）
 
 
 ### src/core/GN_Base.cpp（1）
@@ -242,6 +242,53 @@ sysEncoding.inc 应用目录（GT_CurAppDir*）。vkImageTypes.inc 的 7 个为�
 - 各子系统自有 GPU 资源（vkBloom/vkCloudCube/vkParticle*/vkCloth*/vkAtmosphereLut/vkSkinSsbo 等）：
   vkContext.inc 设计注释明确保留文件内静态，不在 B7 收敛范围（B7-5 审计复核该决定）。
 - GN_Parallel/GN_NetTrans/sysProcess.inc 等非渲染模块 static：未分批，B7-5 审计盘点。
+
+## B7-5 审计记录（2026-11-27）
+
+### 函数内 static（30 项）逐项裁决
+
+**迁入上下文（10 项）**：
+- GN_File.cpp `run_filename`/`cached_target` → `GN_FileState.aRunLogFileName[256]`/`aRunLogCachedTarget[128]`；
+  `pluginsDir` → `aPluginsDir[128]`（初值 "Plugins/"）。
+- GN_Input.cpp `GN::sIME_CONTEXT ctx`（GN::GetImeContext 的存储）→ `GN_InputState.aImeContext`；
+  `lastMouseTime`/`lastTouchTime` → `aLastMouseTime`/`aLastTouchTime`；`outPutTestIime`/`change` →
+  `aOutPutTestTime`/`aOutPutTestChange`（初值 10000）；`Rx`/`Rz` → `aSensorRx`/`aSensorRz`。
+- vkDraw2d.cpp `s_lastBlendMode` → `GN_Vk.s2DRes.lastBlendMode`（初值 1）；vkProbe.cpp `cursor` →
+  `GN_Vk.sDeferredRes.probeCursor`。
+
+**保留（20 项，逐类理由）**：
+- 警告一次标记（2）：vk3dForward/vk3dPasses 的 `warned`——只影响日志频次，无状态语义。
+- 计算常量缓存（6）：GN_NetTrans `bs/ds/fs/ts`（strlen 常量）、`max_send_size`；GN_Input `sensorCaps`（惰性平台查询，
+  静态初始化期取会早于平台初始化）；vkInit `s_layerNames/s_extNames`（实例创建期临时向量）。
+- 临时缓冲/线程临时（3）：GN_Character `aSweepScratch`（thread_local）、GN_UiFBrowser `cloneName`、
+  GN_Media `avVersionStr`（返回值指向的格式化缓冲，契约要求持久）。
+- 平台事实/进程级语义（5）：sysMutexIo `sysInfo`（三平台分支各一份，仅一个编译）、sysProcess `start_run_time`、
+  GN_Color `Tr/Tg/Tb`（色彩动画宏内状态）、GN_Base `seed`（进程级 RNG 序列，公共语义）、GN_Media `zAV_Register`
+  （类静态成员，原账本误记为函数内）。
+- 其余（4）：GN_UiPopDlgMenu `sPopDlgContext`（访问器持有，ui）、GN_NetBase `sNetAddrContext`（访问器持有，网络）、
+  GN_NetTrans `en_addr`（网络通知地址）、GN_Main 分支内 `static int`（随 sys* 批走）。
+
+### 全仓复审（B7 收口盘点）
+
+- 文件级/命名空间级 static：33 项清单中已迁 28、余 5；另补迁账本漏计的 1 项（GN_UiFBrowser GT_FileBrowserLast）。
+  函数内 static：30 项中迁 10、留 20。
+- 剩余文件级 static（5 + 2 新发现）：
+  * `GN_2D.cpp gScissorContext`、`GN_2Dtype.cpp gImageLoadContext`：L2 图形 API 层，收敛需跨层白名单 → 留后续「L2 图形 API 上下文」批。
+  * `GN_Parallel.cpp gParallelContext`（并行任务上下文）、`GN_NetTrans.cpp gNetTransContext`、`sysProcess.inc gUserThreadContext`。
+  * **新发现（原扫描未覆盖 .inc）**：`sysProcClipboard.inc gClipboardContext`、`GT_X11Clip`（X11 剪贴板）。
+- 非渲染状态清单（未批次化，后续按需）：网络（NetBase/NetTrans 上下文与函数内 static）、媒体（AVI/ffmpeg 状态）、
+  平台（sysEncoding.inc `GT_CurAppDir*` Android 分支、sysProc* 各 .inc）、ui 弹窗（GN_UiPopDlgMenu 上下文）。
+- 按设计保留：纹理环集缓存（vk3dForward/vk3dPasses 描述符缓存，非平凡类型）、各子系统自有 GPU 资源
+  （vkContext.inc 注释）、公共 API 变量（GT_MainWindow/GT_AppDefault_*/GT_pFunc*/GT_SYS_*/GN_RunError*/
+  GN_ErrorLast/List/GN_Words/GT_RunTotal*/GT_IdleTime/GT_MouseCkN）。
+- 口径订正：GN_Media `zAV_Register` 实为类静态成员（非函数内）；账号清单以本记录为准。
+
+### 多实例测试（+3 例）
+
+- `engineContextMultiInstanceContract`：栈上第二门面与单例指向同一批默认子系统上下文（多实例语义变更必须改测试）。
+- `coreContextSecondInstanceIndependent`：GN_CoreContext/GN_MainContext/GN_FileContext 本地实例默认值正确且与全局互不影响。
+- `migratedFunctionStaticDefaults`：迁入的 4 个可安全断言的初值（输出测试端口/感应器基准/IME 状态）。
+
 
 ## B7-3 范围登记（2026-11-26）
 

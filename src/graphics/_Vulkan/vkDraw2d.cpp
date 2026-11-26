@@ -25,8 +25,8 @@ void ImageDraw(sIMAGE *img, int x, int y, int w, int h, unsigned int color, unsi
     BatchSwitch(ds);
     vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipelineLayout, 0, 1, &ds, 0, 0);
     // Select blend pipeline per draw call
-    static unsigned short s_lastBlendMode = 1;
-    if(blendmode != s_lastBlendMode) {
+    // B7-5：混排管线缓存已迁 GN_Vk.s2DRes.lastBlendMode（初值 1=eBLEND_NORMAL）。
+    if(blendmode != GN_Vk.lastBlendMode) {
         VkPipeline pipe = GN_Vk.pipeline; // default: eBLEND_NORMAL (1)
         switch(blendmode) {
             case 0: pipe = GN_Vk.pipelineNull; break; // NULL: no blend
@@ -38,7 +38,7 @@ void ImageDraw(sIMAGE *img, int x, int y, int w, int h, unsigned int color, unsi
             default: pipe = GN_Vk.pipeline; break;
         }
         vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-        s_lastBlendMode = blendmode;
+        GN_Vk.lastBlendMode = blendmode;
     }
     float u0 = (u1 == 0 && v1 == 0 && u2 == 0 && v2 == 0) ? 0.0f : u1, v0 = (u1 == 0 && v1 == 0 && u2 == 0 && v2 == 0) ? 0.0f : v1;
     float ue = (u1 == 0 && v1 == 0 && u2 == 0 && v2 == 0) ? (img ? img->uRange : 1.0f) : u2, ve = (u1 == 0 && v1 == 0 && u2 == 0 && v2 == 0) ? (img ? img->vRange : 1.0f) : v2;

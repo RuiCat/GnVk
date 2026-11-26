@@ -256,13 +256,13 @@ void GN_VkSetProbeWeight(float weight) {
 void GN_VkUpdateProbes() {
     if(GN_Vk.probeUBOMemory == VK_NULL_HANDLE || !sProbeGrid.IsValid()) return;
     if(probeWeight() <= 0.0f) return;
-    static uint32_t cursor = 0;
+    // B7-5：探针轮转游标已迁 GN_Vk.sDeferredRes.probeCursor。
     float sh9[9][4];
     readEnvironmentSh(sh9);
     bool changed = false;
     for(int n = 0; n < 2; ++n) {
-        const uint32_t index = cursor % sProbeGrid.GetProbeCount();
-        ++cursor;
+        const uint32_t index = GN_Vk.probeCursor % sProbeGrid.GetProbeCount();
+        ++GN_Vk.probeCursor;
         if(sProbeGrid.BlendProbeSh(index, sh9, 0.15f)) changed = true;
     }
     if(changed) uploadProbeTextures();

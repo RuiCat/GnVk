@@ -70,3 +70,43 @@ TEST_CASE(subsystemContextDefaults) {
     CHECK(GNg::GN_UiBrowserState.aLastFileBrowser == nullptr);
     CHECK(GNg::GN_SoundState.aAlDevice == nullptr);
 }
+
+TEST_CASE(engineContextMultiInstanceContract) {
+    // 多实例契约：栈上第二个门面实例与单例指向同一批默认子系统上下文。
+    // 各子系统真正独立实例化尚未开放（c4 逐步开放）；本用例锁定当前默认语义。
+    sEngineContext second;
+    sEngineContext &def = GN_GetEngineContext();
+    CHECK(&second != &def);
+    CHECK(second.vk == def.vk && second.core == def.core && second.file == def.file);
+    CHECK(second.input == def.input && second.ui == def.ui);
+    CHECK(second.platform == def.platform && second.audio == def.audio);
+    CHECK(second.core == &GNg::GN_Core && second.platform == &GNg::GN_MainState);
+}
+
+TEST_CASE(coreContextSecondInstanceIndependent) {
+    // 上下文结构本身可多实例：本地实例默认值与全局一致，写入互不影响
+    GNg::GN_CoreContext local;
+    CHECK(std::strcmp(local.aSysDir, "assets/") == 0);
+    CHECK(local.aAppDir[0] == 0);
+    CHECK(local.aSysFile == local.aSysDir + 7);
+    CHECK(local.aAppFile == local.aAppDir);
+    local.aImgRowEndID = 42;
+    CHECK(local.aImgRowEndID == 42);
+    CHECK(GNg::GN_Core.aImgRowEndID == 0); // 全局未受影响
+    // 平凡上下文同理
+    GNg::GN_MainContext mc;
+    mc.aFirstCursor = false;
+    CHECK(!mc.aFirstCursor);
+    CHECK(GNg::GN_MainState.aFirstCursor); // 全局仍是首帧标记
+    GNg::GN_FileContext fc;
+    CHECK(fc.aRunLogOpenMode[0] == 'w');
+    CHECK(fc.aPluginsDir[0] == 'P');
+}
+
+TEST_CASE(migratedFunctionStaticDefaults) {
+    // B7-5 迁入的函数内 static 初值与原 static 一致（选只由显式调用改写的项，避免跨用例顺序依赖）
+    CHECK(GNg::GN_InputState.aOutPutTestChange == 10000);
+    CHECK(GNg::GN_InputState.aSensorRx == 0.0f);
+    CHECK(GNg::GN_InputState.aSensorRz == 0.0f);
+    CHECK(!GNg::GN_InputState.aImeContext.aImeOn);
+}

@@ -73,7 +73,7 @@
 | [MULTILAYER_RENDER_PIPELINE_PLAN.md](MULTILAYER_RENDER_PIPELINE_PLAN.md) | 📋 已完成 | 多层渲染设计；CPU 侧（`GN_RenderPipeline` / `GN_RenderQueue`）已落地，GPU 全路径分期推进 |
 | [LINUX_CLIPBOARD_VOLUME_PLAN.md](LINUX_CLIPBOARD_VOLUME_PLAN.md) | 📋 已完成 | X11 剪贴板 + ALSA 音量（OSS `/dev/mixer` 已废弃） |
 | [REFACTOR_PLAN.md](REFACTOR_PLAN.md) | 🚧 进行中 | 工程化重构：C 彻底粒度已裁决（2026-11-26），G2 复核完成，冻结任务图 §13 |
-| [B7_STATIC_LEDGER.md](B7_STATIC_LEDGER.md) | 🚧 进行中 | B7 static 收敛账本（c4）：精确口径、批次计划、逐变量清单 |
+| [B7_STATIC_LEDGER.md](B7_STATIC_LEDGER.md) | ✅ 已完成 | B7 static 收敛账本（c4）：精确口径、批次计划、逐变量清单、B7-5 审计记录 |
 | [ENGINE_RT_GI_PLAN.md](ENGINE_RT_GI_PLAN.md) | 🚧 规划 | 把屏幕空间 GI 升级为 ray query；目前只在 `tests/cornellBox` 里验证过，引擎侧未接 |
 | [GI_RT_TYNDALL_PLAN.md](GI_RT_TYNDALL_PLAN.md) | 🚧 规划 | 光追 GI + 丁达尔；**无对应着色器，未实现** |
 | [NEXT_PHASE_PLAN.md](NEXT_PHASE_PLAN.md) | 🚧 规划 | 审查批（620bd0e）后的执行顺序：P0 遗留小修 → P1 容器内功能 → P2 真机/资产 → P3 设计批次 |
