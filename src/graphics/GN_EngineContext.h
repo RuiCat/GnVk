@@ -14,12 +14,20 @@ namespace GNg {
 struct GN_VkContext; // 定义在 _Vulkan/GN_Vk.h；前向声明避免 L2→L3 越级包含
 struct GN_CoreContext; // 定义在 core/GN_CoreContext.h（L1）
 struct GN_FileContext; // 定义在 file/GN_FileContext.h（L1）
+struct GN_InputContext; // 定义在 input/GN_InputContext.h（L5，B7-4）
+struct GN_UiBrowserContext; // 定义在 ui/GN_UiBrowserContext.h（L5，B7-4）
+struct GN_MainContext; // 定义在 platform/_Main/GN_MainContext.h（L0，B7-4）
+struct GN_SoundContext; // 定义在 audio/_Sound/GN_SoundContext.h（L5，B7-4）
 } // namespace GNg
 
 struct sEngineContext {
     GNg::GN_VkContext *vk; // 渲染子系统上下文；默认指向全局 GN_Vk
     GNg::GN_CoreContext *core; // core 子系统上下文（B7-3）；默认指向全局 GN_Core
     GNg::GN_FileContext *file; // file 子系统上下文（B7-3）；默认指向全局 GN_FileState
+    GNg::GN_InputContext *input; // 输入子系统上下文（B7-4）；默认指向全局 GN_InputState
+    GNg::GN_UiBrowserContext *ui; // ui 文件浏览上下文（B7-4）；默认指向全局 GN_UiBrowserState
+    GNg::GN_MainContext *platform; // 平台主循环上下文（B7-4）；默认指向全局 GN_MainState
+    GNg::GN_SoundContext *audio; // 音频子系统上下文（B7-4）；默认指向全局 GN_SoundState
     sEngineContext();
 };
 

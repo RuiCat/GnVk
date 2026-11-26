@@ -1,6 +1,6 @@
 # B7 static 收敛账本（c4）
 
-> **状态**：🚧 进行中 — B7-1/B7-2/B7-3 完成（门面 + 2D 帧状态 + 渲染状态 + 资源缓存）；余输入UI/审计批次
+> **状态**：🚧 进行中 — B7-1…B7-4 完成（门面 + 2D 帧状态 + 渲染状态 + 资源缓存 + 输入/UI/平台/音频）；余审计批次
 
 ## 口径
 
@@ -16,13 +16,13 @@
 | B7-1 | sEngineContext 门面 + vkFrame2d.cpp 2D 帧状态（16 变量 → GN_Vk.s2DRes） | ✅ 2026-11-26，945/0，ABI 登记 3 移除 3 新增 |
 | B7-2 | 渲染状态余量：vk3dPasses/vk3dShutdown/vkRenderTarget/vkImageData 等 file static + 3D pass extern | ✅ 2026-11-26，24 变量 → GN_Vk（s3DPassRes/sRtRes/sSwapchainRes/s2DRes + 3 顶层命名成员），948/0，ABI 登记 1 移除；范围与留后续批见文末登记 |
 | B7-3 | 资源缓存：core（GN_Init/GN_Format*）+ file（GN_File） | ✅ 2026-11-26，6 变量 → GNg::GN_Core / GN_FileState（新品 2 头），950/0，ABI 登记 2 强新增 + 弱变更 2/2；公共配置变量保留见文末登记 |
-| B7-4 | 输入/UI/平台：GN_Input、GN_UiFBrowser、GN_Main（9 static）、GN_Sound | 待做 |
+| B7-4 | 输入/UI/平台：GN_Input、GN_UiFBrowser、GN_Main（9 static）、GN_Sound | ✅ 2026-11-27，14 变量 → GN_InputState/GN_UiBrowserState/GN_MainState/GN_SoundState（新品 4 头），952/0，ABI 登记 4 强新增 + 弱变更 4/4；预览上下文与公共变量保留见文末登记 |
 | B7-5 | 函数内 static 审计 + 全仓复审 + 多实例测试 | 待做 |
 
 ## 文件级 static 变量清单（33）
 
 
-### src/audio/_Sound/GN_Sound.cpp（1，待迁）
+### src/audio/_Sound/GN_Sound.cpp（1，✅ B7-4 迁 GNg::GN_SoundState）
 
 - L856 `gSoundAlContext`
 
@@ -83,7 +83,7 @@
 
 - L18 `s_lastSkinnedPath`
 
-### src/input/GN_Input.cpp（1，待迁）
+### src/input/GN_Input.cpp（1，✅ B7-4 迁 GNg::GN_InputState）
 
 - L125 `gInputContext`
 
@@ -91,7 +91,7 @@
 
 - L1215 `gNetTransContext`
 
-### src/platform/_Main/GN_Main.cpp（9，待迁）
+### src/platform/_Main/GN_Main.cpp（9，✅ B7-4 迁 GNg::GN_MainState）
 
 - L16 `GT_PENDING_RESIZE_W`
 - L17 `GT_PENDING_RESIZE_H`
@@ -107,7 +107,7 @@
 
 - L207 `gUserThreadContext`
 
-### src/ui/GN_UiFBrowser.cpp（2，待迁）
+### src/ui/GN_UiFBrowser.cpp（2，✅ B7-4：gFbContext → GN_UiBrowserState；gFbPreviewContext 留（宏关闭不可验证）；另补迁账本漏计的 GT_FileBrowserLast → aLastFileBrowser）
 
 - L59 `gFbContext`
 - L206 `gFbPreviewContext`

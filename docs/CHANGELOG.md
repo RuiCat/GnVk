@@ -2,6 +2,25 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-27 — B7-4：输入/UI/平台/音频上下文（c4 第四批）
+
+**迁移**（14 个文件级 static → 4 个子系统上下文，引用全在定义文件内）：
+- 新头 `src/input/GN_InputContext.h` + `GNg::GN_InputState`：sINPUT_CONTEXT（DA-M2 批 1/批 3 的输入上下文组合成结构）；
+  GT_sINPUT_PARAME 声明随迁（方法定义留 GN_Input.cpp）。导出计时变量 GT_RunTotalTime 等（listWheel.h 内联模板直读）保留。
+- 新头 `src/ui/GN_UiBrowserContext.h` + `GNg::GN_UiBrowserState`：sUI_FB_CONTEXT（16 字段）+ 账本漏计的文件级
+  GT_FileBrowserLast（迁 aLastFileBrowser）。预览上下文 gFbPreviewContext 在 GN_USING_FILE_PREVIEW 关闭时不参与
+  编译、迁移不可验证 → 留 B7-5 登记。
+- 新头 `src/platform/_Main/GN_MainContext.h` + `GNg::GN_MainState`：resize 挂起值、光标位置/逐帧累积/首帧标记、IME 缓冲（9 static）。
+- 新头 `src/audio/_Sound/GN_SoundContext.h` + `GNg::GN_SoundState`：OpenAL 设备/上下文句柄（void* 存储，避免把分平台 AL 头拉进上下文头；
+  GN_Sound.cpp 内转型）。GT_SoundInitError 属 WinCE 分支保留。
+- 门面 `sEngineContext` 增 input/ui/platform/audio 指针；layers.sh 白名单新增 3 条（门面→L5 上下文头，只取实例地址）。
+
+**ABI**（D2，已登记 abi/changes.md）：新增导出 GN_InputState/GN_UiBrowserState/GN_MainState/GN_SoundState；
+弱符号 4 移除（旧 sINPUT_CONTEXT/sUI_FB_CONTEXT 析构）/4 新增（新上下文析构）。
+
+验证：单测 **950→952/0**（+2 例）；make ci 全绿（smoke 13/0 + doc-check + spv-check + lint-strict）；
+headers.sh 新 4 头自包含通过；写域机检仅存 ui 文件历史超限（净 −13 行，按逃生条款登记）。
+
 ## 2026-11-26 — B7-3：资源缓存上下文（c4 第三批）
 
 **迁移**（6 个文件级 static → 子系统上下文；引用全在定义文件内，沿用现有访问器语义）：

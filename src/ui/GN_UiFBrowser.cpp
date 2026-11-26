@@ -25,6 +25,7 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 
 #include "GN.h"
 #include "GN_Def.h"
+#include "GN_UiBrowserContext.h" // B7-4：文件浏览子系统上下文
 #ifdef _GN_UIFBROWSER_H_
 
 #define GN_USING_FILE_PREVIEW
@@ -38,25 +39,11 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
     memset(buf0, 0, dsize);                                                              \
     icon.DataFill(buf0, IMG->cFormat); //第0层贴图为空
 
-// DA-M2 批 2a：文件浏览器 15 个文件内全局收敛进上下文；批 2b 再把依赖本地类型的 GT_FilePreviewGenList 收起（见类定义后）。
-struct sUI_FB_CONTEXT {
-    P<GNg::sIMAGE> aDefIconImg;
-    uint8 *aIconBackData = 0;
-    uint8 *aIconFrameData = 0;
-    GNg::COLOR_FORMAT aIconBackCfmt;
-    GNg::COLOR_FORMAT aIconFrameCfmt;
-    int aIconBackW = -1;
-    int aIconBackH;
-    int aIconFrameX;
-    int aIconFrameY;
-    int aIconFrameW;
-    int aIconFrameH;
-    GNg::sRECT aPicInIconRange;
-    bool aShowPreview = false;
-    P<GNg::cFRAME> aDefFrameAct;
-    P<P<char>> aExtNameTable;
-};
-static sUI_FB_CONTEXT gFbContext;
+// B7-4：文件浏览上下文（原 DA-M2 批 2a 的 sUI_FB_CONTEXT + 文件级 GNg::GN_UiBrowserState.aLastFileBrowser）已迁
+// GN_UiBrowserContext.h，状态经全局 GN_UiBrowserState 访问。
+namespace GNg {
+GN_UiBrowserContext GN_UiBrowserState; // 默认 ui 文件浏览上下文（仿 GN_Vk / GN_Core）
+} // namespace GNg
 
 
 #ifdef GN_USING_FILE_PREVIEW /********************************************** 文件缩图预览功能 ****************************************************************************/
@@ -83,9 +70,9 @@ void GT_FbIconOptInitToData() {
 #define GT_TMP_FB_LOAD_DEF_EMPTY_ICON(PATH_, V)                                                                                          \
     file_name__ = 0, file_name = GN_SysDir(PATH_);                                                                                       \
     GT_ImageFileNameSet(file_name, &ifname_len, &_add_0000_, &file_name__);                                                              \
-    gFbContext.aIcon##V##Data = GT_ImageFileLoadToData(file_name__, ifname_len, 0, 0, &gFbContext.aIcon##V##Cfmt, &gFbContext.aIcon##V##W, &gFbContext.aIcon##V##H); \
+    GNg::GN_UiBrowserState.aIcon##V##Data = GT_ImageFileLoadToData(file_name__, ifname_len, 0, 0, &GNg::GN_UiBrowserState.aIcon##V##Cfmt, &GNg::GN_UiBrowserState.aIcon##V##W, &GNg::GN_UiBrowserState.aIcon##V##H); \
     if(file_name__) delete[] file_name__;                                                                                                \
-    if(!gFbContext.aIcon##V##Data) { GN_Log("读取图象文件失败! 找不到文件 : %s\n" /*"Load Image file faile! do not file : %s\n"*/, file_name); }
+    if(!GNg::GN_UiBrowserState.aIcon##V##Data) { GN_Log("读取图象文件失败! 找不到文件 : %s\n" /*"Load Image file faile! do not file : %s\n"*/, file_name); }
 
     GT_TMP_FB_LOAD_DEF_EMPTY_ICON("fileicon/load_icon", Back)
     GT_TMP_FB_LOAD_DEF_EMPTY_ICON("fileicon/load_iconF", Frame)
@@ -95,7 +82,7 @@ void GT_FbIconOptInitToData() {
     char *ini_file_buf = GNf::FileFullLoadToMemoryText(file_name, &fsize);
     if(ini_file_buf) {
         char arg_name1[64], arg_name2[64];
-        if(sscanf(ini_file_buf, "%s %d %d %d %d %s %d %d", arg_name1, &gFbContext.aPicInIconRange.left, &gFbContext.aPicInIconRange.top, &gFbContext.aPicInIconRange.right, &gFbContext.aPicInIconRange.bottom, arg_name2, &gFbContext.aIconFrameX, &gFbContext.aIconFrameY) != 8) {
+        if(sscanf(ini_file_buf, "%s %d %d %d %d %s %d %d", arg_name1, &GNg::GN_UiBrowserState.aPicInIconRange.left, &GNg::GN_UiBrowserState.aPicInIconRange.top, &GNg::GN_UiBrowserState.aPicInIconRange.right, &GNg::GN_UiBrowserState.aPicInIconRange.bottom, arg_name2, &GNg::GN_UiBrowserState.aIconFrameX, &GNg::GN_UiBrowserState.aIconFrameY) != 8) {
             GN_Log("%s 文件图标筐信息设置不正确! 应按这样的格式来设置\nrange 预览图填充区相对图标的偏移位置X Y 预览图填充宽度 高度\nframeOffset 图标筐显示相对图标的偏移位置X Y\n示范:\nrange 3 5 48 48\nframeOffset 2 2\n\n", file_name);
             fsize = 0;
         }
@@ -103,49 +90,49 @@ void GT_FbIconOptInitToData() {
     } else {
         GN_Log("读取文件图标筐信息失败! 找不到文件: %s\n" /*"load file icon frame info faile! do not file: %s\n"*/, file_name);
     }
-    int def_icon_w = gFbContext.aDefIconImg->width, def_icon_h = gFbContext.aDefIconImg->height;
+    int def_icon_w = GNg::GN_UiBrowserState.aDefIconImg->width, def_icon_h = GNg::GN_UiBrowserState.aDefIconImg->height;
     if(!fsize) {
-        gFbContext.aPicInIconRange.Init(0, 0, def_icon_w, def_icon_h);
-        gFbContext.aIconFrameX = gFbContext.aIconFrameY = 0;
+        GNg::GN_UiBrowserState.aPicInIconRange.Init(0, 0, def_icon_w, def_icon_h);
+        GNg::GN_UiBrowserState.aIconFrameX = GNg::GN_UiBrowserState.aIconFrameY = 0;
     }
     //检查这些信息有没指定正确 -------------------------------------------------------------
-    if(gFbContext.aIconBackData) {
+    if(GNg::GN_UiBrowserState.aIconBackData) {
         uint8 *tem_img_data = 0;
-        if(gFbContext.aIconBackW != def_icon_w || gFbContext.aIconBackH != def_icon_h) {
-            int pd = GNg::ImgFmtGetByteNum(gFbContext.aIconBackCfmt);
+        if(GNg::GN_UiBrowserState.aIconBackW != def_icon_w || GNg::GN_UiBrowserState.aIconBackH != def_icon_h) {
+            int pd = GNg::ImgFmtGetByteNum(GNg::GN_UiBrowserState.aIconBackCfmt);
             tem_img_data = new uint8[def_icon_w * def_icon_h * pd]; //图大小不匹配就缩放到一致
-            GNg::ImgScale(tem_img_data, def_icon_w, def_icon_h, gFbContext.aIconBackData, gFbContext.aIconBackW, gFbContext.aIconBackH, pd);
-            delete[] gFbContext.aIconBackData;
-            gFbContext.aIconBackData = tem_img_data;
-            gFbContext.aIconBackW = def_icon_w;
-            gFbContext.aIconBackH = def_icon_h;
+            GNg::ImgScale(tem_img_data, def_icon_w, def_icon_h, GNg::GN_UiBrowserState.aIconBackData, GNg::GN_UiBrowserState.aIconBackW, GNg::GN_UiBrowserState.aIconBackH, pd);
+            delete[] GNg::GN_UiBrowserState.aIconBackData;
+            GNg::GN_UiBrowserState.aIconBackData = tem_img_data;
+            GNg::GN_UiBrowserState.aIconBackW = def_icon_w;
+            GNg::GN_UiBrowserState.aIconBackH = def_icon_h;
         }
-        if(gFbContext.aIconBackCfmt != GNg::CR_RGBA) { //图不是RGBA个格式
-            tem_img_data = new uint8[gFbContext.aIconBackW * gFbContext.aIconBackH * GNg::ImgFmtGetByteNum(GNg::CR_RGBA)];
-            GNg::ImgFmtConvertTs(tem_img_data, GNg::CR_RGBA, gFbContext.aIconBackData, gFbContext.aIconBackCfmt, gFbContext.aIconBackW * gFbContext.aIconBackH, false);
-            delete[] gFbContext.aIconBackData;
-            gFbContext.aIconBackData = tem_img_data;
+        if(GNg::GN_UiBrowserState.aIconBackCfmt != GNg::CR_RGBA) { //图不是RGBA个格式
+            tem_img_data = new uint8[GNg::GN_UiBrowserState.aIconBackW * GNg::GN_UiBrowserState.aIconBackH * GNg::ImgFmtGetByteNum(GNg::CR_RGBA)];
+            GNg::ImgFmtConvertTs(tem_img_data, GNg::CR_RGBA, GNg::GN_UiBrowserState.aIconBackData, GNg::GN_UiBrowserState.aIconBackCfmt, GNg::GN_UiBrowserState.aIconBackW * GNg::GN_UiBrowserState.aIconBackH, false);
+            delete[] GNg::GN_UiBrowserState.aIconBackData;
+            GNg::GN_UiBrowserState.aIconBackData = tem_img_data;
         }
         bool in_pic_out_range = false;
-        if(gFbContext.aPicInIconRange.left + gFbContext.aPicInIconRange.right > gFbContext.aIconBackW) {
-            gFbContext.aPicInIconRange.left = 0;
-            gFbContext.aPicInIconRange.right = gFbContext.aIconBackW;
+        if(GNg::GN_UiBrowserState.aPicInIconRange.left + GNg::GN_UiBrowserState.aPicInIconRange.right > GNg::GN_UiBrowserState.aIconBackW) {
+            GNg::GN_UiBrowserState.aPicInIconRange.left = 0;
+            GNg::GN_UiBrowserState.aPicInIconRange.right = GNg::GN_UiBrowserState.aIconBackW;
             in_pic_out_range = true;
         }
-        if(gFbContext.aPicInIconRange.top + gFbContext.aPicInIconRange.bottom > gFbContext.aIconBackH) {
-            gFbContext.aPicInIconRange.top = 0;
-            gFbContext.aPicInIconRange.bottom = gFbContext.aIconBackH;
+        if(GNg::GN_UiBrowserState.aPicInIconRange.top + GNg::GN_UiBrowserState.aPicInIconRange.bottom > GNg::GN_UiBrowserState.aIconBackH) {
+            GNg::GN_UiBrowserState.aPicInIconRange.top = 0;
+            GNg::GN_UiBrowserState.aPicInIconRange.bottom = GNg::GN_UiBrowserState.aIconBackH;
             in_pic_out_range = true;
         }
         if(in_pic_out_range) { GN_Log("指定的预览图填充区超出图标范围!\n"); }
-    } else gFbContext.aIconBackW = 0;
+    } else GNg::GN_UiBrowserState.aIconBackW = 0;
 
-    if(gFbContext.aIconFrameData) {
-        if(gFbContext.aIconFrameCfmt != GNg::CR_RGBA) {
-            GN_DeleteArray(gFbContext.aIconFrameData);
+    if(GNg::GN_UiBrowserState.aIconFrameData) {
+        if(GNg::GN_UiBrowserState.aIconFrameCfmt != GNg::CR_RGBA) {
+            GN_DeleteArray(GNg::GN_UiBrowserState.aIconFrameData);
             GN_Log("文件图标加筐的图不是RGBA 32位格式的! 将不能正确加在图标上面, 该图标筐将被忽略\n");
-        } else if(gFbContext.aIconFrameX + gFbContext.aIconFrameW > gFbContext.aIconBackW || gFbContext.aIconFrameY + gFbContext.aIconFrameH > gFbContext.aIconBackH) {
-            GN_DeleteArray(gFbContext.aIconFrameData);
+        } else if(GNg::GN_UiBrowserState.aIconFrameX + GNg::GN_UiBrowserState.aIconFrameW > GNg::GN_UiBrowserState.aIconBackW || GNg::GN_UiBrowserState.aIconFrameY + GNg::GN_UiBrowserState.aIconFrameH > GNg::GN_UiBrowserState.aIconBackH) {
+            GN_DeleteArray(GNg::GN_UiBrowserState.aIconFrameData);
             GN_Log("文件图标加筐的范围超出图标本身! 图标筐将被忽略\n");
         }
     }
@@ -153,9 +140,9 @@ void GT_FbIconOptInitToData() {
 }
 //释放图标加框操作内部资源
 void GT_FbIconOptRelease() {
-    GN_DeleteArray(gFbContext.aIconBackData);
-    GN_DeleteArray(gFbContext.aIconFrameData);
-    gFbContext.aIconBackW = -1;
+    GN_DeleteArray(GNg::GN_UiBrowserState.aIconBackData);
+    GN_DeleteArray(GNg::GN_UiBrowserState.aIconFrameData);
+    GNg::GN_UiBrowserState.aIconBackW = -1;
 }
 /*********************************************************** GT_cFILE_PREVIEW_GEN ************************************************************/
 //#define GT_FB_ICON_FILL_FULL //如图片比较小时也填满图标筐
@@ -206,7 +193,7 @@ struct sUI_FB_PREVIEW_CONTEXT {
 static sUI_FB_PREVIEW_CONTEXT gFbPreviewContext;
 
 GT_cFILE_PREVIEW_GEN::GT_cFILE_PREVIEW_GEN(void *fb_hinstance) : zDatas(0), zStates(0), zIconNum(0) {
-    if(gFbContext.aIconBackW == -1) {
+    if(GNg::GN_UiBrowserState.aIconBackW == -1) {
         GT_FbIconOptInitToData(); //-1表示还未初始化
     }
 }
@@ -326,7 +313,7 @@ void GT_cFILE_PREVIEW_GEN::IconDataLoadAndGenProc() {
                         t_data = 0; //图片数据与图标所需的数据匹配
                     } else {
                         icon_data = new uint8[icon_dsize];
-                        if(!gFbContext.aIconBackData || cr_format == GNg::CR_RGBA || cr_format == GNg::CR_LUMINANCE_ALPHA || cr_format == GNg::CR_ALPHA) { //含透明的图标处理
+                        if(!GNg::GN_UiBrowserState.aIconBackData || cr_format == GNg::CR_RGBA || cr_format == GNg::CR_LUMINANCE_ALPHA || cr_format == GNg::CR_ALPHA) { //含透明的图标处理
 #ifndef GT_FB_ICON_FILL_FULL
                             _tw = tw < zIconW ? tw : zIconW;
                             _th = th < zIconH ? th : zIconH;
@@ -360,15 +347,15 @@ void GT_cFILE_PREVIEW_GEN::IconDataLoadAndGenProc() {
                                 }
                             }
                         } else { //不含透明的图标处理 必须转换颜色格式
-                            memcpy(icon_data, gFbContext.aIconBackData, icon_dsize);
-                            if(tw == gFbContext.aPicInIconRange.right && th == gFbContext.aPicInIconRange.bottom) //图片尺寸与想要的尺寸大小匹配
-                                GNg::ImgTsBlt(t_data, tw, 0, 0, tw, th, icon_data, zIconW, gFbContext.aPicInIconRange.left, gFbContext.aPicInIconRange.top, cr_format, GNg::CR_RGBA);
+                            memcpy(icon_data, GNg::GN_UiBrowserState.aIconBackData, icon_dsize);
+                            if(tw == GNg::GN_UiBrowserState.aPicInIconRange.right && th == GNg::GN_UiBrowserState.aPicInIconRange.bottom) //图片尺寸与想要的尺寸大小匹配
+                                GNg::ImgTsBlt(t_data, tw, 0, 0, tw, th, icon_data, zIconW, GNg::GN_UiBrowserState.aPicInIconRange.left, GNg::GN_UiBrowserState.aPicInIconRange.top, cr_format, GNg::CR_RGBA);
                             else { //把读出的图象填充到中间
-                                GNg::ImgScale(tmp_buf, gFbContext.aPicInIconRange.right, gFbContext.aPicInIconRange.bottom, t_data, tw, th, px_byte);
-                                GNg::ImgTsBlt(tmp_buf, gFbContext.aPicInIconRange.right, 0, 0, gFbContext.aPicInIconRange.right, gFbContext.aPicInIconRange.bottom, icon_data, zIconW, gFbContext.aPicInIconRange.left, gFbContext.aPicInIconRange.top, cr_format, GNg::CR_RGBA);
+                                GNg::ImgScale(tmp_buf, GNg::GN_UiBrowserState.aPicInIconRange.right, GNg::GN_UiBrowserState.aPicInIconRange.bottom, t_data, tw, th, px_byte);
+                                GNg::ImgTsBlt(tmp_buf, GNg::GN_UiBrowserState.aPicInIconRange.right, 0, 0, GNg::GN_UiBrowserState.aPicInIconRange.right, GNg::GN_UiBrowserState.aPicInIconRange.bottom, icon_data, zIconW, GNg::GN_UiBrowserState.aPicInIconRange.left, GNg::GN_UiBrowserState.aPicInIconRange.top, cr_format, GNg::CR_RGBA);
                             } //加入反光膜
-                            if(gFbContext.aIconFrameData)
-                                GNg::ImgBlendRGBAtoRGBAusNormal(gFbContext.aIconFrameData, gFbContext.aIconFrameW, 0, 0, gFbContext.aIconFrameW, gFbContext.aIconFrameH, icon_data, zIconW, gFbContext.aIconFrameX, gFbContext.aIconFrameY);
+                            if(GNg::GN_UiBrowserState.aIconFrameData)
+                                GNg::ImgBlendRGBAtoRGBAusNormal(GNg::GN_UiBrowserState.aIconFrameData, GNg::GN_UiBrowserState.aIconFrameW, 0, 0, GNg::GN_UiBrowserState.aIconFrameW, GNg::GN_UiBrowserState.aIconFrameH, icon_data, zIconW, GNg::GN_UiBrowserState.aIconFrameX, GNg::GN_UiBrowserState.aIconFrameY);
                         }
                     }
                     zDatas[fi] = icon_data;
@@ -475,7 +462,7 @@ bool (*GNu::cFILE_BROWSER::aOnIconDrawCallBack)(void *relate_id, int fi, int is_
 
 
 void GNu::cFILE_BROWSER::SetShowPreview(bool yes) {
-    gFbContext.aShowPreview = yes;
+    GNg::GN_UiBrowserState.aShowPreview = yes;
 }
 void GNu::cFILE_BROWSER::UsShowPreview(bool yes) {
     if(yes) {
@@ -535,12 +522,12 @@ GNu::cFILE_BROWSER::~cFILE_BROWSER() {
 #ifdef GN_USING_FILE_PREVIE
         GT_FbIconOptRelease();
 #endif
-        gFbContext.aExtNameTable.Delete();
-        gFbContext.aDefIconImg.Delete();
-        if(gFbContext.aDefFrameAct) {
-            GNg::sAM_EVENT *_fev = gFbContext.aDefFrameAct->zFEvent;
+        GNg::GN_UiBrowserState.aExtNameTable.Delete();
+        GNg::GN_UiBrowserState.aDefIconImg.Delete();
+        if(GNg::GN_UiBrowserState.aDefFrameAct) {
+            GNg::sAM_EVENT *_fev = GNg::GN_UiBrowserState.aDefFrameAct->zFEvent;
             GN_DeleteArray(_fev);
-            gFbContext.aDefFrameAct.Delete();
+            GNg::GN_UiBrowserState.aDefFrameAct.Delete();
         }
     }
 }
@@ -590,19 +577,19 @@ void GNu::cFILE_BROWSER::SetEffect(short focus_flash_time, P<GNg::cFRAME_LAUNCHE
     zReLoadIcon = true;
 }
 GNg::sIMAGE *GNu::cFILE_BROWSER::GetIcon() {
-    if(!gFbContext.aDefIconImg) {
+    if(!GNg::GN_UiBrowserState.aDefIconImg) {
         GNf_DirStatePush(false);
         int fsize;
         char *ini_filename = GN_SysDir("fileicon/file_icon.ini");
         char *ini_file_buf = GNf::FileFullLoadToMemoryText(ini_filename, &fsize);
         if(ini_file_buf) {
-            gFbContext.aExtNameTable = GN_StrSplitToData(ini_file_buf, '\n');
+            GNg::GN_UiBrowserState.aExtNameTable = GN_StrSplitToData(ini_file_buf, '\n');
             delete[] ini_file_buf;
 
-            if(gFbContext.aExtNameTable.Num()) {
-                gFbContext.aDefIconImg.New(1);
-                GNg::sIMAGE *_img = gFbContext.aDefIconImg;
-                if(GNg::ImageLoad(GN_SysDir("fileicon/file_icon"), (unsigned short)gFbContext.aExtNameTable.Num() + 2, _img)) {
+            if(GNg::GN_UiBrowserState.aExtNameTable.Num()) {
+                GNg::GN_UiBrowserState.aDefIconImg.New(1);
+                GNg::sIMAGE *_img = GNg::GN_UiBrowserState.aDefIconImg;
+                if(GNg::ImageLoad(GN_SysDir("fileicon/file_icon"), (unsigned short)GNg::GN_UiBrowserState.aExtNameTable.Num() + 2, _img)) {
                     // Vulkan: 跳过OpenGL纹理合并(texture数组未使用, 避免heap corruption)
                     (void)_img;
                 } else GN_Log("读取文件浏览默认文件图标失败!\n");
@@ -610,17 +597,17 @@ GNg::sIMAGE *GNu::cFILE_BROWSER::GetIcon() {
         } else GN_Log("读取文件浏览默认能识别的文件扩展名列表失败! 找不到文件: %s\n", ini_filename);
         GNf_DirStatePop();
     }
-    if(gFbContext.aDefIconImg) return (GNg::sIMAGE *)gFbContext.aDefIconImg;
+    if(GNg::GN_UiBrowserState.aDefIconImg) return (GNg::sIMAGE *)GNg::GN_UiBrowserState.aDefIconImg;
     else return 0;
 }
 void GNu::cFILE_BROWSER::zInitInternalObj(short fx, short fy, short fw, short fh, short tw) {
     GT_TMP_UI_OffsetArrowInit();
     if(!zFFrames) {
-        if(!gFbContext.aDefFrameAct) {
+        if(!GNg::GN_UiBrowserState.aDefFrameAct) {
             GNg::sAM_EVENT *fev = new GNg::sAM_EVENT[1];
             fev->Init(GNg::eEVENT_SIZE_X | GNg::eEVENT_SIZE_Y, 0, 120, 1.0f, 1.3f);
-            gFbContext.aDefFrameAct.New(1);
-            gFbContext.aDefFrameAct->Init(0, 1, fev GT_TMP_DEF_FRAME_INIT_ARGS_ONCE_KEEP);
+            GNg::GN_UiBrowserState.aDefFrameAct.New(1);
+            GNg::GN_UiBrowserState.aDefFrameAct->Init(0, 1, fev GT_TMP_DEF_FRAME_INIT_ARGS_ONCE_KEEP);
         }
         if(!zFrameIcon) {
             GNg::sIMAGE *p_img = GetIcon();
@@ -636,7 +623,7 @@ void GNu::cFILE_BROWSER::zInitInternalObj(short fx, short fy, short fw, short fh
 
         GNg::sARRANGE_FMT afmt(0, 0.0f, 0.0f, w2, 0, 0, 0, GNg::eENTER_LEFT_RIGHT, 0, 0);
         GNg::sRECT2 arc2d((float)fx, (float)fy, (float)(fx + fw), (float)(fy + fh));
-        zFFrames->InitToData(_frame_icon, GNg::cFRAME_LAUNCHER_FONT::aPicIndex, 1, &arc2d, &afmt, 0.0f, 1000, 0, 127, 0, 127, 127, 0, 0, 0, gFbContext.aDefFrameAct, true);
+        zFFrames->InitToData(_frame_icon, GNg::cFRAME_LAUNCHER_FONT::aPicIndex, 1, &arc2d, &afmt, 0.0f, 1000, 0, 127, 0, 127, 127, 0, 0, 0, GNg::GN_UiBrowserState.aDefFrameAct, true);
     } else SetPos(fx, fy, fw, fh);
 }
 void GNu::cFILE_BROWSER::zSetIconChange(unsigned int fid, unsigned int pid) {
@@ -947,18 +934,18 @@ void GNu::cFILE_BROWSER::Search(bool wait, char *dir, const char *search_mode, b
 void GNu::cFILE_BROWSER::Search_exec(bool wait, char *dir, void (*proc)(GNf::sFILE_INFO *file_info)) {
     if(!zTkThread) Search(wait, dir, "*.*", true, proc);
 }
-static GNu::cFILE_BROWSER *GT_FileBrowserLast = 0;
+// B7-4：GNg::GN_UiBrowserState.aLastFileBrowser 收敛进 GNg::GN_UiBrowserState.aLastFileBrowser。
 
 static void GT_FileBrowserDelFile(GNf::sFILE_INFO *file_info) {
     if(!(file_info->attrib & _A_SUBDIR)) {
         GNu::cFILE_BROWSER::aCurProcFileName = file_info->global_filename;
-        if(GNf::Del(file_info->global_filename, GT_FileBrowserLast->zTkArgPH)) GT_FileBrowserLast->zTkArgSSubDir = 0; //标记有错
+        if(GNf::Del(file_info->global_filename, GNg::GN_UiBrowserState.aLastFileBrowser->zTkArgPH)) GNg::GN_UiBrowserState.aLastFileBrowser->zTkArgSSubDir = 0; //标记有错
     }
 }
 static void GT_FileBrowserDelDir(GNf::sFILE_INFO *file_info) {
     if(file_info->attrib & _A_SUBDIR) {
         GNu::cFILE_BROWSER::aCurProcFileName = file_info->global_filename;
-        if(GNf::Rmdir(file_info->global_filename, GT_FileBrowserLast->zTkArgPH)) GT_FileBrowserLast->zTkArgSSubDir = 0; //标记有错
+        if(GNf::Rmdir(file_info->global_filename, GNg::GN_UiBrowserState.aLastFileBrowser->zTkArgPH)) GNg::GN_UiBrowserState.aLastFileBrowser->zTkArgSSubDir = 0; //标记有错
     }
 }
 void GT_FILE_BROWSER_FindDel(P<GN_sTHREAD> this_thread, void *arg, void *arg2) {
@@ -966,7 +953,7 @@ void GT_FILE_BROWSER_FindDel(P<GN_sTHREAD> this_thread, void *arg, void *arg2) {
     void *ph = fb->zTkArgPH;
     char *dir = fb->zTkArgSDir;
     GNf_DirStatePush(true);
-    GT_FileBrowserLast = fb;
+    GNg::GN_UiBrowserState.aLastFileBrowser = fb;
     fb->zIsDirDelOrCopy = true;
     fb->zTkArgSSubDir = 1; //临时用该值来标记是否无错
     fb->zSearch__(dir, "*.*", true, GT_FileBrowserDelFile, ph);
@@ -1051,7 +1038,7 @@ int GNu::cFILE_BROWSER::FileCopy(const char *dst, const char *src, void *ph_dst,
     return ret;
 }
 inline void GT_FileBrowserCopyDirAndFile(GNf::sFILE_INFO *file_info) {
-    GNu::cFILE_BROWSER *fb = GT_FileBrowserLast;
+    GNu::cFILE_BROWSER *fb = GNg::GN_UiBrowserState.aLastFileBrowser;
     strncpy((char *)(fb->zTkArgSMode) + fb->zTkArgPathLen, file_info->global_filename + fb->zTkArgPathLen2, GN_MAXFILEPATH - fb->zTkArgPathLen - 1);
     ((char *)(fb->zTkArgSMode))[GN_MAXFILEPATH - 1] = 0; //续上目标目录或文件名
     if(file_info->attrib & _A_SUBDIR) {
@@ -1065,7 +1052,7 @@ void GT_FILE_BROWSER_FindCopy(P<GN_sTHREAD> this_thread, void *arg, void *arg2) 
     GNu::cFILE_BROWSER *fb = (GNu::cFILE_BROWSER *)arg;
     char *dir = (char *)fb->zTkArgSDir;
     fb->zTkArgSSubDir = 1; //临时用该值来标记是否无错
-    GT_FileBrowserLast = fb;
+    GNg::GN_UiBrowserState.aLastFileBrowser = fb;
     GNf_DirStatePush(true);
     GNf::Mkdir(fb->zTkArgSMode, fb->zTkArgPH);
     GNf_DirStatePop();
@@ -1197,8 +1184,8 @@ void GNu::cFILE_BROWSER::zGenerateFileIcons() {
         }
         if(file_n) {
             file_stid = zFileNum;
-            P<char> *ext_names = gFbContext.aExtNameTable;
-            unsigned int exi, ext_num = gFbContext.aExtNameTable.Num();
+            P<char> *ext_names = GNg::GN_UiBrowserState.aExtNameTable;
+            unsigned int exi, ext_num = GNg::GN_UiBrowserState.aExtNameTable.Num();
             for(itf = zFileList.begin(), etf = zFileList.end(); itf != etf; ++itf) {
                 _finfo = (*itf);
                 ext_name = GN_StrGetExtName(_finfo->name);
@@ -1252,8 +1239,8 @@ void GNu::cFILE_BROWSER::zGenerateFileIcons() {
                 gpaths_[pfi] = gpaths[pfi];
             }
         }
-        aOnIconGenCallBack(zRelate, (int)zFileNum, (const char **)((char **)zGlobalPaths_), zPicID, zReGenIcon == 2, gFbContext.aDefIconImg->width, gFbContext.aDefIconImg->height);
-    } else if(gFbContext.aShowPreview) {
+        aOnIconGenCallBack(zRelate, (int)zFileNum, (const char **)((char **)zGlobalPaths_), zPicID, zReGenIcon == 2, GNg::GN_UiBrowserState.aDefIconImg->width, GNg::GN_UiBrowserState.aDefIconImg->height);
+    } else if(GNg::GN_UiBrowserState.aShowPreview) {
         zRelate = aOnCreateCallBack(this);
         goto GT_GOTO_FB_CopyGlobalPaths;
     }
@@ -1405,7 +1392,7 @@ int8 GNu::cFILE_BROWSER::UpdateRun(unsigned int updatatime, GNg::sIMAGE **img_ou
         return 0;
     }
 #ifdef GN_USING_FILE_PREVIEW
-    unsigned short empty_tid = (unsigned short)gFbContext.aExtNameTable.Num() + 2;
+    unsigned short empty_tid = (unsigned short)GNg::GN_UiBrowserState.aExtNameTable.Num() + 2;
     char **_global_paths = zGlobalPaths_;
 
     if(zRelate) { //-索取预览图标处理-------------------------------------------------------------------------------------------
@@ -2065,11 +2052,11 @@ P<GNu::iUI_OBJECT> GNu::cFILE_BROWSER::Clone() {
 }
 uint8 *GNu::cFILE_BROWSER::zDataSave(uint8 *wpos, cSHARE_DATA *share_objs) {
     GNg::cFRAME *_frame_icon = zFrameIcon;
-    if(_frame_icon->zPlay_obj == (GNg::sIMAGE *)gFbContext.aDefIconImg) {
+    if(_frame_icon->zPlay_obj == (GNg::sIMAGE *)GNg::GN_UiBrowserState.aDefIconImg) {
         _frame_icon->zPlay_obj = &GNg::Image;
         ((GT_cUI_SHARE_DATA_W *)share_objs)->list_fileicon.push_back(_frame_icon);
     }
-    GT_TMP_SCROLL_LIST_DATA_SAVE(gFbContext.aDefFrameAct)
+    GT_TMP_SCROLL_LIST_DATA_SAVE(GNg::GN_UiBrowserState.aDefFrameAct)
     *wpos = (_frame_icon->zPlay_obj == &GNg::Image) ? 1 : 0;
     wpos += 1;
     wpos = zTextOut.zDataSave(wpos, share_objs->image_list);

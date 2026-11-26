@@ -6,6 +6,10 @@
 #include "GN_Vk.h"
 #include "GN_CoreContext.h" // B7-3：core 上下文默认值
 #include "GN_FileContext.h" // B7-3：file 上下文默认值
+#include "GN_InputContext.h" // B7-4：input 上下文默认值
+#include "GN_UiBrowserContext.h" // B7-4：ui 上下文默认值
+#include "_Main/GN_MainContext.h" // B7-4：platform 上下文默认值（头在 platform/_Main）
+#include "_Sound/GN_SoundContext.h" // B7-4：audio 上下文默认值（头在 audio/_Sound）
 
 using GNg::GN_Vk;
 
@@ -45,4 +49,24 @@ TEST_CASE(coreFileContextDefaults) {
     CHECK(GNg::GN_Core.aAudioExtNames[0] == 0);
     CHECK(GNg::GN_Core.aImageExtNames[0] == 0);
     CHECK(GNg::GN_FileState.aRunLogOpenMode[0] == 'w');
+}
+
+TEST_CASE(engineContextSubsystemPointers) {
+    // B7-4：input/ui/platform/audio 子系统上下文接入默认门面
+    sEngineContext &ctx = GN_GetEngineContext();
+    CHECK(ctx.input == &GNg::GN_InputState);
+    CHECK(ctx.ui == &GNg::GN_UiBrowserState);
+    CHECK(ctx.platform == &GNg::GN_MainState);
+    CHECK(ctx.audio == &GNg::GN_SoundState);
+}
+
+TEST_CASE(subsystemContextDefaults) {
+    // B7-4：迁移后初值与原文件内 static 一致（只读断言，避免污染其它用例）
+    CHECK(GNg::GN_InputState.aInputNotIsMapping);
+    CHECK(GNg::GN_MainState.aPendingResizeW == 0);
+    CHECK(GNg::GN_MainState.aFirstCursor);
+    CHECK(GNg::GN_MainState.aImeBufLen == 0);
+    CHECK(GNg::GN_UiBrowserState.aIconBackW == -1);
+    CHECK(GNg::GN_UiBrowserState.aLastFileBrowser == nullptr);
+    CHECK(GNg::GN_SoundState.aAlDevice == nullptr);
 }

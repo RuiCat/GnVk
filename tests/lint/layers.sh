@@ -48,10 +48,21 @@ level_of_dir() {
 
 # ── 已知越级（基线白名单）───────────────────────────────
 # 格式：<源文件>:<头文件名>  —— 每条都要写清原因，否则不许加。
+# 原因一览（按行）：
+#   GN_3Dmodel.h/.cpp:GN_Vk.h      渲染实体需要后端类型（B2 前既有）
+#   GN_EngineContext.cpp:GN_Vk.h   引擎门面按设计持有渲染上下文（B7-1）
+#   GN_EngineContext.cpp:GN_InputContext.h / GN_UiBrowserContext.h / GN_SoundContext.h
+#                                  引擎门面按设计持有全部子系统上下文指针（B7-4；只取全局实例地址，不调 L5 逻辑）
+#   GN_3Dasset.cpp:cgltf.h         资产导入直接解析 glTF（既有）
+#   GN_UiPopDlgIO.cpp:GN_EdPlugin.h 编辑器插件接口（既有）
+#   GN_RunRec.cpp:GN_FontFT.h      运行记录写字形（既有）
 KNOWN_VIOLATIONS='
 src/graphics/GN_3Dmodel.h:GN_Vk.h
 src/graphics/GN_3Dmodel.cpp:GN_Vk.h
 src/graphics/GN_EngineContext.cpp:GN_Vk.h
+src/graphics/GN_EngineContext.cpp:GN_InputContext.h
+src/graphics/GN_EngineContext.cpp:GN_UiBrowserContext.h
+src/graphics/GN_EngineContext.cpp:GN_SoundContext.h
 src/graphics/GN_3Dasset.cpp:cgltf.h
 src/ui/GN_UiPopDlgIO.cpp:GN_EdPlugin.h
 src/core/GN_RunRec.cpp:GN_FontFT.h

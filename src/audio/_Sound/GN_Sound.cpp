@@ -24,6 +24,7 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
  ****************************************************************************/
 
 #include <GN.h>
+#include "GN_SoundContext.h" // B7-4：audio 子系统上下文（OpenAL 句柄）
 #ifdef _GN_SOUND_H_
 #if defined _WIN32_ || defined _WIN32_WCE //----------- 使用 MMSYSTEM 音效 ------------------------------------------------------
 #include <windows.h>
@@ -848,26 +849,25 @@ GN_SOUND_API void GT_ReSetSoundMode2D() {
 }
 GN_SOUND_API void GT_ReSetSoundMode3D() {}
 
-// DA-M2 批 3：OpenAL 设备/上下文收敛进文件内上下文（仅在非 WinCE 分支编译；GT_SoundInitError 属 WinCE 分支，本机无该工具链不迁）。
-struct sSoundAlContext {
-    ALCdevice *aAlDevice = 0;
-    ALCcontext *aAlContext = 0;
-};
-static sSoundAlContext gSoundAlContext;
+// B7-4：OpenAL 设备/上下文（原 DA-M2 批 3 的 sSoundAlContext）已迁 GN_SoundContext.h，状态经
+// 全局 GN_SoundState 访问（void* 句柄，下方按 AL 分支转型为 ALCdevice*/ALCcontext*）。
+namespace GNg {
+GN_SoundContext GN_SoundState; // 默认 audio 上下文（仿 GN_Vk / GN_Core）
+} // namespace GNg
 GN_SOUND_API bool GT_InitSound() {
 #ifdef AL_ALUT_H
     char c = alutInit(0, 0);
 #else
-    gSoundAlContext.aAlDevice = alcOpenDevice(0);
-    if(!gSoundAlContext.aAlDevice) return false;
-    gSoundAlContext.aAlContext = alcCreateContext(gSoundAlContext.aAlDevice, 0);
-    if(!gSoundAlContext.aAlContext) {
-        alcCloseDevice(gSoundAlContext.aAlDevice);
+    GNg::GN_SoundState.aAlDevice = alcOpenDevice(0);
+    if(!GNg::GN_SoundState.aAlDevice) return false;
+    GNg::GN_SoundState.aAlContext = alcCreateContext((ALCdevice *)GNg::GN_SoundState.aAlDevice, 0);
+    if(!GNg::GN_SoundState.aAlContext) {
+        alcCloseDevice((ALCdevice *)GNg::GN_SoundState.aAlDevice);
         return false;
     }
-    if(!alcMakeContextCurrent(gSoundAlContext.aAlContext)) {
-        alcDestroyContext(gSoundAlContext.aAlContext);
-        alcCloseDevice(gSoundAlContext.aAlDevice);
+    if(!alcMakeContextCurrent((ALCcontext *)GNg::GN_SoundState.aAlContext)) {
+        alcDestroyContext((ALCcontext *)GNg::GN_SoundState.aAlContext);
+        alcCloseDevice((ALCdevice *)GNg::GN_SoundState.aAlDevice);
         return false;
     }
 #endif
@@ -877,15 +877,15 @@ GN_SOUND_API bool GT_UnInitSound() {
 #ifdef AL_ALUT_H
     alutExit();
 #else
-    if(gSoundAlContext.aAlContext) {
+    if(GNg::GN_SoundState.aAlContext) {
         alcMakeContextCurrent(0);
-        alcDestroyContext(gSoundAlContext.aAlContext);
-        if(alcGetError(gSoundAlContext.aAlDevice) != ALC_NO_ERROR) return false;
-        gSoundAlContext.aAlContext = 0;
+        alcDestroyContext((ALCcontext *)GNg::GN_SoundState.aAlContext);
+        if(alcGetError((ALCdevice *)GNg::GN_SoundState.aAlDevice) != ALC_NO_ERROR) return false;
+        GNg::GN_SoundState.aAlContext = 0;
     }
-    if(gSoundAlContext.aAlDevice) {
-        if(!alcCloseDevice(gSoundAlContext.aAlDevice)) return false;
-        gSoundAlContext.aAlDevice = 0;
+    if(GNg::GN_SoundState.aAlDevice) {
+        if(!alcCloseDevice((ALCdevice *)GNg::GN_SoundState.aAlDevice)) return false;
+        GNg::GN_SoundState.aAlDevice = 0;
     }
 #endif
     return true;

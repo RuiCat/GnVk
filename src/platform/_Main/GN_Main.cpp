@@ -4,6 +4,7 @@
 // ╚══════════════════════════════════════════════════════════╝
 
 #include <GN.h>
+#include "GN_MainContext.h" // B7-4：平台主循环上下文（resize/光标/IME 状态）
 #include <GN_Vk.h>
 #include <cstdio>
 #include <cstdlib>
@@ -13,36 +14,28 @@ GLFWwindow *GT_MainWindow = nullptr;
 
 // task-24：framebuffer resize 回调只记录 pending（回调可能处于 pass 中，禁止直接调 GN_VkResize）；
 // 主循环在 glfwPollEvents 之后、FrameCycle 之前统一处理，同帧多次 resize 取最后值。
-static int GT_PENDING_RESIZE_W = 0;
-static int GT_PENDING_RESIZE_H = 0;
+// B7-4：resize 挂起值收敛进 GNg::GN_MainState（aPendingResizeW/aPendingResizeH）。
 
 static void GT_FramebufferSizeCallback(GLFWwindow *window, int width, int height) {
     (void)window;
-    GT_PENDING_RESIZE_W = width;
-    GT_PENDING_RESIZE_H = height;
+    GNg::GN_MainState.aPendingResizeW = width;
+    GNg::GN_MainState.aPendingResizeH = height;
 }
 
 // ═══════════════════════════════════════════════════════════
 //  静态状态：追踪鼠标光标位置与逐帧累积增量
 // ═══════════════════════════════════════════════════════════
-static double GT_LastCursorX = 0.0;
-static double GT_LastCursorY = 0.0;
-static double GT_AccumDX = 0.0; // 本帧累积的水平增量
-static double GT_AccumDY = 0.0; // 本帧累积的垂直增量
-static bool GT_FirstCursor = true; // 首帧初始化标记
-
-// ═══════════════════════════════════════════════════════════
-//  IME 文字输入缓冲 (引擎通过 GF_ReSetInputState 消费者)
-// ═══════════════════════════════════════════════════════════
-static char GT_ImeBuffer[256] = {0};
-static uint8 GT_ImeBufLen = 0;
+// B7-4：光标位置/增量/首帧标记/IME 缓冲收敛进 GNg::GN_MainState。
+namespace GNg {
+GN_MainContext GN_MainState; // 默认平台主循环上下文（仿 GN_Vk / GN_Core）
+} // namespace GNg
 
 // 引擎每帧调用此函数取走缓存的文字输入
 static void GT_GetImeChar(char *ime_str, uint8 *ime_len) {
-    if(GT_ImeBufLen > 0) {
-        memcpy(ime_str, GT_ImeBuffer, GT_ImeBufLen);
-        *ime_len = GT_ImeBufLen;
-        GT_ImeBufLen = 0;
+    if(GNg::GN_MainState.aImeBufLen > 0) {
+        memcpy(ime_str, GNg::GN_MainState.aImeBuffer, GNg::GN_MainState.aImeBufLen);
+        *ime_len = GNg::GN_MainState.aImeBufLen;
+        GNg::GN_MainState.aImeBufLen = 0;
     } else {
         *ime_len = 0;
     }
@@ -164,7 +157,7 @@ static void MouseButtonCallback(GLFWwindow *, int btn, int action, int) {
     }
     if(mk >= 0 && mk < GN_MAX_MK_NUM) {
         GF_SetMouseState((uint8)mk, action == GLFW_PRESS,
-                         (int)GT_LastCursorX, (int)GT_LastCursorY);
+                         (int)GNg::GN_MainState.aLastCursorX, (int)GNg::GN_MainState.aLastCursorY);
     }
 }
 
@@ -173,24 +166,24 @@ static void MouseButtonCallback(GLFWwindow *, int btn, int action, int) {
 //  ★ 检测异常大跳变(>200px) → 自动重置基准, 防止模式切换时突变
 // ═══════════════════════════════════════════════════════════
 static void CursorPosCallback(GLFWwindow *, double x, double y) {
-    if(GT_FirstCursor) {
-        GT_LastCursorX = x;
-        GT_LastCursorY = y;
-        GT_FirstCursor = false;
+    if(GNg::GN_MainState.aFirstCursor) {
+        GNg::GN_MainState.aLastCursorX = x;
+        GNg::GN_MainState.aLastCursorY = y;
+        GNg::GN_MainState.aFirstCursor = false;
         return;
     }
-    double dx = x - GT_LastCursorX;
-    double dy = y - GT_LastCursorY;
+    double dx = x - GNg::GN_MainState.aLastCursorX;
+    double dy = y - GNg::GN_MainState.aLastCursorY;
     // 异常大跳变: 光标模式切换 / GLFW 虚拟位置重置 → 重新锚定
     if(dx > 200.0 || dx < -200.0 || dy > 200.0 || dy < -200.0) {
-        GT_LastCursorX = x;
-        GT_LastCursorY = y;
+        GNg::GN_MainState.aLastCursorX = x;
+        GNg::GN_MainState.aLastCursorY = y;
         return; // 丢弃此帧的异常增量
     }
-    GT_AccumDX += dx;
-    GT_AccumDY += dy;
-    GT_LastCursorX = x;
-    GT_LastCursorY = y;
+    GNg::GN_MainState.aAccumDX += dx;
+    GNg::GN_MainState.aAccumDY += dy;
+    GNg::GN_MainState.aLastCursorX = x;
+    GNg::GN_MainState.aLastCursorY = y;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -199,9 +192,9 @@ static void CursorPosCallback(GLFWwindow *, double x, double y) {
 // ═══════════════════════════════════════════════════════════
 static void ScrollCallback(GLFWwindow *, double /*xoffset*/, double yoffset) {
     if(yoffset > 0.0) {
-        GF_SetMouseState(GM_TOP, true, (int)GT_LastCursorX, (int)GT_LastCursorY);
+        GF_SetMouseState(GM_TOP, true, (int)GNg::GN_MainState.aLastCursorX, (int)GNg::GN_MainState.aLastCursorY);
     } else if(yoffset < 0.0) {
-        GF_SetMouseState(GM_BOTTOM, true, (int)GT_LastCursorX, (int)GT_LastCursorY);
+        GF_SetMouseState(GM_BOTTOM, true, (int)GNg::GN_MainState.aLastCursorX, (int)GNg::GN_MainState.aLastCursorY);
     }
 }
 
@@ -210,25 +203,25 @@ static void ScrollCallback(GLFWwindow *, double /*xoffset*/, double yoffset) {
 //  引擎在 GF_ReSetInputState 中通过 GT_GetImeChar 取走
 // ═══════════════════════════════════════════════════════════
 static void CharCallback(GLFWwindow *, unsigned int codepoint) {
-    if(GT_ImeBufLen >= 252) return; // 防止溢出
+    if(GNg::GN_MainState.aImeBufLen >= 252) return; // 防止溢出
 
     if(codepoint < 0x80) {
-        GT_ImeBuffer[GT_ImeBufLen++] = (char)codepoint;
+        GNg::GN_MainState.aImeBuffer[GNg::GN_MainState.aImeBufLen++] = (char)codepoint;
     } else if(codepoint < 0x800) {
-        if(GT_ImeBufLen + 1 >= 255) return;
-        GT_ImeBuffer[GT_ImeBufLen++] = (char)(0xC0 | (codepoint >> 6));
-        GT_ImeBuffer[GT_ImeBufLen++] = (char)(0x80 | (codepoint & 0x3F));
+        if(GNg::GN_MainState.aImeBufLen + 1 >= 255) return;
+        GNg::GN_MainState.aImeBuffer[GNg::GN_MainState.aImeBufLen++] = (char)(0xC0 | (codepoint >> 6));
+        GNg::GN_MainState.aImeBuffer[GNg::GN_MainState.aImeBufLen++] = (char)(0x80 | (codepoint & 0x3F));
     } else if(codepoint < 0x10000) {
-        if(GT_ImeBufLen + 2 >= 255) return;
-        GT_ImeBuffer[GT_ImeBufLen++] = (char)(0xE0 | (codepoint >> 12));
-        GT_ImeBuffer[GT_ImeBufLen++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        GT_ImeBuffer[GT_ImeBufLen++] = (char)(0x80 | (codepoint & 0x3F));
+        if(GNg::GN_MainState.aImeBufLen + 2 >= 255) return;
+        GNg::GN_MainState.aImeBuffer[GNg::GN_MainState.aImeBufLen++] = (char)(0xE0 | (codepoint >> 12));
+        GNg::GN_MainState.aImeBuffer[GNg::GN_MainState.aImeBufLen++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        GNg::GN_MainState.aImeBuffer[GNg::GN_MainState.aImeBufLen++] = (char)(0x80 | (codepoint & 0x3F));
     } else if(codepoint < 0x110000) {
-        if(GT_ImeBufLen + 3 >= 255) return;
-        GT_ImeBuffer[GT_ImeBufLen++] = (char)(0xF0 | (codepoint >> 18));
-        GT_ImeBuffer[GT_ImeBufLen++] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-        GT_ImeBuffer[GT_ImeBufLen++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        GT_ImeBuffer[GT_ImeBufLen++] = (char)(0x80 | (codepoint & 0x3F));
+        if(GNg::GN_MainState.aImeBufLen + 3 >= 255) return;
+        GNg::GN_MainState.aImeBuffer[GNg::GN_MainState.aImeBufLen++] = (char)(0xF0 | (codepoint >> 18));
+        GNg::GN_MainState.aImeBuffer[GNg::GN_MainState.aImeBufLen++] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+        GNg::GN_MainState.aImeBuffer[GNg::GN_MainState.aImeBufLen++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        GNg::GN_MainState.aImeBuffer[GNg::GN_MainState.aImeBufLen++] = (char)(0x80 | (codepoint & 0x3F));
     }
 }
 
@@ -314,26 +307,26 @@ GN_MAIN_API void GT_InitAllAndRun(int *hwnd, short vw, short vh, short cb,
 
         // task-24：窗口缩放统一在主循环、渲染 pass 之外处理（回调只写 pending）。
         // 最小化（ICONIFIED）时 w/h 可能为 0 或不可用，保留 pending，恢复后再重建。
-        if(GT_PENDING_RESIZE_W > 0 && GT_PENDING_RESIZE_H > 0 &&
+        if(GNg::GN_MainState.aPendingResizeW > 0 && GNg::GN_MainState.aPendingResizeH > 0 &&
            glfwGetWindowAttrib(GT_MainWindow, GLFW_ICONIFIED) == 0) {
-            const int resizeW = GT_PENDING_RESIZE_W;
-            const int resizeH = GT_PENDING_RESIZE_H;
-            GT_PENDING_RESIZE_W = 0;
-            GT_PENDING_RESIZE_H = 0;
+            const int resizeW = GNg::GN_MainState.aPendingResizeW;
+            const int resizeH = GNg::GN_MainState.aPendingResizeH;
+            GNg::GN_MainState.aPendingResizeW = 0;
+            GNg::GN_MainState.aPendingResizeH = 0;
             GNg::GN_VkResize(resizeW, resizeH);
         }
 
         // ★ 每帧一次性提交累积的鼠标增量 (避免多事件覆盖 mouseMSX)
-        if(GT_AccumDX != 0.0 || GT_AccumDY != 0.0) {
+        if(GNg::GN_MainState.aAccumDX != 0.0 || GNg::GN_MainState.aAccumDY != 0.0) {
             unsigned short ks = 0;
             if(GN::Mouse[GM_LEFT]) ks |= GMM_LEFT;
             if(GN::Mouse[GM_CENTRE]) ks |= GMM_CENTRE;
             if(GN::Mouse[GM_RIGHT]) ks |= GMM_RIGHT;
             GF_SetMouseMoveState(ks,
-                                 (int)(GN::MouseMX + GT_AccumDX),
-                                 (int)(GN::MouseMY + GT_AccumDY));
-            GT_AccumDX = 0.0;
-            GT_AccumDY = 0.0;
+                                 (int)(GN::MouseMX + GNg::GN_MainState.aAccumDX),
+                                 (int)(GN::MouseMY + GNg::GN_MainState.aAccumDY));
+            GNg::GN_MainState.aAccumDX = 0.0;
+            GNg::GN_MainState.aAccumDY = 0.0;
         }
 
         static unsigned int fc = 0;
