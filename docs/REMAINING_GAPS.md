@@ -5,6 +5,8 @@
 这份清单把 P0–P6 规划之外、以及各轮视频制作时**明确留档未做**的项汇总起来，
 按"能否在没有外部资产的容器里落地 + 是否可自动验收"排序。
 
+> 2026-11-26 补充：C5–C7、B8 为缺陷审查批分析新增；D4 修正。**执行顺序见 `NEXT_PHASE_PLAN.md`**。
+
 标记：
 - **[可做]** 纯 CPU 或现有 GPU 能力即可完成，能写单测/gpuCheck；
 - **[需资产]** 需要真实 MMD/GLB/贴图才能验证；
@@ -33,6 +35,7 @@
 | B6 | ~~cube shadow 的 PCSS 软化~~ | ✅ 2026-11-25 完成：阻塞物搜索 + 半影估计 + PCF；光源物理半径走 `coneAngles.z` | — | 已完成 |
 | B7 | ~~多光源 cube shadow 选灯~~ | ✅ 2026-11-25 完成：**层号按注册顺序固定分配**（`assignCubeShadowLayers`，与相机无关）+ 评分选灯 `pickCubeShadowLights`（排名只用于选谁，不当层号）。曾经的「轮转」做法已删除——它会让影子随视角闪进闪出 | — | 已完成 |
 | B5 | `sMATERIAL::aEmissive` 已打通 ✅ | 2026-11-25 完成 | — | 已完成 |
+| B8 | 多层渲染管线 GPU 全路径（P4–P6） | CPU 侧 `GN_RenderPipeline`/`GN_RenderQueue` 已落地；P4 逐物体多 pass / P5 外部 SPIR-V 热重载 / P6 延迟前向混排未做，设计见 `MULTILAYER_RENDER_PIPELINE_PLAN.md` §5 | 换场景仍要手写编排；Q3 深度格式未决 | [大改] |
 
 ## C. 场景 / 物理 / 角色
 
@@ -43,7 +46,10 @@
 | C3a | ~~root motion~~ | ✅ 2026-11-25 完成：`cROOT_MOTION_EXTRACTOR` + `cCHARACTER::ApplyRootMotion` + 循环回绕补偿 | — | 已完成 |
 | C3b-IK | ~~两骨 IK~~ | ✅ 2026-11-25 完成：`solveTwoBoneIK`（余弦定理 + 极向量）+ `cIK_SOLVER`（骨架取链）+ `GNg::QuatMul` 提升到数学库 | — | 已完成 |
 | C3b-布娃娃 | ~~布娃娃~~ | ✅ 2026-11-25 完成：`cRAGDOLL`（骨架→球体链 + distance 关节 + 不互撞组）+ `SyncPose`；13 例单测 + 演示 | 无可视骨架连线/关节角限制，见下 | [已交付·有边界] |
-| C4 | ~~台阶抬升是"抬-移-落"~~ | ✅ 2026-11-25 完成：`sweepCapsuleAgainstTriangles`（保守推进 + 二分）+ `cCHARACTER::stepUpSwept`（可开关，默认开） | — | 已完成 |
+| C4 | ~~台阶抬升是"抬-移-落"~~ | ✅ 2026-11-25 完成：`sweepCapsuleAgainstTriangles`（保守推进 + 二分）+ `cCHARACTER::stepUpSwept`（可开关，默认开）；2026-11-26 精度修复（精确距离 + 半径有界探针，DA-1126-07/08） | — | 已完成 |
+| C5 | 布料自碰撞 / 连续碰撞 / 动态碰撞体 | 当前：离散点碰撞、静态碰撞体、无自碰撞（`GN_3Dcloth.cpp` 文件头刻意取舍） | 薄壁可漏穿、布不互撞、不反推碰撞体 | [大改] |
+| C6 | 布娃娃关节角限制 | 当前：distance 关节，无角限制（膝盖能反向弯，`GN_Ragdoll.h:29` 刻意取舍） | 需要带角限制的球窝关节求解器 | [大改] |
+| C7 | 物理三角网尖刺/边-边接触 | 当前：盒只处理"盒角穿透三角形正面"（`GN_PhysicsMesh.cpp` 文件头） | 三角尖刺扎进盒体、盒棱搁三角棱会漏 | [大改] |
 
 ## D. 资产与验证
 
@@ -52,7 +58,7 @@
 | D1 | 真实 MMD/GLB 模型下的画面确认（仓库 `.gitignore` 掉了所有资产） | [需资产] |
 | D2 | 逐像素基线截图（桌面 GPU） | [需桌面] |
 | D3 | ~~混合树 / 动画层遮罩~~ | ✅ 2026-11-25 完成：`cANIM_BLEND_1D`（1D 混合空间 + 相位同步）+ `cANIM_LAYER_STACK`（关节遮罩覆盖）+ `cANIM_CONTROLLER` 接线 | 已完成 |
-| D4 | 代码提交（容器内无 GitHub 凭据，只能本地 commit） | — |
+| D4 | ~~代码提交（容器内无 GitHub 凭据）~~ ✅ 2026-11-26：deploy key 建好，容器内可直接 push（`e2ce1c2`、`620bd0e` 已推） | 已完成 |
 
 ---
 

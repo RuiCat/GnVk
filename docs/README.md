@@ -75,6 +75,7 @@
 | [REFACTOR_PLAN.md](REFACTOR_PLAN.md) | 🚧 进行中 | `GN_Vk.cpp` 拆分等工程化重构，阶段 2 未收口 |
 | [ENGINE_RT_GI_PLAN.md](ENGINE_RT_GI_PLAN.md) | 🚧 规划 | 把屏幕空间 GI 升级为 ray query；目前只在 `tests/cornellBox` 里验证过，引擎侧未接 |
 | [GI_RT_TYNDALL_PLAN.md](GI_RT_TYNDALL_PLAN.md) | 🚧 规划 | 光追 GI + 丁达尔；**无对应着色器，未实现** |
+| [NEXT_PHASE_PLAN.md](NEXT_PHASE_PLAN.md) | 🚧 规划 | 审查批（620bd0e）后的执行顺序：P0 遗留小修 → P1 容器内功能 → P2 真机/资产 → P3 设计批次 |
 
 ## 五、历史（📦 不要照着做）
 
