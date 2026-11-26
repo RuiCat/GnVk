@@ -2,6 +2,25 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B3：GN_Array.h 4016 行 → containers/ 11 片段（全自包含）
+
+move-only 拆分（REFACTOR_PLAN §13 B3），单测 943/0，符号名 diff 为零。
+
+| 片段 | 内容 |
+|---|---|
+| memMacros / arrayAlgorithms / iterator | 内存宏、数组算法、全局搜索迭代器 |
+| array / bufferMapping | GN::sARRAY 家族；缓冲映射 + 用量管理/内存池1/分配器 |
+| list / listWheel | 链表节点 + GN::sLIST/sLIST_WHEEL；列表轮附加操作 |
+| tempBuf / tree2 | GT_sTBUF + GN::sTBUF 家族；段比较 + cTREE2/cVOLUME_MAG/cMEM_POOL |
+| smartPtr / nodeTree | 安全指针 P_/P；GN::sNODE 安全节点树 |
+
+- 切分边界全部落在 scope 平衡点（命名空间开闭完整包含在片段内）；GN_Array.h 变 16 行转发聚合头，
+  包含顺序即原文件顺序，所有消费者经 GN.h 无感。
+- 新增 `baseTypes.h`：uint8/int8 等最小类型基础（与 GN.h typedef 一致，C++11 允许相同重声明）——
+  GN.h  typedef 抽离到独立头登记为后续 C10 任务。
+- 12 个容器头全部通过 `headers.sh --strict`（自包含依赖已补齐）；全仓头基线 **67/121 → 66/133**
+  （GN_Array.h 本身转为通过）。修正一处切分边界：GT_sTBUF 的 template 行归位 tempBuf。
+
 ## 2026-11-26 — B2 第四刀收尾：GN_Vk.cpp 3690 → 25 行（仅上下文实例）
 
 move-only 归位（REFACTOR_PLAN §13 B2），单测 943/0，符号名 diff 为零。

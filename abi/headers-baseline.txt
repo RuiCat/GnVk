@@ -1,6 +1,5 @@
 src/audio/GN_Audio.h
 src/core/GN_AmCtrl.h
-src/core/GN_Array.h
 src/core/GN_Base.h
 src/core/GN_Color.h
 src/core/GN_Def.h
