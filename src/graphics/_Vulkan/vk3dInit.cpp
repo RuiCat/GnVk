@@ -1100,4 +1100,179 @@ void destroy3DCubeShadow() {
 // HDR 离屏目标 + 合成管线：HDR 图像/视图/采样器、HDR render pass 与 framebuffer、
 // 合成（色调映射）管线与描述符集。
 
+// ═══════════════════════════════════════════════════════════
+//  3D 渲染管线实现 (GN_USING_3D)
+// ═══════════════════════════════════════════════════════════
+#ifdef GN_USING_3D
+
+#include "gn3d_vert_spv.h"
+#include "gn3d_frag_spv.h"
+#include "gn3d_pbr_vert_spv.h"
+#include "gn3d_pbr_frag_spv.h"
+#include "gn3d_shadow_vert_spv.h"
+
+// — 渲染通道追踪 (所有 pass 共用, 需在 #ifdef GN_USING_3D 外声明) —
+
+// — 3D pass 状态（定义在本文件，供 vk3d* 模块共享） —
+bool s_in3DPass = false;
+VkFramebuffer *s_framebuffers3D = nullptr;
+
+// — 阴影 pass 状态 —
+// s_inShadowPass 定义在 vk3dPasses.cpp
+
+// ── 3D 初始化编排：各阶段实现见 vk3dInit.cpp ──
+void GN_VkInit3D() {
+    // L1：renderPass3D 的 resolve 附件是 HDR 目标，必须先于 init3DTargets 创建 hdrView。
+    create3DHdrImages();
+    init3DTargets();
+    // P11-S3：雾 UBO 最先创建（前向/PBR/延迟三条管线的描述符集都要绑定它）。
+    if(!init3DAtmosphere()) fprintf(stderr, "[GN_Vk] 警告: 雾 UBO 不可用（P11-S3）\n");
+
+    // ── 加载 3D 着色器 ───────────────────────────────
+    auto vertSpv = LoadSPIRVFile("assets/shaders/gn3d.vert.spv");
+    auto fragSpv = LoadSPIRVFile("assets/shaders/gn3d.frag.spv");
+    if(vertSpv.empty() || fragSpv.empty()) {
+        // 回退到嵌入式 SPIR-V
+        if(vertSpv.empty()) vertSpv.assign(assets_shaders_gn3d_vert_spv,
+                                           assets_shaders_gn3d_vert_spv + assets_shaders_gn3d_vert_spv_len);
+        if(fragSpv.empty()) fragSpv.assign(assets_shaders_gn3d_frag_spv,
+                                           assets_shaders_gn3d_frag_spv + assets_shaders_gn3d_frag_spv_len);
+    }
+
+    init3DForward(vertSpv, fragSpv);
+
+    // PBR 着色器加载（含嵌入式回退）
+    auto pbrVert = LoadSPIRVFile("assets/shaders/gn3d_pbr.vert.spv");
+    auto pbrFrag = LoadSPIRVFile("assets/shaders/gn3d_pbr.frag.spv");
+    if(pbrVert.empty()) pbrVert.assign(assets_shaders_gn3d_pbr_vert_spv,
+                                       assets_shaders_gn3d_pbr_vert_spv + assets_shaders_gn3d_pbr_vert_spv_len);
+    if(pbrFrag.empty()) pbrFrag.assign(assets_shaders_gn3d_pbr_frag_spv,
+                                       assets_shaders_gn3d_pbr_frag_spv + assets_shaders_gn3d_pbr_frag_spv_len);
+    init3DPbr(pbrVert, pbrFrag);
+
+    // ═══════════════════════════════════════════════════════
+    //  阴影映射系统
+    // ═══════════════════════════════════════════════════════
+    // Shadow 着色器加载（含嵌入式回退）
+    auto svSpv = LoadSPIRVFile("assets/shaders/gn3d_shadow.vert.spv");
+    if(svSpv.empty()) svSpv.assign(assets_shaders_gn3d_shadow_vert_spv,
+                                   assets_shaders_gn3d_shadow_vert_spv + assets_shaders_gn3d_shadow_vert_spv_len);
+    // B2：cube shadow 的资源（image/view/sampler/pass/framebuffer）必须先建，
+    // 因为 init3DShadow 里会用 cubeShadowRenderPass 建 cube 专用管线。
+    init3DCubeShadow(1024);
+    init3DShadow(svSpv); // 内部创建 shadowPipelineLayout + shadowPipeline + cubeShadowPipeline
+    // cube shadow 的 image/pass/framebuffer 要早于上面的管线创建，
+    // 但管线依赖 pass ⇒ 顺序是：先 init3DCubeShadow 的"资源"，再建管线。
+    // 为避免拆分函数，这里把 init3DCubeShadow 放在 init3DShadow 之前：
+    // 它只建 image/view/sampler/pass/framebuffer，不碰管线。
+
+
+    // ── 创建 PBR 描述符集 (必须在 Shadow Map 创建之后) ──
+    {
+        VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        dai.descriptorPool = GN_Vk.descriptorPool;
+        dai.descriptorSetCount = 1;
+        dai.pSetLayouts = &GN_Vk.descriptorLayoutPBR;
+        vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.descriptorSetPBR);
+
+        VkDescriptorBufferInfo dbiScene = {GN_Vk.uniformBuffer3D, 0, sizeof(VkSceneUBO)};
+        VkDescriptorBufferInfo dbiLight = {GN_Vk.lightBuffer3D, 0, sizeof(GN3d::sLIGHT_UBO)};
+        VkDescriptorImageInfo diiTex = {GN_Vk.defaultSampler, GN_Vk.defaultImageView,
+                                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo diiNormal = {GN_Vk.defaultSampler, GN_Vk.defaultImageView,
+                                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo diiShadow = {GN_Vk.shadowSampler, GN_Vk.shadowView,
+                                           VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
+
+        // B2：binding 12 = cube shadow（点光/聚光）
+        VkDescriptorImageInfo diiCubeShadow = {GN_Vk.cubeShadowSampler, GN_Vk.cubeShadowView,
+                                               VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet w[7] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        w[0].dstSet = GN_Vk.descriptorSetPBR;
+        w[0].dstBinding = 0;
+        w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        w[0].descriptorCount = 1;
+        w[0].pBufferInfo = &dbiScene;
+        w[1].dstSet = GN_Vk.descriptorSetPBR;
+        w[1].dstBinding = 1;
+        w[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[1].descriptorCount = 1;
+        w[1].pImageInfo = &diiTex;
+        w[2].dstSet = GN_Vk.descriptorSetPBR;
+        w[2].dstBinding = 2;
+        w[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        w[2].descriptorCount = 1;
+        w[2].pBufferInfo = &dbiLight;
+        w[3].dstSet = GN_Vk.descriptorSetPBR;
+        w[3].dstBinding = 3;
+        w[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[3].descriptorCount = 1;
+        w[3].pImageInfo = &diiNormal;
+        w[4].dstSet = GN_Vk.descriptorSetPBR;
+        w[4].dstBinding = 4;
+        w[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[4].descriptorCount = 1;
+        w[4].pImageInfo = &diiShadow;
+        // P11-S3：binding 6 = 雾 UBO（binding 5 留给天空盒 cubemap，在天空盒初始化后更新）。
+        VkDescriptorBufferInfo dbiFog = {atmosphereFogBuffer(), 0, atmosphereFogRange()};
+        w[5].dstSet = GN_Vk.descriptorSetPBR;
+        w[5].dstBinding = 6;
+        w[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        w[5].descriptorCount = 1;
+        w[5].pBufferInfo = &dbiFog;
+        w[6].dstSet = GN_Vk.descriptorSetPBR;
+        w[6].dstBinding = 12;
+        w[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[6].descriptorCount = 1;
+        w[6].pImageInfo = &diiCubeShadow;
+        vkUpdateDescriptorSets(GN_Vk.device, 7, w, 0, 0);
+        // Binding 5 (skybox cubemap) 将在天空盒初始化后更新
+    }
+
+    init3DHdr();
+    // L1d：Bloom mip 链（依赖 hdrView 与 composite 描述符集）。
+    if(!init3DBloom()) fprintf(stderr, "[GN_Vk] 警告: Bloom 资源不可用（L1d）\n");
+    // L1：POST UBO（曝光/色调映射/Bloom）+ composite 描述符 binding 2。
+    init3DPost();
+    // L4c：CPU 生成透射率/sky-view LUT 并上传 GPU（天空 shader 接线前先就绪）。
+    if(!init3DAtmosphereLut()) fprintf(stderr, "[GN_Vk] 警告: 大气 LUT 不可用（L4c）\n");
+
+    init3DSkybox();
+    // G1a：环境来源方案 B——GPU 6 面烘焙解析天空，回读后 CPU 预滤波并上传 GI 资源。
+    init3DEnvironment();
+    init3DGbuffer();
+    init3DDeferredLight();
+    // L4：LUT 就绪后补写天空/PBR/延迟描述符的 2/3、10/11、24/25 槽位。
+    wireAtmosphereDescriptors();
+    // G0b：G-Buffer 四通道调试视图（复用延迟 render pass/描述符集；管线归 aPipelineCache）。
+    init3DGbufferDebug();
+    // G2b：SSAO 资源（默认关；依赖 G-Buffer 视图与延迟描述符集）。
+    init3DSsao();
+    // G4：SSGI 资源（默认关；依赖 G-Buffer 视图、延迟描述符集与 GI UBO）。
+    init3DSsgi();
+    // G5b-2：SH9 探针 9× 3D 纹理（固定尺寸；默认 weight=0，不采样）。
+    init3DProbes();
+
+    // P1c / P2 / P8：新增子系统（管线各自经 aPipelineCache 创建；失败只告警）
+    if(!init3DMaterial()) fprintf(stderr, "[GN_Vk] 警告: 材质实例管线不可用（P1c）\n");
+    if(!init3DSkinned()) fprintf(stderr, "[GN_Vk] 警告: GPU 蒙皮管线不可用（P2）\n");
+    if(!init3DDebugLines()) fprintf(stderr, "[GN_Vk] 警告: 调试线框管线不可用（P8）\n");
+    // P9：GPU 粒子（compute 模拟 + 实例化绘制）；SSBO 在 GN_VkParticleCreate 时分配。
+    if(!init3DParticle()) fprintf(stderr, "[GN_Vk] 警告: GPU 粒子 compute 不可用（P9）\n");
+    if(!init3DParticleDraw()) fprintf(stderr, "[GN_Vk] 警告: GPU 粒子绘制管线不可用（P9）\n");
+    // P9 剩余片：SSBO 蒙皮（>128 关节）与 GPU 布料（管线预建，缓冲在各自 Create 时分配）。
+    if(!init3DSkinnedSsbo()) fprintf(stderr, "[GN_Vk] 警告: SSBO 蒙皮管线不可用（P9）\n");
+    if(!init3DCloth()) fprintf(stderr, "[GN_Vk] 警告: GPU 布料管线不可用（P9）\n");
+    // G1b：三套描述符集与 G1a 资源均已存在，写入 GI 槽位（默认倍率 0 = 关闭，回退旧 IBL）。
+    init3DGiBindings();
+}
+
+#endif // GN_USING_3D
+
 } // namespace GNg

@@ -245,4 +245,31 @@ void GN_VkEndFrame() {
     vkQueuePresentKHR(GN_Vk.graphicsQueue, &pi);
 }
 
+void GN_VkBegin2DPass() {
+    if(!GN_Vk.initialized || s_inRenderPass) return; // 已有活跃通道时不重复开
+    if(s_renderPass2DOverlay == VK_NULL_HANDLE || s_framebuffers2DOverlay == nullptr) return;
+    VkCommandBuffer commandBuffer = GN_Vk.commandBuffers[GN_Vk.currentFrame];
+    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rpi.renderPass = s_renderPass2DOverlay;
+    rpi.framebuffer = s_framebuffers2DOverlay[GN_Vk.currentFrame];
+    rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
+    rpi.clearValueCount = 0; // loadOp=LOAD：沿用 3D 的结果
+    vkCmdBeginRenderPass(commandBuffer, &rpi, VK_SUBPASS_CONTENTS_INLINE);
+    s_inRenderPass = true;
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipeline);
+    VkRect2D fullScreen = {{0, 0}, GN_Vk.swapchainExtent};
+    vkCmdSetScissor(commandBuffer, 0, 1, &fullScreen);
+}
+
+// 历史遗留：pass 内 DataFill 的 staging 暂存数组（当前未使用；释放逻辑已并入 vkFrame2d.cpp）
+static VkBuffer s_pendingStagingBufs[32];
+static VkDeviceMemory s_pendingStagingMems[32];
+static int s_pendingStagingCnt = 0;
+
+// ── 帧结束入口：转发到 vkFrame2d.cpp 的 GN_VkEndFrame ──
+void RenderFinish(bool only3d) {
+    (void)only3d;
+    // Vulkan: end the current frame and present
+    GNg::GN_VkEndFrame();
+}
 } // namespace GNg

@@ -2,6 +2,7 @@
 #include <GN.h>
 #include "GN_Vk.h"
 #include "vkInternal.h"
+#include "vkValidation.h" // vkValidationDestroyMessenger（Shutdown 用）
 
 #include <cstdio>
 #include <cstdlib>
@@ -143,6 +144,77 @@ GN_VK_INTERNAL VkPresentModeKHR ChoosePresentMode(VkPhysicalDevice physical,
         }
     }
     return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+// ── 设备与交换链关闭：先等 GPU 空闲，再释放 3D/2D 资源与设备对象 ──
+void GN_VkShutdown() {
+    if(!GN_Vk.initialized) return;
+    vkDeviceWaitIdle(GN_Vk.device);
+    GN_VkRayQueryDestroyScene();
+    // P1b：缓存持有的管线必须先于 renderPass / VkDevice 销毁
+    GN_Vk.aPipelineCache.Release();
+#ifdef GN_USING_3D
+    GN_VkShutdown3D();
+#endif
+    vkDestroySemaphore(GN_Vk.device, GN_Vk.imageAvailable, 0);
+    vkDestroySemaphore(GN_Vk.device, GN_Vk.renderFinished, 0);
+    vkDestroyFence(GN_Vk.device, GN_Vk.inFlightFence, 0);
+    vkDestroyDescriptorPool(GN_Vk.device, GN_Vk.descriptorPool, 0);
+    vkDestroySampler(GN_Vk.device, GN_Vk.defaultSampler, 0);
+    // 清理默认纹理资源 (1x1 白色)
+    if(GN_Vk.defaultImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(GN_Vk.device, GN_Vk.defaultImageView, 0);
+        GN_Vk.defaultImageView = VK_NULL_HANDLE;
+    }
+    if(GN_Vk.defaultImage != VK_NULL_HANDLE) {
+        vkDestroyImage(GN_Vk.device, GN_Vk.defaultImage, 0);
+        GN_Vk.defaultImage = VK_NULL_HANDLE;
+    }
+    if(GN_Vk.defaultImageMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(GN_Vk.device, GN_Vk.defaultImageMemory, 0);
+        GN_Vk.defaultImageMemory = VK_NULL_HANDLE;
+    }
+    vkDestroyBuffer(GN_Vk.device, GN_Vk.vertexBuffer, 0);
+    vkFreeMemory(GN_Vk.device, GN_Vk.vertexMemory, 0);
+    vkDestroyBuffer(GN_Vk.device, GN_Vk.uniformBuffer, 0);
+    vkFreeMemory(GN_Vk.device, GN_Vk.uniformMemory, 0);
+    vkDestroyCommandPool(GN_Vk.device, GN_Vk.commandPool, 0);
+    for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) vkDestroyFramebuffer(GN_Vk.device, GN_Vk.framebuffers[i], 0);
+    delete[] GN_Vk.framebuffers;
+    delete[] GN_Vk.commandBuffers;
+    destroyOverlayFramebuffers();
+    if(s_renderPass2DOverlay != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(GN_Vk.device, s_renderPass2DOverlay, 0);
+        s_renderPass2DOverlay = VK_NULL_HANDLE;
+    }
+    for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) vkDestroyImageView(GN_Vk.device, GN_Vk.swapchainViews[i], 0);
+    delete[] GN_Vk.swapchainViews;
+    if(GN_Vk.headless) {
+        destroyOffscreenSwapchain();
+    } else {
+        delete[] GN_Vk.swapchainImages;
+        vkDestroySwapchainKHR(GN_Vk.device, GN_Vk.swapchain, 0);
+    }
+    vkDestroyPipelineLayout(GN_Vk.device, GN_Vk.pipelineLayout, 0);
+    vkDestroyDescriptorSetLayout(GN_Vk.device, GN_Vk.descriptorLayout, 0);
+    vkRenderTargetShutdown();
+    vkDestroyRenderPass(GN_Vk.device, GN_Vk.renderPass, 0);
+    DestroyImageUploadCache();
+    vkDestroyDevice(GN_Vk.device, 0);
+    if(!GN_Vk.headless) vkDestroySurfaceKHR(GN_Vk.instance, GN_Vk.surface, 0);
+    vkValidationDestroyMessenger();
+    vkDestroyInstance(GN_Vk.instance, 0);
+    GN_Vk.initialized = false;
+}
+
+bool GN_VkRayQuerySupported() {
+    return GN_Vk.rayQuerySupported;
+}
+
+void GN_VkWaitIdle() {
+    if(GN_Vk.initialized && GN_Vk.device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(GN_Vk.device);
+    }
 }
 
 } // namespace GNg

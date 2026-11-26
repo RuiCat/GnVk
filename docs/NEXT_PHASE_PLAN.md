@@ -31,7 +31,7 @@
 
 | # | 项 | 设计依据 | 验收 | 量级 |
 |---|---|---|---|---|
-| P1.1 | `GN_Vk.cpp` 拆分阶段 2 收口 | `REFACTOR_PLAN.md` §10 已裁决（C 彻底），任务图 §13 | 🚧 2026-11-26：G3-0 门禁完成，B2 三刀（vkRenderTarget/vkOffscreen/vkSwapchain），GN_Vk.cpp 3690→859；余 vkInit 余量 | 中 |
+| P1.1 | `GN_Vk.cpp` 拆分阶段 2 收口 | `REFACTOR_PLAN.md` §10 已裁决（C 彻底），任务图 §13 | ✅ 2026-11-26：B2 四刀完成，GN_Vk.cpp 3690→25（仅上下文实例）；下一步 B3（GN_Array.h） | 中 |
 | P1.2 | 多层管线 P4：逐物体多 pass（阴影/G-Buffer/描边/透明） | `MULTILAYER_RENDER_PIPELINE_PLAN.md` §5 | gpuCheck 新站点 + 现有 126 站无回归 | ≥1 天 |
 | P1.3 | HiZ 启用决策 | `REMAINING_GAPS.md` B4 | 二选一：a) 加启用开关 + 密集场景 overdraw 量化站（阈值触发）；b) 维持未启用并把决策写进 B4。容器内只做 a 的机制部分，收益判定需真实场景 | 小 |
 | P1.4 | 布料自碰撞（空间哈希 + 互推） | `REMAINING_GAPS.md` C5 | 纯 CPU 单测：叠布不互穿 + 同输入确定性 | ≥1 天 |

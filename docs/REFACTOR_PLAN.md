@@ -6,7 +6,7 @@
 > **G2 红队复核**：`REFACTOR_REDTEAM_2026-11-26.md`（六攻击面；同一助手新上下文复核，非真正独立智能体，见该文档诚实性声明）。
 > **进度（2026-11-26 实测基线，取代 10-26 旧数）**：阶段 0/1 大部分已完成——`make ci` 门禁已建
 > （单测 **943**/0、gpuCheck **126**/0、smoke **13**/0、doc-check、spv-check），lavapipe 无窗口渲染每日可用；
-> 阶段 2 进行中：`GN_Vk.cpp` 3690→**859** 行（已抽出 20+ 个 vk*.cpp；2026-11-26 三刀：vkRenderTarget/vkOffscreen/vkSwapchain），`GN_Format.cpp` 已按域拆成 6 文件；
+> 阶段 2 的 GN_Vk.cpp 拆分已完成：3690→**25** 行（仅 GN_VkContext 实例；2026-11-26 四刀，抽出 20+ 个 vk*.cpp），`GN_Format.cpp` 已按域拆成 6 文件；
 > 未拆超限文件：`GN_Array.h` **4016**、`GN_UiBase.cpp` **2669**、`GN_Vk.h` **1122**、`GN_FormatImgFile.cpp` **1041**。
 > 源文件 **185 cpp / 121 h**；文件级非常量 static **136**；扩展警告口径 **19385**（台账 §5.3）。
 > `samples/` 已不存在，消费者是 `tests/` 各 demo 与 `tests/imoScene` 资产管线。
@@ -478,7 +478,7 @@ nm -D --defined-only libGN_mini.so | sort | diff abi/baseline.txt -   # 只允�
 | 批次 | 任务 | 写域 | 依赖 | 状态 |
 |---|---|---|---|---|
 | G3-0 | 门禁准备：建 `abi/baseline.txt`（nm -D）；layers.sh --strict 试跑并收敛白名单；自包含头测试脚本；C2 命令改仓内工具 | `abi/`、`tests/lint/`、`Makefile` | 无 | ✅ 2026-11-26：基线 4206 符号；--strict 越级 0 已进 ci；headers.sh 基线 67/121（abi/headers-baseline.txt，只许减）；C2 已修正 |
-| B2 | `GN_Vk.cpp` 拆完：~~vkRenderTarget~~ → ~~vkOffscreen~~ → ~~vkSwapchain~~ → vkInit 余量（Init ~540 行 + Begin2DPass/Shutdown/RenderFinish/Init3D 编排 + sIMAGE 上传） | `src/graphics/_Vulkan/` | G3-0 | 🚧 三刀完成：vkRenderTarget 206 / vkOffscreen 116 / vkSwapchain 283 行，GN_Vk.cpp 3690→859；第一刀符号变更已登记，第二三刀符号零变化 |
+| B2 | `GN_Vk.cpp` 拆完：vkRenderTarget / vkOffscreen / vkSwapchain / vkInit + 余量归位（Begin2DPass/RenderFinish→vkFrame2d，Shutdown/WaitIdle→vkDevice，3D 状态/Init3D→vk3dInit） | `src/graphics/_Vulkan/` | G3-0 | ✅ 2026-11-26 四刀完成：GN_Vk.cpp 3690→25（仅上下文实例）；符号变更已登记 abi/changes.md，后三刀零变化。遗留：vkInit.cpp 562 行单体函数，内部阶段拆分登记为后续可选 |
 | B3 | `GN_Array.h` 4016 行 → containers/ 10 头 + 转发聚合头 | `src/core/containers/` | G3-0 | 待做 |
 | B4 | 其余超限：`GN_UiBase.cpp` 2669 按控件切；`GN_Vk.h` 1122 公共类型/内部声明分离；`GN_FormatImgFile.cpp` 1041 按编解码切 | `src/ui/`、`src/graphics/_Vulkan/`、`src/core/` | B2/B3 后 | 待做 |
 | B6 | 平台拆分 + Linux-only 如实声明（cross 目标标 experimental；README/GETTING_STARTED 同步） | `src/platform/`、`docs/` | B4 | 待做 |

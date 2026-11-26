@@ -2,6 +2,21 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B2 第四刀收尾：GN_Vk.cpp 3690 → 25 行（仅上下文实例）
+
+move-only 归位（REFACTOR_PLAN §13 B2），单测 943/0，符号名 diff 为零。
+
+| 内容 | 去向 |
+|---|---|
+| `GN_VkInit`（设备/交换链/管线/命令缓冲/同步对象，含 2D 嵌入式 spv 回退） | `vkInit.cpp`（新，562 行） |
+| `GN_VkBegin2DPass` / `RenderFinish` / staging 遗留静态数组 | `vkFrame2d.cpp` |
+| `GN_VkShutdown` / `GN_VkRayQuerySupported` / `GN_VkWaitIdle` | `vkDevice.cpp`（补 vkValidation.h include） |
+| `s_in3DPass` / `s_framebuffers3D` 定义 + 3D spv includes + `GN_VkInit3D` 编排 | `vk3dInit.cpp`（#ifdef GN_USING_3D 守卫原样保留） |
+
+GN_Vk.cpp 仅余 `GN_VkContext GN_Vk;` 全局实例定义（25 行）。清理迁走后的孤儿注释与过期 sIMAGE 注释。
+B2 至此完成；遗留登记：vkInit.cpp 是 562 行单体函数，内部阶段拆分（设备/表面/管线/同步）为后续可选项。
+下一批次：B3（GN_Array.h 4016 行 → containers/ 多头 + 转发聚合头）。
+
 ## 2026-11-26 — B2 第二三刀：vkOffscreen + vkSwapchain（GN_Vk.cpp 1230 → 859）
 
 move-only 拆分（REFACTOR_PLAN §13 B2），单测 943/0，符号名 diff 为零。
