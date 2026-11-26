@@ -741,7 +741,7 @@ bool GN_VkRebakeEnvironment() {
        GN_Vk.envBakePipeline == VK_NULL_HANDLE || GN_Vk.envPrefilteredImage == VK_NULL_HANDLE) {
         return false;
     }
-    if(s_in3DPass || GN_Vk.inRenderPass) return false; // 不允许在 pass 内重烘
+    if(GN_Vk.in3DPass || GN_Vk.inRenderPass) return false; // 不允许在 pass 内重烘
     vkDeviceWaitIdle(GN_Vk.device);
     VkSkyParams sky;
     GN_VkGetSky(&sky);

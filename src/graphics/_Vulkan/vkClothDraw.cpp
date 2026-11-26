@@ -221,7 +221,7 @@ void destroyClothDraw() {
 }
 
 bool GN_VkClothDraw(const sMAT44 &viewProj, float r, float g, float b) {
-    if(!GN_Vk.initialized || !s_in3DPass) return false;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass) return false;
     const GN3d::sCLOTH_GPU_DESC *desc = clothGpuDesc();
     const VkBuffer buffer = clothGpuVertexBuffer();
     const uint32_t count = clothGpuVertexCount();

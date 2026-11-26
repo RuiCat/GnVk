@@ -257,7 +257,7 @@ uint32_t GN_VkLast3DIndexCount() { return s_last3DIndexCount; }
 
 void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                       const void *lightUBO, uint32_t lightUBOSize) {
-    if(!GN_Vk.initialized || s_in3DPass) return;
+    if(!GN_Vk.initialized || GN_Vk.in3DPass) return;
 
     // 偏移不按 pass 归零：同一帧可能先录 4 级 shadow pass，归零会覆盖其顶点数据
     // （已录制命令在提交时才读取缓冲）。帧首由 GN_VkBeginFrame 归零，
@@ -339,7 +339,7 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         cvs[2].color = {{0.0f, 0.0f, 0.0f, 1.0f}}; // Resolve — 会被覆盖
         VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         rpi.renderPass = GN_Vk.renderPass3D;
-        rpi.framebuffer = s_framebuffers3D[GN_Vk.currentFrame];
+        rpi.framebuffer = GN_Vk.framebuffers3D[GN_Vk.currentFrame];
         rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
         rpi.clearValueCount = 3;
         rpi.pClearValues = cvs;
@@ -352,20 +352,20 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
                             GN_Vk.pipelineLayout3D, 0, 1, &GN_Vk.descriptorSet3D, 0, 0);
 
-    s_in3DPass = true;
+    GN_Vk.in3DPass = true;
     GN_Vk.inRenderPass = true; // 3D 渲染通道活跃
 }
 
 bool GN_VkIsIn3DPass() {
-    return s_in3DPass;
+    return GN_Vk.in3DPass;
 }
 
 void GN_VkEnd3DPass() {
-    if(!GN_Vk.initialized || !s_in3DPass) return;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass) return;
 
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
 
-    s_in3DPass = false;
+    GN_Vk.in3DPass = false;
     GN_Vk.inRenderPass = false; // 3D pass 结束，不重启 2D pass（避免 CLEAR 清掉 3D 内容）
     // L1：3D 输出统一线性 HDR → 合成（曝光/色调映射/Bloom）到 swapchain；
     // 2D 叠层随后以 LOAD 方式画在其上。
@@ -378,7 +378,7 @@ void GN_VkDraw3D(const void *vertices, uint32_t vertexCount,
                  float diffuseR, float diffuseG, float diffuseB,
                  float specularR, float specularG, float specularB,
                  float shininess, const sIMAGE *texture) {
-    if(!GN_Vk.initialized || !s_in3DPass || !vertices || vertexCount == 0) return;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass || !vertices || vertexCount == 0) return;
 
     // ── 绑定本 draw 的纹理描述符集 ──
     // 不能改写已绑定的 descriptorSet3D：本帧命令缓冲已把它绑定并录制过，
@@ -403,7 +403,7 @@ void GN_VkDraw3D(const void *vertices, uint32_t vertexCount,
 
     // 写入顶点到当前偏移
     void *d;
-    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, s_vtxOfs3D, vtxSize, 0, &d);
+    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, GN_Vk.vtxOfs3D, vtxSize, 0, &d);
     memcpy(d, vertices, vtxSize);
     vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory3D);
 
@@ -411,10 +411,10 @@ void GN_VkDraw3D(const void *vertices, uint32_t vertexCount,
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame],
                       VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.pipeline3D);
 
-    VkDeviceSize offs[] = {s_vtxOfs3D};
+    VkDeviceSize offs[] = {GN_Vk.vtxOfs3D};
     vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1,
                            &GN_Vk.vertexBuffer3D, offs);
-    s_vtxOfs3D += vtxSize;
+    GN_Vk.vtxOfs3D += vtxSize;
 
     // Push constants (Blinn-Phong 材质)
     VkModelPushConstBP pc;
@@ -435,13 +435,13 @@ void GN_VkDraw3D(const void *vertices, uint32_t vertexCount,
     if(indices && indexCount > 0) {
         // 写入索引到当前偏移
         void *id;
-        vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, s_idxOfs3D, idxSize, 0, &id);
+        vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, GN_Vk.idxOfs3D, idxSize, 0, &id);
         memcpy(id, indices, idxSize);
         vkUnmapMemory(GN_Vk.device, GN_Vk.indexMemory3D);
 
         vkCmdBindIndexBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame],
-                             GN_Vk.indexBuffer3D, s_idxOfs3D, VK_INDEX_TYPE_UINT32);
-        s_idxOfs3D += idxSize;
+                             GN_Vk.indexBuffer3D, GN_Vk.idxOfs3D, VK_INDEX_TYPE_UINT32);
+        GN_Vk.idxOfs3D += idxSize;
         vkCmdDrawIndexed(GN_Vk.commandBuffers[GN_Vk.currentFrame], indexCount, 1, 0, 0, 0);
     } else {
         vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], vertexCount, 1, 0, 0);
@@ -456,7 +456,7 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
                     const sIMAGE *albedoTex, const sIMAGE *normalTex, float alphaCutoff,
                     bool alphaBlend, float emissiveR, float emissiveG, float emissiveB,
                     float emissiveIntensity) {
-    if(!GN_Vk.initialized || !s_in3DPass || !vertices || vertexCount == 0) return;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass || !vertices || vertexCount == 0) return;
     s_last3DIndexCount = (indices && indexCount > 0) ? indexCount : 0;
 
     // ── 每个纹理组合一份独立描述符集（避免单帧内改写同一 set 导致所有网格采样同一贴图）──
@@ -505,7 +505,7 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
     Ensure3DBufferCapacity(vtxSize, idxSize);
 
     void *d;
-    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, s_vtxOfs3D, vtxSize, 0, &d);
+    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, GN_Vk.vtxOfs3D, vtxSize, 0, &d);
     memcpy(d, vertices, vtxSize);
     vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory3D);
 
@@ -515,20 +515,20 @@ void GN_VkDraw3DPBR(const void *vertices, uint32_t vertexCount,
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame],
                       VK_PIPELINE_BIND_POINT_GRAPHICS, pbrPipeline);
 
-    VkDeviceSize offs[] = {s_vtxOfs3D};
+    VkDeviceSize offs[] = {GN_Vk.vtxOfs3D};
     vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1,
                            &GN_Vk.vertexBuffer3D, offs);
-    s_vtxOfs3D += vtxSize;
+    GN_Vk.vtxOfs3D += vtxSize;
 
     if(indices && indexCount > 0) {
         void *id;
-        vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, s_idxOfs3D, idxSize, 0, &id);
+        vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, GN_Vk.idxOfs3D, idxSize, 0, &id);
         memcpy(id, indices, idxSize);
         vkUnmapMemory(GN_Vk.device, GN_Vk.indexMemory3D);
 
         vkCmdBindIndexBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame],
-                             GN_Vk.indexBuffer3D, s_idxOfs3D, VK_INDEX_TYPE_UINT32);
-        s_idxOfs3D += idxSize;
+                             GN_Vk.indexBuffer3D, GN_Vk.idxOfs3D, VK_INDEX_TYPE_UINT32);
+        GN_Vk.idxOfs3D += idxSize;
         vkCmdDrawIndexed(GN_Vk.commandBuffers[GN_Vk.currentFrame], indexCount, 1, 0, 0, 0);
     } else {
         vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], vertexCount, 1, 0, 0);

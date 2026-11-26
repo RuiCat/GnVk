@@ -141,7 +141,7 @@ TEST_CASE(outfitWiringGroupToggleWritesBackToModel) {
 TEST_CASE(outfitWiringAppliesDefaultHiddenList) {
     clearOutfitEnv();
     // 写一份临时名单：隐藏衬衫(没有) + Mesh_Body.001 + CatEar
-    const char *path = "/work/.sbx/tmp/testOutfitWiring.json";
+    const char *path = "build/testOutfitWiring.json"; // B7-2：临时路径改相对 build/（原 /work/.sbx 仅容器存在）
     std::FILE *file = std::fopen(path, "wb");
     CHECK(file != 0);
     if (file != 0) {
@@ -176,7 +176,7 @@ TEST_CASE(outfitWiringAppliesDefaultHiddenList) {
 TEST_CASE(outfitWiringEnvOverridesJsonHair) {
     // 环境变量优先于 JSON 的 hair 字段。
     clearOutfitEnv();
-    const char *path = "/work/.sbx/tmp/testOutfitWiring2.json";
+    const char *path = "build/testOutfitWiring2.json";
     std::FILE *file = std::fopen(path, "wb");
     CHECK(file != 0);
     if (file != 0) {
@@ -222,7 +222,7 @@ TEST_CASE(outfitWiringReinitResetsPreviousState) {
     clearOutfitEnv();
     sFAKE_MODEL fake;
     // 第一次：带默认名单（隐藏 CatEar）
-    const char *path = "/work/.sbx/tmp/testOutfitWiring3.json";
+    const char *path = "build/testOutfitWiring3.json";
     std::FILE *file = std::fopen(path, "wb");
     CHECK(file != 0);
     if (file != 0) {

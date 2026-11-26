@@ -12,8 +12,8 @@
 
 namespace GNg {
 
-VkRenderPass s_renderPass2DOverlay = VK_NULL_HANDLE;
-VkFramebuffer *s_framebuffers2DOverlay = nullptr;
+// B7-2（2026-11-26）：2D 叠层 pass/framebuffers 已收敛进 GN_Vk.sSwapchainRes
+// （renderPass2DOverlay/framebuffers2DOverlay，vkContext.inc）。
 
 
 // 交换链格式选择：优先 8-bit sRGB（硬件负责 linear→sRGB），否则退回驱动给出的
@@ -41,29 +41,29 @@ bool GN_VkSwapchainIsSrgb() {
 }
 
 void destroyOverlayFramebuffers() {
-    if(!s_framebuffers2DOverlay) return;
+    if(!GN_Vk.framebuffers2DOverlay) return;
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
-        if(s_framebuffers2DOverlay[i]) {
-            vkDestroyFramebuffer(GN_Vk.device, s_framebuffers2DOverlay[i], 0);
+        if(GN_Vk.framebuffers2DOverlay[i]) {
+            vkDestroyFramebuffer(GN_Vk.device, GN_Vk.framebuffers2DOverlay[i], 0);
         }
     }
-    delete[] s_framebuffers2DOverlay;
-    s_framebuffers2DOverlay = nullptr;
+    delete[] GN_Vk.framebuffers2DOverlay;
+    GN_Vk.framebuffers2DOverlay = nullptr;
 }
 
 void createOverlayFramebuffers() {
-    if(s_renderPass2DOverlay == VK_NULL_HANDLE) return;
-    s_framebuffers2DOverlay = new VkFramebuffer[GN_Vk.swapchainImageCount];
+    if(GN_Vk.renderPass2DOverlay == VK_NULL_HANDLE) return;
+    GN_Vk.framebuffers2DOverlay = new VkFramebuffer[GN_Vk.swapchainImageCount];
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
-        s_framebuffers2DOverlay[i] = VK_NULL_HANDLE;
+        GN_Vk.framebuffers2DOverlay[i] = VK_NULL_HANDLE;
         VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        fci.renderPass = s_renderPass2DOverlay;
+        fci.renderPass = GN_Vk.renderPass2DOverlay;
         fci.attachmentCount = 1;
         fci.pAttachments = &GN_Vk.swapchainViews[i];
         fci.width = GN_Vk.swapchainExtent.width;
         fci.height = GN_Vk.swapchainExtent.height;
         fci.layers = 1;
-        vkCreateFramebuffer(GN_Vk.device, &fci, 0, &s_framebuffers2DOverlay[i]);
+        vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.framebuffers2DOverlay[i]);
     }
 }
 
@@ -141,7 +141,7 @@ void GN_VkResize(int w, int h) {
 #ifdef GN_USING_3D
     destroy3DCompositeFramebuffers();
     destroy3DDeferredLightFramebuffers();
-    destroy3DForwardFramebuffers(); // s_framebuffers3D 引用旧 swapchainView/旧 msaa/depth
+    destroy3DForwardFramebuffers(); // GN_Vk.framebuffers3D 引用旧 swapchainView/旧 msaa/depth
     destroy3DHdrTargets();          // HDR fb + image/view/sampler 都是旧尺寸
 #endif
     // 销毁旧 swapchain 资源

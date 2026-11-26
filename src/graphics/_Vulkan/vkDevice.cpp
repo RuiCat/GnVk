@@ -183,9 +183,9 @@ void GN_VkShutdown() {
     delete[] GN_Vk.framebuffers;
     delete[] GN_Vk.commandBuffers;
     destroyOverlayFramebuffers();
-    if(s_renderPass2DOverlay != VK_NULL_HANDLE) {
-        vkDestroyRenderPass(GN_Vk.device, s_renderPass2DOverlay, 0);
-        s_renderPass2DOverlay = VK_NULL_HANDLE;
+    if(GN_Vk.renderPass2DOverlay != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(GN_Vk.device, GN_Vk.renderPass2DOverlay, 0);
+        GN_Vk.renderPass2DOverlay = VK_NULL_HANDLE;
     }
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) vkDestroyImageView(GN_Vk.device, GN_Vk.swapchainViews[i], 0);
     delete[] GN_Vk.swapchainViews;

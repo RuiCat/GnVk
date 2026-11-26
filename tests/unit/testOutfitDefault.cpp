@@ -23,7 +23,9 @@
 
 namespace {
 
-const char *kTempPath = "/work/.sbx/tmp/testOutfitDefault.json";
+// B7-2 顺手修（环境阻塞）：原硬编码 /work/.sbx/tmp 只在 sbxd 容器存在，宿主上 fopen 必败。
+// 临时产物落 build/（make unit 先 mkdir -p build；两种环境 cwd 都是仓库根）。
+const char *kTempPath = "build/testOutfitDefault.json";
 
 bool writeTempFile(const char *text) {
     std::FILE *file = std::fopen(kTempPath, "wb");

@@ -482,7 +482,7 @@ nm -D --defined-only libGN_mini.so | sort | diff abi/baseline.txt -   # 只允�
 | B3 | `GN_Array.h` 4016 行 → containers/ 11 头 + 转发聚合头 | `src/core/containers/` | G3-0 | ✅ 2026-11-26：11 片段（memMacros/arrayAlgorithms/iterator/array/bufferMapping/list/listWheel/tempBuf/tree2/smartPtr/nodeTree）+ baseTypes 最小类型头；GN_Array.h 16 行转发头；12 头全部自包含（C10），总基线 67/121→66/133；符号零变化 |
 | B4 | ~~其余超限~~ | `src/ui/`、`src/graphics/_Vulkan/`、`src/core/` | B2/B3 后 | ✅ 2026-11-26：GN_UiBase.cpp 2670→38、GN_Vk.h 1122→49、GN_FormatImgFile.cpp 1041→28（转发 + .inc 片段，单编译单元语义不变） |
 | B6 | ~~平台拆分 + Linux-only 如实声明~~ | `src/platform/`、`docs/` | B4 | ✅ 2026-11-26：GN_Sys.cpp 1722→36 + 7 个 .inc 片段（预处理平衡点切分）；README/Makefile 声明 Linux-only，cross 目标标 experimental |
-| B7 | 上下文收敛（c4）：门面 → 渲染状态 → 资源缓存 → 输入/UI → 审计（账本见 B7_STATIC_LEDGER.md） | 全仓（**串行**，一次一个模块） | B2–B6 | 🚧 B7-1 ✅（门面 + vkFrame2d 16 变量 → GN_Vk.s2DRes，945/0）；余 B7-2…5 |
+| B7 | 上下文收敛（c4）：门面 → 渲染状态 → 资源缓存 → 输入/UI → 审计（账本见 B7_STATIC_LEDGER.md） | 全仓（**串行**，一次一个模块） | B2–B6 | 🚧 B7-1 ✅（门面 + 2D 帧状态，945/0）+ B7-2 ✅（渲染状态 24 变量 → s3DPassRes/sRtRes 等，948/0）；余 B7-3…5 |
 | B8 | CMake + presets + make 薄封装；双构建 parity 后删旧规则 | `CMakeLists.txt`、`CMakePresets.json`、`Makefile` | B2–B6（可与 B7 并行） | 🚧 2026-11-26 阶段1：CMakeLists + presets + `make parity`；parity 全过（单测 943/0、smoke 13/0、gpuCheck 126/0、符号零差异）；余 make 薄封装与旧规则删除 |
 | B9 | 质量门全量（c7）：去 -fpermissive、C++17、告警预算 19385→<500、字符串安全清零、解析器 fuzz | 全仓 | B7/B8 | 待做 |
 | B10 | 文档与发布（c8）：版本单一来源、README 重写、ABI 基线随版本、过期文档退役 | `docs/`、`README.md` | 全部 | 待做 |

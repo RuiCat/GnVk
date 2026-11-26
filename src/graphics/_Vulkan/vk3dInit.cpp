@@ -83,12 +83,12 @@ void init3DTargets() {
 
 // ── 可重入的 3D 目标创建/销毁（GN_VkResize 与 GN_VkShutdown3D 共用）──
 void destroy3DForwardFramebuffers() {
-    if(!s_framebuffers3D) return;
+    if(!GN_Vk.framebuffers3D) return;
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
-        if(s_framebuffers3D[i]) vkDestroyFramebuffer(GN_Vk.device, s_framebuffers3D[i], 0);
+        if(GN_Vk.framebuffers3D[i]) vkDestroyFramebuffer(GN_Vk.device, GN_Vk.framebuffers3D[i], 0);
     }
-    delete[] s_framebuffers3D;
-    s_framebuffers3D = nullptr;
+    delete[] GN_Vk.framebuffers3D;
+    GN_Vk.framebuffers3D = nullptr;
 }
 
 void destroy3DMsaaTargets() {
@@ -188,9 +188,9 @@ bool create3DMsaaTargets() {
 
 void create3DForwardFramebuffers() {
     if(GN_Vk.renderPass3D == VK_NULL_HANDLE) return;
-    s_framebuffers3D = new VkFramebuffer[GN_Vk.swapchainImageCount];
+    GN_Vk.framebuffers3D = new VkFramebuffer[GN_Vk.swapchainImageCount];
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
-        s_framebuffers3D[i] = VK_NULL_HANDLE;
+        GN_Vk.framebuffers3D[i] = VK_NULL_HANDLE;
         VkImageView atts[3] = {GN_Vk.msaaColorView, GN_Vk.depthView, GN_Vk.hdrView};
         VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
         fci.renderPass = GN_Vk.renderPass3D;
@@ -199,7 +199,7 @@ void create3DForwardFramebuffers() {
         fci.width = GN_Vk.swapchainExtent.width;
         fci.height = GN_Vk.swapchainExtent.height;
         fci.layers = 1;
-        vkCreateFramebuffer(GN_Vk.device, &fci, 0, &s_framebuffers3D[i]);
+        vkCreateFramebuffer(GN_Vk.device, &fci, 0, &GN_Vk.framebuffers3D[i]);
     }
 }
 
@@ -1111,14 +1111,9 @@ void destroy3DCubeShadow() {
 #include "gn3d_pbr_frag_spv.h"
 #include "gn3d_shadow_vert_spv.h"
 
-// — 渲染通道追踪 (所有 pass 共用, 需在 #ifdef GN_USING_3D 外声明) —
-
-// — 3D pass 状态（定义在本文件，供 vk3d* 模块共享） —
-bool s_in3DPass = false;
-VkFramebuffer *s_framebuffers3D = nullptr;
-
-// — 阴影 pass 状态 —
-// s_inShadowPass 定义在 vk3dPasses.cpp
+// — 渲染通道追踪 —
+// B7-2：GN_Vk.in3DPass/GN_Vk.framebuffers3D 已收敛进 GN_Vk.s3DPassRes（in3DPass/framebuffers3D，
+// 无条件成员，不再受本文件 GN_USING_3D 条件编译限制）；阴影 pass 状态同组。
 
 // ── 3D 初始化编排：各阶段实现见 vk3dInit.cpp ──
 void GN_VkInit3D() {

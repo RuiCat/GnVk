@@ -139,7 +139,7 @@ void destroyDebugLines() {
 
 // 在已开启的 3D pass 内绘制 lineCount 条线段；未初始化/不在 pass 内/空输入时安全返回。
 void GN_VkDrawDebugLines(const void *lines, uint32_t lineCount, unsigned int color) {
-    if(!GN_Vk.initialized || !s_in3DPass || lines == 0 || lineCount == 0) return;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass || lines == 0 || lineCount == 0) return;
     if(s_debugPipeline == VK_NULL_HANDLE || s_debugPipelineLayout == VK_NULL_HANDLE) return;
 
     const GN3d::sDEBUG_LINE *segments = (const GN3d::sDEBUG_LINE *)lines;
@@ -153,7 +153,7 @@ void GN_VkDrawDebugLines(const void *lines, uint32_t lineCount, unsigned int col
     unpackColor(color, rgba);
 
     void *mapped = 0;
-    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, s_vtxOfs3D, vertexSize, 0, &mapped);
+    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, GN_Vk.vtxOfs3D, vertexSize, 0, &mapped);
     if(mapped == 0) return;
     sDEBUG_VERTEX *out = (sDEBUG_VERTEX *)mapped;
     for(uint32_t i = 0; i < lineCount; ++i) {
@@ -166,9 +166,9 @@ void GN_VkDrawDebugLines(const void *lines, uint32_t lineCount, unsigned int col
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_debugPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_debugPipelineLayout,
                             0, 1, &s_debugDescriptorSet, 0, 0);
-    VkDeviceSize offset = s_vtxOfs3D;
+    VkDeviceSize offset = GN_Vk.vtxOfs3D;
     vkCmdBindVertexBuffers(cmd, 0, 1, &GN_Vk.vertexBuffer3D, &offset);
-    s_vtxOfs3D += vertexSize;
+    GN_Vk.vtxOfs3D += vertexSize;
     vkCmdDraw(cmd, vertexCount, 1, 0, 0);
     vkValidationEndLabel(cmd);
 }
@@ -177,7 +177,7 @@ void GN_VkDrawDebugLines(const void *lines, uint32_t lineCount, unsigned int col
 // 唯一区别是颜色逐线读取 —— 见 GN_Vk.h 里为什么需要它。
 uint32_t GN_VkDrawEditLinesImpl(const void *lines, uint32_t lineCount, VkPipeline pipeline,
                                 const char *label) {
-    if(!GN_Vk.initialized || !s_in3DPass || lines == 0 || lineCount == 0) return 0;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass || lines == 0 || lineCount == 0) return 0;
     if(pipeline == VK_NULL_HANDLE || s_debugPipelineLayout == VK_NULL_HANDLE) return 0;
 
     const GN3d::sEDIT_LINE *segments = (const GN3d::sEDIT_LINE *)lines;
@@ -188,7 +188,7 @@ uint32_t GN_VkDrawEditLinesImpl(const void *lines, uint32_t lineCount, VkPipelin
     if(GN_Vk.vertexBuffer3D == VK_NULL_HANDLE || GN_Vk.vertexMemory3D == VK_NULL_HANDLE) return 0;
 
     void *mapped = 0;
-    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, s_vtxOfs3D, vertexSize, 0, &mapped);
+    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, GN_Vk.vtxOfs3D, vertexSize, 0, &mapped);
     if(mapped == 0) return 0;
     sDEBUG_VERTEX *out = (sDEBUG_VERTEX *)mapped;
     for(uint32_t i = 0; i < lineCount; ++i) {
@@ -207,9 +207,9 @@ uint32_t GN_VkDrawEditLinesImpl(const void *lines, uint32_t lineCount, VkPipelin
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_debugPipelineLayout,
                             0, 1, &s_debugDescriptorSet, 0, 0);
-    VkDeviceSize offset = s_vtxOfs3D;
+    VkDeviceSize offset = GN_Vk.vtxOfs3D;
     vkCmdBindVertexBuffers(cmd, 0, 1, &GN_Vk.vertexBuffer3D, &offset);
-    s_vtxOfs3D += vertexSize;
+    GN_Vk.vtxOfs3D += vertexSize;
     vkCmdDraw(cmd, vertexCount, 1, 0, 0);
     vkValidationEndLabel(cmd);
     return lineCount;

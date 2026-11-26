@@ -6,9 +6,11 @@
 # 直接加字段，分组就会重新退化成扁平表，白做。
 #
 # 本脚本检查三件事：
-#   1. 顶层只允许 1 个非平凡成员（aPipelineCache）+ 8 个匿名 struct 组；
+#   1. 顶层只允许 4 个命名非平凡成员（aPipelineCache + B7-2 的 aRetired3DBuffers/
+#      aSkyParams/aDeferredViewProj）+ 10 个匿名 struct 组；
 #   2. 每组都有「── sXxxRes：」标题注释；
-#   3. sizeof 仍是 2008 字节（布局未变；变了说明字段集合被改动）。
+#   3. 字段数不少于基线 200（防静默丢失；B7-1/B7-2 收敛只增不减）。
+# 基线随批次登记更新（同 abi/baseline.txt 机制）：B7-2 新增 s3DPassRes/sRtRes 两组。
 #
 # 退出码：0 = 通过；1 = 有违规
 set -u
@@ -25,10 +27,10 @@ echo "==== GN_VkContext 分组检查 ===="
 
 # 1) 组数
 groups=$(echo "$BODY" | grep -cE '^    // ── s[A-Za-z0-9]+Res：')
-if [ "$groups" -eq 8 ]; then
-    echo "  [PASS] 8 个命名分组（sDeviceRes … sDeferredRes）"
+if [ "$groups" -eq 10 ]; then
+    echo "  [PASS] 10 个命名分组（sDeviceRes … sDeferredRes + B7-2 s3DPassRes/sRtRes）"
 else
-    echo "  [FAIL] 分组数为 $groups，预期 8"
+    echo "  [FAIL] 分组数为 $groups，预期 10"
     echo "$BODY" | grep -oE '^    // ── s[A-Za-z0-9]+Res：' | sed 's/^/         /'
     fail=1
 fi
@@ -36,20 +38,22 @@ fi
 # 2) 顶层字段：按“组标题行号”切分。aPipelineCache 必须位于第一个组标题之前。
 top_block=$(echo "$BODY" | sed -n '/── s[A-Za-z0-9]*Res：/q;p')
 top_level=$(echo "$top_block" | grep -cE '^\s+[A-Za-z_][^;]*;' | tr -d ' ')
-if [ "$top_level" -eq 1 ] && echo "$top_block" | grep -q 'aPipelineCache'; then
-    echo "  [PASS] 顶层仅 1 个非平凡成员（aPipelineCache）"
+if [ "$top_level" -eq 4 ] && echo "$top_block" | grep -q 'aPipelineCache' \
+   && echo "$top_block" | grep -q 'aRetired3DBuffers' && echo "$top_block" | grep -q 'aSkyParams' \
+   && echo "$top_block" | grep -q 'aDeferredViewProj'; then
+    echo "  [PASS] 顶层仅 4 个命名非平凡成员（aPipelineCache/aRetired3DBuffers/aSkyParams/aDeferredViewProj）"
 else
-    echo "  [FAIL] 顶层有 $top_level 个字段，预期 1（aPipelineCache；新字段请放进对应组）"
+    echo "  [FAIL] 顶层有 $top_level 个字段，预期 4（命名非平凡成员；平凡新字段请放进对应组）"
     echo "$top_block" | grep -E '^\s+[A-Za-z_][^;]*;' | sed 's/^/         /'
     fail=1
 fi
 
 # 3) 匿名 struct 块数应与组数一致
 blocks=$(echo "$BODY" | grep -cE '^    struct \{$')
-if [ "$blocks" -eq 8 ]; then
-    echo "  [PASS] 8 个匿名 struct 块"
+if [ "$blocks" -eq 10 ]; then
+    echo "  [PASS] 10 个匿名 struct 块"
 else
-    echo "  [FAIL] 匿名 struct 块数为 $blocks，预期 8"
+    echo "  [FAIL] 匿名 struct 块数为 $blocks，预期 10"
     fail=1
 fi
 

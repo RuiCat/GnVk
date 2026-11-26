@@ -6,7 +6,7 @@
 //   * set 0 = binding0 UNIFORM_BUFFER（绘制参数）、binding1 STORAGE_BUFFER（粒子）；
 //     描述符集在粒子 SSBO 创建后由 particleDrawBindBuffer 分配并写入。
 //   * 管线经 GN_Vk.aPipelineCache（renderPass3D）：深度测试开、深度写关、双面、标准 alpha 混合。
-//   * 只在 3D pass 内可用（s_in3DPass），pass 外调用返回 false 且不改任何状态。
+//   * 只在 3D pass 内可用（GN_Vk.in3DPass），pass 外调用返回 false 且不改任何状态。
 #include <GN.h>
 #include "GN_Vk.h"
 #include "vkInternal.h"
@@ -165,7 +165,7 @@ bool particleDrawBindBuffer(VkBuffer buffer, uint32_t capacity) {
 void particleDrawUnbindBuffer() { releaseDrawDescriptorSet(); }
 
 bool GN_VkParticleDraw(const GN3d::sPARTICLE_DRAW_PARAMS &params) {
-    if(!GN_Vk.initialized || !s_in3DPass) return false;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass) return false;
     if(!s_drawUboMapped || s_drawSet == VK_NULL_HANDLE || s_particleDrawPipeline == VK_NULL_HANDLE) {
         return false;
     }

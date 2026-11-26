@@ -194,7 +194,7 @@ uint32_t acquireSlot() {
 } // namespace
 
 bool GN_VkDrawDecals(const sDECAL_DRAW_PARAMS &params) {
-    if(!GN_Vk.initialized || !s_in3DPass) return false;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass) return false;
     if(params.aCount == 0 || params.aItems == nullptr) return false;
     if(params.aCount > 0xFFFFFFFFu / 6u) return false;
     if(s_pipeline == VK_NULL_HANDLE && !createPipeline()) return false;

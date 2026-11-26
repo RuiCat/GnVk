@@ -168,7 +168,7 @@ void GN_VkMaterialDestroy(GN3d::sMATERIAL_RES *material) {
 void GN_VkDraw3DMaterial(const void *vertices, uint32_t vertexCount,
                          const uint32_t *indices, uint32_t indexCount,
                          const sMAT44 *modelMatrix, const GN3d::sMATERIAL_RES *material) {
-    if(!GN_Vk.initialized || !s_in3DPass) return;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass) return;
     if(!vertices || vertexCount == 0 || !modelMatrix || !material) return;
     if(s_materialPipeline == VK_NULL_HANDLE || s_materialPipelineLayout == VK_NULL_HANDLE) return;
     VkDescriptorSet set = (VkDescriptorSet)material->aDescriptorSet;
@@ -179,7 +179,7 @@ void GN_VkDraw3DMaterial(const void *vertices, uint32_t vertexCount,
     Ensure3DBufferCapacity(vtxSize, idxSize);
 
     void *mapped = 0;
-    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, s_vtxOfs3D, vtxSize, 0, &mapped);
+    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, GN_Vk.vtxOfs3D, vtxSize, 0, &mapped);
     memcpy(mapped, vertices, vtxSize);
     vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory3D);
 
@@ -188,19 +188,19 @@ void GN_VkDraw3DMaterial(const void *vertices, uint32_t vertexCount,
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, s_materialPipelineLayout,
                             0, 1, &set, 0, 0);
 
-    VkDeviceSize offs[] = {s_vtxOfs3D};
+    VkDeviceSize offs[] = {GN_Vk.vtxOfs3D};
     vkCmdBindVertexBuffers(cb, 0, 1, &GN_Vk.vertexBuffer3D, offs);
-    s_vtxOfs3D += vtxSize;
+    GN_Vk.vtxOfs3D += vtxSize;
 
     vkCmdPushConstants(cb, s_materialPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
                        0, 64, modelMatrix->m);
 
     if(indices && indexCount > 0) {
-        vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, s_idxOfs3D, idxSize, 0, &mapped);
+        vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, GN_Vk.idxOfs3D, idxSize, 0, &mapped);
         memcpy(mapped, indices, idxSize);
         vkUnmapMemory(GN_Vk.device, GN_Vk.indexMemory3D);
-        vkCmdBindIndexBuffer(cb, GN_Vk.indexBuffer3D, s_idxOfs3D, VK_INDEX_TYPE_UINT32);
-        s_idxOfs3D += idxSize;
+        vkCmdBindIndexBuffer(cb, GN_Vk.indexBuffer3D, GN_Vk.idxOfs3D, VK_INDEX_TYPE_UINT32);
+        GN_Vk.idxOfs3D += idxSize;
         vkCmdDrawIndexed(cb, indexCount, 1, 0, 0, 0);
     } else {
         vkCmdDraw(cb, vertexCount, 1, 0, 0);

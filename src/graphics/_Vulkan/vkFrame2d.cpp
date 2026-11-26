@@ -108,8 +108,8 @@ bool GN_VkBeginFrame() {
     releaseRetired3DBuffers();
     // 3D 绘制偏移按帧单调追加（阴影 4 级 + 主 pass），帧首归零。
     // 旧实现在每个 pass 开头归零，4 级 cascade 的 draw 会在提交前互相覆盖顶点数据。
-    s_vtxOfs3D = 0;
-    s_idxOfs3D = 0;
+    GN_Vk.vtxOfs3D = 0;
+    GN_Vk.idxOfs3D = 0;
     // 描述符集同步必须在命令缓冲开始录制之前（录制中改写已绑定的 set 会让 CB 失效）。
     applyRingResetIfRequested(); // 纹理解放后作废旧环集（含 vkFreeDescriptorSets，必须先于本帧分配）
     refreshPBRTextureSets();
@@ -235,11 +235,11 @@ void GN_VkEndFrame() {
 
 void GN_VkBegin2DPass() {
     if(!GN_Vk.initialized || GN_Vk.inRenderPass) return; // 已有活跃通道时不重复开
-    if(s_renderPass2DOverlay == VK_NULL_HANDLE || s_framebuffers2DOverlay == nullptr) return;
+    if(GN_Vk.renderPass2DOverlay == VK_NULL_HANDLE || GN_Vk.framebuffers2DOverlay == nullptr) return;
     VkCommandBuffer commandBuffer = GN_Vk.commandBuffers[GN_Vk.currentFrame];
     VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    rpi.renderPass = s_renderPass2DOverlay;
-    rpi.framebuffer = s_framebuffers2DOverlay[GN_Vk.currentFrame];
+    rpi.renderPass = GN_Vk.renderPass2DOverlay;
+    rpi.framebuffer = GN_Vk.framebuffers2DOverlay[GN_Vk.currentFrame];
     rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
     rpi.clearValueCount = 0; // loadOp=LOAD：沿用 3D 的结果
     vkCmdBeginRenderPass(commandBuffer, &rpi, VK_SUBPASS_CONTENTS_INLINE);

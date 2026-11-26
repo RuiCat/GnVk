@@ -535,7 +535,7 @@ TEST_CASE(entityShadowStateMatchesLegacyPath) {
 // ── cRENDER_FRAME：没有设备时的行为必须是"明确失败 + 不崩" ──────────
 // 单测进程不建 Vulkan 设备，所以这里走的就是"引擎未初始化"分支。
 // 这条覆盖的正是 cRENDER_FRAME 最容易写错的地方：Begin 失败时析构不能去 End 一个
-// 没开始的 pass（那会把 s_in3DPass 状态搞乱，重则画面永久冻结）。
+// 没开始的 pass（那会把 GN_Vk.in3DPass 状态搞乱，重则画面永久冻结）。
 TEST_CASE(entityRenderFrameWithoutDevice) {
     GNg::cRENDER_FRAME frame;
     CHECK(!frame.Active());

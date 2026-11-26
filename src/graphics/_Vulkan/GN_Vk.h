@@ -32,6 +32,7 @@
 #include "GN_Environment.h" // G1b：环境光照预设（eENV_LIGHTING）
 #include "postParams.h" // L1：sPOST_UBO 契约（GN_VkSetPost 参数类型）
 #include "atmosphereParams.h" // L4：sATMOSPHERE_PARAMS 契约（GN_VkSetAtmosphere 参数类型）
+#include "GN_3DSkin.h" // B7-2：eSKIN_PALETTE_PATH（GN_VkContext.lastSkinnedPath 成员需要完整枚举；L3→L2 向下依赖）
 
 // GN3d 前向声明（放在 GNg 外层，否则会变成 GNg::GN3d）
 namespace GN3d {

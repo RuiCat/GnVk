@@ -2,6 +2,35 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — B7-2：渲染状态余量收敛（c4 第二批）
+
+**迁移**（24 个文件级全局/static → GN_VkContext，NSDMI 初值与原一致；30 文件约 280 处引用改 GN_Vk.*）：
+- 3D pass 状态 → 新组 s3DPassRes（14）：in3DPass/inShadowPass/inCubeShadowPass/cubeShadowLightIndex/
+  cubeShadowLightPos/shadowPassPipeline/framebuffers3D/vtxOfs3D/idxOfs3D/vtxCap3D/idxCap3D/
+  hasDeferredViewProj/retireTick3D/lastSkinnedPath（原 vk3dInit/vk3dPasses/vk3dShutdown/vkSkinnedDispatch）
+- RT 状态 → 新组 sRtRes（4）：rtRenderPass/rtFramebuffer/activeRT/rtInProgress（原 vkRenderTarget）
+- 2D 叠层 → sSwapchainRes（+2）：renderPass2DOverlay/framebuffers2DOverlay（原 vkSwapchain）
+- s2DRes（+1）：alphaColorKey（原 vkDraw2d）
+- 非平凡成员按约定走顶层命名（aPipelineCache 先例，+3）：aRetired3DBuffers（退休表，条目类型
+  sRETIRED_3D_BUFFER 迁 vkImageTypes.inc）、aSkyParams、aDeferredViewProj
+- vkInternal.h 删 9 extern；GN_Vk.h 补 include GN_3DSkin.h（L3→L2 向下，枚举可见性）；
+  vkImageData.cpp 核实无文件级状态余量（引用已随 B7-1 收敛）。
+
+**门禁基线**：context_groups.sh 8→10 组、顶层 1→4 命名非平凡成员（字段数 250≥200）。
+
+**ABI**（D2，已登记 abi/changes.md）：移除导出 GNg::s_shadowPassPipeline（唯一强符号变更，零新增）；
+基线按宿主 GCC 16.2.1 重生成，弱符号名漂移（libstdc++ `_M_realloc_insert`→`_M_realloc_append` 等，
+旧基线为 GCC≤14 工具链产物）单独登记，与代码改动无关。
+
+**顺手修（环境阻塞，存量缺陷）**：testOutfitDefault/testOutfitWiring 硬编码 /work/.sbx/tmp
+（仅 sbxd 容器存在，宿主 fopen 必败，61dd182 引入）→ 相对路径 build/（4 处字面量）。
+
+**明确留后续批**（账本有登记）：L2 层 gScissorContext/gImageLoadContext（跨层需白名单）；
+三套纹理环集缓存与 vk3dForward 诊断计数（描述符资源缓存类）；各子系统自有 GPU 资源
+（vkContext.inc 设计注释明确保留文件内静态）。
+
+验证：单测 **948/0**（+renderState3DPassDefaults/renderStateRtOverlayAndColorKey/renderStateSkyParamsRoundTrip 3 例）。
+
 ## 2026-11-26 — B7-1：引擎上下文门面 + 2D 帧状态收敛（c4 第一批）
 
 **static 精确盘点**（旧口径 136 含 static 函数）：文件级 static 变量 33 + 函数内 static 30，

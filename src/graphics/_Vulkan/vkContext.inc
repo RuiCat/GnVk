@@ -22,10 +22,22 @@ struct GN_VkContext {
     //  ⚠ 匿名 struct 是 GNU/MS 扩展（ISO C++ 不允许）。本项目不用 -Wpedantic，
     //    且 GCC/Clang/MSVC 均支持；换来的是零调用点改动。
     // ═══════════════════════════════════════════════════════════
-    //  非平凡成员（有构造/析构，不能放进匿名 struct）
+    //  非平凡成员（有构造/析构，不能放进匿名 struct）——顶层只放这类成员，
+    //  平凡字段一律进下面的分组（tests/lint/context_groups.sh 守卫）。
     //  管线缓存持有所有 VkPipeline；须在 vkDestroyDevice 之前 Release。
     // ═══════════════════════════════════════════════════════════
     GN3d::cPIPELINE_CACHE aPipelineCache;
+    // B7-2（2026-11-26）：3D 动态缓冲退休表（原 vk3dShutdown.cpp 匿名命名空间 static 收敛，c4）。
+    // 扩容退休的旧缓冲只在 GN_VkBeginFrame 的 fence 之后释放；GN_VkShutdown3D 清空。
+    std::vector<sRETIRED_3D_BUFFER> aRetired3DBuffers;
+    // B7-2：天空参数（原 vk3dPasses.cpp s_skyParams；NSDMI 初值与原全局一致）。
+#ifdef GN_USING_3D
+    VkSkyParams aSkyParams;
+#endif
+    // B7-2：延迟 pass 最近一次 viewProj（原 vk3dPasses.cpp s_deferredViewProj，SSAO/SSGI 用）。
+    // 全局 GN_Vk 静态存储先零初始化，sMAT44() {} 不改 m ⇒ 与旧 static 初值一致；
+    // 读取由 hasDeferredViewProj 守卫，未写入前不会被消费。
+    sMAT44 aDeferredViewProj;
 
     // ── sDeviceRes：设备与队列：Vulkan 实例、物理设备、逻辑设备、队列族。子系统存活的根本前提
     struct {
@@ -56,6 +68,10 @@ struct GN_VkContext {
         bool headless;
         VkImageLayout swapFinalLayout;
         VkDeviceMemory *swapchainMemories;
+        // B7-2（2026-11-26）：2D 叠层 pass/framebuffers（原 vkSwapchain.cpp 文件级全局收敛，c4）。
+        // Init 创建、Shutdown 销毁；以 swapchainView 为附件，resize 重建。
+        VkRenderPass renderPass2DOverlay = VK_NULL_HANDLE;
+        VkFramebuffer *framebuffers2DOverlay = nullptr;
     };
 
     // ── sFrameRes：每帧录制：命令池/命令缓冲/描述符池
@@ -107,6 +123,7 @@ struct GN_VkContext {
         VkBuffer pendingStagingBufs[32] = {};
         VkDeviceMemory pendingStagingMems[32] = {};
         int pendingStagingCnt = 0;
+        unsigned int alphaColorKey = 0; // B7-2：原 vkDraw2d.cpp s_alphaColorKey（SetAlphaColorKey 写入）
     };
 
     // ── sForwardRes：3D 前向：MSAA/深度、3D 管线与 UBO、PBR（含透明变体）、阴影 CSM、3D 动态顶点索引
@@ -167,6 +184,37 @@ struct GN_VkContext {
         VkDeviceMemory vertexMemory3D;
         VkBuffer indexBuffer3D;
         VkDeviceMemory indexMemory3D;
+    };
+
+    // ── s3DPassRes：3D pass 共享状态（B7-2 收敛，c4）：pass 开关、绘制偏移/容量、前向
+    //    framebuffers、阴影管线选择、延迟 viewProj 标志、退休 tick、蒙皮路径诊断。
+    //    原 vk3dInit/vk3dPasses/vk3dShutdown/vkSkinnedDispatch 文件级全局/static；NSDMI 初值与原一致。
+    struct {
+        bool in3DPass = false;
+        bool inShadowPass = false;
+        bool inCubeShadowPass = false;
+        uint32_t cubeShadowLightIndex = 0; // 当前正在渲染哪盏灯（0..GN_MAX_CUBE_SHADOW_LIGHTS-1）
+        sVEC3 cubeShadowLightPos = {0.0f, 0.0f, 0.0f}; // 当前 cube pass 的光源位置（BeginForLight 写入）
+        // 当前 shadow pass 用哪条管线：默认 CSM 的 shadowPipeline；cube pass 临时设成
+        // cubeShadowPipeline（GN_VkShadowDraw 据此绑管线，见 vk3dPasses.cpp 的 B2 教训）。
+        VkPipeline shadowPassPipeline = VK_NULL_HANDLE;
+        VkFramebuffer *framebuffers3D = nullptr;
+        VkDeviceSize vtxOfs3D = 0; // 同一帧内多个 draw 的写入偏移，避免相互覆盖
+        VkDeviceSize idxOfs3D = 0;
+        uint32_t vtxCap3D = 0; // 3D 绘制缓冲容量追踪（Ensure3DBufferCapacity）
+        uint32_t idxCap3D = 0;
+        bool hasDeferredViewProj = false; // 顶层 aDeferredViewProj 的有效标志
+        uint64_t retireTick3D = 0; // 退休表帧同步点序号（releaseRetired3DBuffers 自增）
+        GN3d::eSKIN_PALETTE_PATH lastSkinnedPath = GN3d::eSKIN_PATH_NONE; // 上次 GN_VkDrawSkinnedAuto 走的路径
+    };
+
+    // ── sRtRes：离屏渲染目标（B7-2 收敛，c4）：RT pass/framebuffer 与当前目标。
+    //    原 vkRenderTarget.cpp 文件级 static/全局；NSDMI 初值与原一致。
+    struct {
+        VkRenderPass rtRenderPass = VK_NULL_HANDLE;
+        VkFramebuffer rtFramebuffer = VK_NULL_HANDLE;
+        sIMAGE *activeRT = nullptr; // 当前渲染目标
+        bool rtInProgress = false; // RT pass 进行中
     };
 
     // ── sPostRes：后处理：HDR 离屏目标 + 合成管线（色调映射/Bloom/Gamma）

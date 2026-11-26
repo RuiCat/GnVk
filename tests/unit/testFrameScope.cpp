@@ -1,7 +1,7 @@
 // testFrameScope.cpp — 3D pass 作用域守卫的契约。
 //
 // 为什么值得测：漏调 GN_VkEnd3DPass 的后果不是"少画一点"，而是两个静默黑屏：
-//   1) s_in3DPass 永远 true ⇒ 之后所有 Begin3DPass 都被 `if(s_in3DPass) return;` 挡掉；
+//   1) GN_Vk.in3DPass 永远 true ⇒ 之后所有 Begin3DPass 都被 `if(GN_Vk.in3DPass) return;` 挡掉；
 //   2) GN_VkCompositeToSwapchain 不被调用 ⇒ HDR 从不合成到交换链。
 // 而"在绘制循环里加个 early return"是非常自然的写法，一旦发生极难排查。
 //

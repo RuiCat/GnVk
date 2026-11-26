@@ -14,8 +14,8 @@
 
 namespace GNg {
 
-// 上一次 GN_VkDrawSkinnedAuto 实际走的路径（诊断/验收用；未绘制过为 eSKIN_PATH_NONE）。
-static GN3d::eSKIN_PALETTE_PATH s_lastSkinnedPath = GN3d::eSKIN_PATH_NONE;
+// B7-2：上一次 GN_VkDrawSkinnedAuto 实际走的路径已收敛进 GN_Vk.s3DPassRes.lastSkinnedPath
+// （诊断/验收用；未绘制过为 eSKIN_PATH_NONE）。
 
 sSKINNED_DRAW_DESC::sSKINNED_DRAW_DESC()
     : aVertices(nullptr), aVertexCount(0), aIndices(nullptr), aIndexCount(0), aPose(nullptr),
@@ -25,10 +25,10 @@ sSKINNED_DRAW_DESC::sSKINNED_DRAW_DESC()
     aColor[2] = 0.8f;
 }
 
-GN3d::eSKIN_PALETTE_PATH GN_VkLastSkinnedPath() { return s_lastSkinnedPath; }
+GN3d::eSKIN_PALETTE_PATH GN_VkLastSkinnedPath() { return GN_Vk.lastSkinnedPath; }
 
 bool GN_VkDrawSkinnedAuto(const sSKINNED_DRAW_DESC &desc) {
-    s_lastSkinnedPath = GN3d::eSKIN_PATH_NONE;
+    GN_Vk.lastSkinnedPath = GN3d::eSKIN_PATH_NONE;
 
     if(desc.aVertices == nullptr || desc.aVertexCount == 0) return false;
     if(desc.aPose == nullptr || desc.aModelMatrix == nullptr) return false;
@@ -39,7 +39,7 @@ bool GN_VkDrawSkinnedAuto(const sSKINNED_DRAW_DESC &desc) {
 
     const uint32_t jointCount = (uint32_t)palette.size();
     const GN3d::eSKIN_PALETTE_PATH path = GN3d::selectSkinPalettePath(jointCount);
-    s_lastSkinnedPath = path;
+    GN_Vk.lastSkinnedPath = path;
     if(path == GN3d::eSKIN_PATH_NONE) {
         // 超容量：明确失败而不是静默截断（截断=角色缺肢体且看不出原因）。
         return false;

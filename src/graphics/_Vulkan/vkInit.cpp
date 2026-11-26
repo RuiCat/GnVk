@@ -378,7 +378,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     // 2D 叠层通道：3D pass 之后用它把 HUD/文本画在 3D 画面上（loadOp=LOAD 保留已有画面）。
     // 以 swapFinalLayout 为起点：窗口模式是 PRESENT_SRC（承接上一条 pass 的结果），
     // 无窗口模式是 TRANSFER_SRC。两种模式下叠层通道都 loadOp=LOAD，不清掉 3D/合成画面。
-    if(s_renderPass2DOverlay == VK_NULL_HANDLE) {
+    if(GN_Vk.renderPass2DOverlay == VK_NULL_HANDLE) {
         VkAttachmentDescription adOverlay = {};
         adOverlay.format = GN_Vk.swapchainFormat;
         adOverlay.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -396,7 +396,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
         rpiOverlay.pAttachments = &adOverlay;
         rpiOverlay.subpassCount = 1;
         rpiOverlay.pSubpasses = &spOverlay;
-        vkCreateRenderPass(GN_Vk.device, &rpiOverlay, 0, &s_renderPass2DOverlay);
+        vkCreateRenderPass(GN_Vk.device, &rpiOverlay, 0, &GN_Vk.renderPass2DOverlay);
         createOverlayFramebuffers();
     }
 

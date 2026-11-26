@@ -92,10 +92,10 @@ void destroy3DGbufferDebug() {
     }
 }
 
-// 四通道调试视图：必须在 3D pass 之外调用（内部兜底检查 s_in3DPass/GN_Vk.inRenderPass）。
+// 四通道调试视图：必须在 3D pass 之外调用（内部兜底检查 GN_Vk.in3DPass/GN_Vk.inRenderPass）。
 void GN_VkDebugGBuffer(int channel) {
     if(!GN_Vk.initialized || GN_Vk.gBufferDebugPipeline == VK_NULL_HANDLE) return;
-    if(s_in3DPass || GN_Vk.inRenderPass) return; // 3D pass 内不允许重开同一目标
+    if(GN_Vk.in3DPass || GN_Vk.inRenderPass) return; // 3D pass 内不允许重开同一目标
     if(channel < 0) channel = 0;
     if(channel > 3) channel = 3;
     VkCommandBuffer cb = GN_Vk.commandBuffers[GN_Vk.currentFrame];

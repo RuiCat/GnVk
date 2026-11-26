@@ -244,7 +244,7 @@ uint32_t acquireSlot() {
 
 // 在已开启的 3D pass 内提交 aCount 个 billboard；pass 外/未初始化/参数非法返回 false。
 bool GN_VkDrawPrecipitation(const sPRECIP_DRAW_PARAMS &params) {
-    if(!GN_Vk.initialized || !s_in3DPass) return false;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass) return false;
     if(params.aCount == 0 || params.aParticles == nullptr) return false;
     if(!(params.aStreakScale > 0.0f)) return false;
     if(params.aCount > 0xFFFFFFFFu / 6u) return false; // 顶点数溢出

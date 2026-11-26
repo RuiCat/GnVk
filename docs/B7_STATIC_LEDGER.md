@@ -1,6 +1,6 @@
 # B7 static 收敛账本（c4）
 
-> **状态**：🚧 进行中 — B7-1 完成（门面 + 2D 帧状态）；余渲染/资源/输入UI 批次
+> **状态**：🚧 进行中 — B7-1/B7-2 完成（门面 + 2D 帧状态 + 渲染状态余量）；余资源/输入UI/审计批次
 
 ## 口径
 
@@ -14,7 +14,7 @@
 | 批 | 范围 | 状态 |
 |---|---|---|
 | B7-1 | sEngineContext 门面 + vkFrame2d.cpp 2D 帧状态（16 变量 → GN_Vk.s2DRes） | ✅ 2026-11-26，945/0，ABI 登记 3 移除 3 新增 |
-| B7-2 | 渲染状态余量：vk3dPasses/vk3dShutdown/vkRenderTarget/vkImageData 等 file static + 3D pass extern | 待做 |
+| B7-2 | 渲染状态余量：vk3dPasses/vk3dShutdown/vkRenderTarget/vkImageData 等 file static + 3D pass extern | ✅ 2026-11-26，24 变量 → GN_Vk（s3DPassRes/sRtRes/sSwapchainRes/s2DRes + 3 顶层命名成员），948/0，ABI 登记 1 移除；范围与留后续批见文末登记 |
 | B7-3 | 资源缓存：core（GN_Init/GN_Format*）+ file（GN_File） | 待做 |
 | B7-4 | 输入/UI/平台：GN_Input、GN_UiFBrowser、GN_Main（9 static）、GN_Sound | 待做 |
 | B7-5 | 函数内 static 审计 + 全仓复审 + 多实例测试 | 待做 |
@@ -51,20 +51,20 @@
 
 - L894 `gFileLogContext`
 
-### src/graphics/GN_2D.cpp（1，待迁）
+### src/graphics/GN_2D.cpp（1，留后续批：L2 API 层，见 B7-2 范围登记）
 
 - L76 `gScissorContext`
 
-### src/graphics/GN_2Dtype.cpp（1，待迁）
+### src/graphics/GN_2Dtype.cpp（1，留后续批：L2 API 层，见 B7-2 范围登记）
 
 - L68 `gImageLoadContext`
 
-### src/graphics/_Vulkan/vk3dShutdown.cpp（2，待迁）
+### src/graphics/_Vulkan/vk3dShutdown.cpp（2，✅ B7-2 迁 GN_Vk.s3DPassRes）
 
 - L11 `s_vtxCap3D`
 - L12 `s_idxCap3D`
 
-### src/graphics/_Vulkan/vkDraw2d.cpp（1，待迁）
+### src/graphics/_Vulkan/vkDraw2d.cpp（1，✅ B7-2 迁 GN_Vk.s2DRes.alphaColorKey）
 
 - L229 `s_alphaColorKey`
 
@@ -74,12 +74,12 @@
 - L266 `s_pendingStagingMems`
 - L267 `s_pendingStagingCnt`
 
-### src/graphics/_Vulkan/vkRenderTarget.cpp（2，待迁）
+### src/graphics/_Vulkan/vkRenderTarget.cpp（2，✅ B7-2 迁 GN_Vk.sRtRes）
 
 - L15 `s_rtRenderPass`
 - L16 `s_rtFramebuffer`
 
-### src/graphics/_Vulkan/vkSkinnedDispatch.cpp（1，待迁）
+### src/graphics/_Vulkan/vkSkinnedDispatch.cpp（1，✅ B7-2 迁 GN_Vk.s3DPassRes.lastSkinnedPath）
 
 - L18 `s_lastSkinnedPath`
 
@@ -203,6 +203,42 @@
 
 ## 非 static 文件级全局（粗扫 ~52）
 
-vkFrame2d.cpp 的 11 个已随 B7-1 迁移。余量重点：GN_Init.cpp 默认配置 9 个（GT_AppDefault_*）、
-GN_Input.cpp 计时 5 个、vk3dPasses/vk3dShutdown 3D pass 状态、GN_NetBase/GN_NetTrans 网络状态、
+vkFrame2d.cpp 的 11 个已随 B7-1 迁移。B7-2 已迁渲染状态簇：vk3dPasses/vk3dShutdown/vk3dInit 3D pass 状态、
+vkRenderTarget RT 状态（s_activeRT/s_rtInProgress）、vkSwapchain 2D 叠层（s_renderPass2DOverlay/s_framebuffers2DOverlay）。
+余量重点：GN_Init.cpp 默认配置 9 个（GT_AppDefault_*）、GN_Input.cpp 计时 5 个、GN_NetBase/GN_NetTrans 网络状态、
 sysEncoding.inc 应用目录（GT_CurAppDir*）。vkImageTypes.inc 的 7 个为结构体定义误报，不计。
+
+## B7-2 范围登记（2026-11-26）
+
+**已迁（24 变量 → GN_VkContext；NSDMI 初值与原一致；30 文件约 280 处引用改 GN_Vk.*）**：
+
+- s3DPassRes（新组，14）：in3DPass、inShadowPass、inCubeShadowPass、cubeShadowLightIndex、cubeShadowLightPos、
+  shadowPassPipeline、framebuffers3D、vtxOfs3D、idxOfs3D、vtxCap3D、idxCap3D、hasDeferredViewProj、retireTick3D、lastSkinnedPath
+- sRtRes（新组，4）：rtRenderPass、rtFramebuffer、activeRT、rtInProgress
+- sSwapchainRes（+2）：renderPass2DOverlay、framebuffers2DOverlay
+- s2DRes（+1）：alphaColorKey
+- 顶层命名非平凡成员（+3，aPipelineCache 先例）：aRetired3DBuffers（std::vector<sRETIRED_3D_BUFFER>，
+  条目类型迁 vkImageTypes.inc）、aSkyParams（VkSkyParams，#ifdef GN_USING_3D）、aDeferredViewProj（sMAT44）
+- vkImageData.cpp 核实：无文件级状态余量（其引用已随 B7-1 收敛），本批无需迁移。
+- vkInternal.h 删 9 extern；GN_Vk.h 补 include GN_3DSkin.h（L3→L2 向下，lastSkinnedPath 枚举可见性）。
+- 门禁基线：context_groups.sh 8→10 组、顶层 1→4 命名非平凡成员（字段数 250≥200）。
+- ABI：唯一强符号变更 = 移除 GNg::s_shadowPassPipeline；基线按宿主 GCC 16.2.1 重生成，
+  弱符号名漂移（libstdc++ 版本）另行登记，见 abi/changes.md。
+- 顺手修（环境阻塞，存量缺陷 61dd182 引入）：testOutfitDefault/testOutfitWiring 硬编码 /work/.sbx/tmp
+  （仅 sbxd 容器存在，宿主 fopen 必败）→ 相对路径 build/。
+- 技术债登记：vk3dInit.cpp 有效代码 1038 行（多功能上限 1000，历史超限）；本批净 −5 行、未顺手拆，
+  按技能逃生条款登记为后续拆分项（拆点：Init 编排 / 阴影 / 大气各阶段分文件）。
+- 命名存量登记：tests/lint/context_groups.sh 为 snake_case（与同目录 headers/input/layers/output.sh 同族，
+  Makefile lint/lint-strict 按名调用）；本批仅改内容、未改名（改名需动 Makefile 与文档，超出本批预算），
+  登记为存量命名债务，后续与 tests/lint 脚本一并迁移 camelCase。
+
+**明确留后续批（不在本批写域，原因登记）**：
+
+- gScissorContext（GN_2D.cpp）、gImageLoadContext（GN_2Dtype.cpp）：L2 API 层状态，收敛进 GN_Vk 需跨层白名单，
+  留 B7-5 审计或专门 L2 批。
+- 三套纹理环集缓存与诊断计数：s_pbrTextureSets/s_forwardTextureSets/s_pbrSyncedGen/s_forwardSyncedGen/
+  s_ringResetRequested/s_last3DIndexCount（vk3dForward.cpp）、s_gbufferTextureSets（vk3dPasses.cpp）——
+  描述符资源缓存（非平凡类型），属资源缓存类，留后续批。
+- 各子系统自有 GPU 资源（vkBloom/vkCloudCube/vkParticle*/vkCloth*/vkAtmosphereLut/vkSkinSsbo 等）：
+  vkContext.inc 设计注释明确保留文件内静态，不在 B7 收敛范围（B7-5 审计复核该决定）。
+- GN_Parallel/GN_NetTrans/sysProcess.inc 等非渲染模块 static：未分批，B7-5 审计盘点。

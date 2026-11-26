@@ -225,10 +225,9 @@ unsigned char Draw2DAlphaDirectionGet() {
     return 0;
 }
 
-// Alpha color key state
-static unsigned int s_alphaColorKey = 0;
+// Alpha color key state（B7-2：收敛进 GN_Vk.s2DRes.alphaColorKey）
 void SetAlphaColorKey(unsigned int color) {
-    s_alphaColorKey = color;
+    GN_Vk.alphaColorKey = color;
 }
 
 // Extended ImageDraw with full UV control

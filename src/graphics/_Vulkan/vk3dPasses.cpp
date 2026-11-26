@@ -7,32 +7,18 @@
 
 namespace GNg {
 
-bool s_inShadowPass = false;
-// 当前 shadow pass 用哪条管线。默认 CSM 的 shadowPipeline；
-// cube pass 会临时设成 cubeShadowPipeline。
-//
-// **为什么需要这个开关**：GN_VkShadowDraw 内部要绑管线，而它以前是**硬绑定**
-// shadowPipeline —— 于是 cube pass 里绑的 cubeShadowPipeline 立刻被它覆盖，
-// 实际一直在用 CSM 那条（静态 viewport 2048）。表现是"cube 的 viewport 怎么改都没反应，
-// 内容永远缩在右下角"（B2 那轮就是因此误判成"已修好"，因为当时的断言只看
-// '有没有像素被写入'）。
-VkPipeline s_shadowPassPipeline = VK_NULL_HANDLE;
-
-namespace {
-// 天空参数：GN_VkSetSky 写入，GN_VkDrawSkybox 每帧连同 viewProj 一起上传。
-VkSkyParams s_skyParams;
-// G2b：延迟 pass 最近一次 viewProj（SSAO 用它求 invViewProj 写 UBO）。
-static sMAT44 s_deferredViewProj;
-static bool s_hasDeferredViewProj = false;
-} // namespace
+// B7-2（2026-11-26）：pass 状态已收敛进 GN_Vk（c4）——inShadowPass/shadowPassPipeline/
+// aSkyParams/aDeferredViewProj/hasDeferredViewProj 见 vkContext.inc（s3DPassRes 与顶层命名成员）。
+// shadowPassPipeline 的由来：GN_VkShadowDraw 曾硬绑定 CSM shadowPipeline，cube pass 绑的
+// cubeShadowPipeline 立刻被覆盖（静态 viewport 2048，内容缩在右下角）；改为按该开关选管线。
 
 // ═══════════════════════════════════════════════════════════
 //  阴影映射 Pass
 // ═══════════════════════════════════════════════════════════
 
 void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
-    if(!GN_Vk.initialized || !GN_Vk.shadowPipeline || s_inShadowPass) return;
-    if(s_in3DPass) return;
+    if(!GN_Vk.initialized || !GN_Vk.shadowPipeline || GN_Vk.inShadowPass) return;
+    if(GN_Vk.in3DPass) return;
     // 描述符集分配失败时跳过本 pass（不绑非法 set）；阴影降级而非崩溃。
     VkDescriptorSet cascadeSet = shadowCascadeDescriptorSet(cascadeIndex);
     if(cascadeSet == VK_NULL_HANDLE) return;
@@ -84,8 +70,8 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
     // 每级绑定自己的描述符集（指向本级 UBO 槽）；单集会再次退化为“所有级同一矩阵”。
     vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
                             GN_Vk.shadowPipelineLayout, 0, 1, &cascadeSet, 0, 0);
-    s_inShadowPass = true;
-    s_shadowPassPipeline = VK_NULL_HANDLE; // CSM 用默认那条
+    GN_Vk.inShadowPass = true;
+    GN_Vk.shadowPassPipeline = VK_NULL_HANDLE; // CSM 用默认那条
     GN_Vk.inRenderPass = true; // 阴影渲染通道活跃
 }
 
@@ -102,10 +88,7 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
 // 否则阴影会出现在错误的一侧。这里刻意用与规范一致的 up 向量：
 //   ±Y 面不能用 (0,1,0) 当 up（与视线平行，叉积退化），换 (0,0,±1)。
 namespace {
-bool s_inCubeShadowPass = false;
-sVEC3 s_cubeShadowLightPos = {0.0f, 0.0f, 0.0f};
-uint32_t s_cubeShadowLightIndex = 0; // 当前正在渲染哪盏灯（0..GN_MAX_CUBE_SHADOW_LIGHTS-1）
-
+// B7-2：inCubeShadowPass/cubeShadowLightPos/cubeShadowLightIndex 已收敛进 GN_Vk.s3DPassRes。
 const sVEC3 kCubeFaceDir[6] = {{1.0f, 0.0f, 0.0f},  {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
                                {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},  {0.0f, 0.0f, -1.0f}};
 const sVEC3 kCubeFaceUp[6] = {{0.0f, -1.0f, 0.0f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},
@@ -126,10 +109,10 @@ bool GN_VkCubeShadowBeginForLight(uint32_t lightIndex, const sVEC3 &lightPos, fl
         return false;
     }
     if(lightIndex >= GN_MAX_CUBE_SHADOW_LIGHTS) return false;
-    if(s_in3DPass || s_inShadowPass || s_inCubeShadowPass) return false;
+    if(GN_Vk.in3DPass || GN_Vk.inShadowPass || GN_Vk.inCubeShadowPass) return false;
     if(!(farZ > nearZ + 1.0e-4f)) return false;
-    s_cubeShadowLightPos = lightPos;
-    s_cubeShadowLightIndex = lightIndex;
+    GN_Vk.cubeShadowLightPos = lightPos;
+    GN_Vk.cubeShadowLightIndex = lightIndex;
 
     // 与 CSM 的 ShadowPassBegin 同理：先把挂起的 2D 批次刷掉、结束当前 render pass，
     // 否则在 render pass 内再 BeginRenderPass 是非法的。
@@ -160,18 +143,18 @@ bool GN_VkCubeShadowBeginForLight(uint32_t lightIndex, const sVEC3 &lightPos, fl
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
         GN_Vk.inRenderPass = false;
     }
-    s_inCubeShadowPass = true;
+    GN_Vk.inCubeShadowPass = true;
     return true;
 }
 
 void GN_VkCubeShadowFaceBegin(const sVEC3 &lightPos, uint32_t face, float nearZ, float farZ) {
-    if(!s_inCubeShadowPass || face >= 6) return;
+    if(!GN_Vk.inCubeShadowPass || face >= 6) return;
     // 帧缓冲索引 = 灯号 * 6 + 面号（见 GN_CUBE_SHADOW_TOTAL_LAYERS 的说明）
-    const uint32_t slot = s_cubeShadowLightIndex * 6u + face;
+    const uint32_t slot = GN_Vk.cubeShadowLightIndex * 6u + face;
     if(slot >= GN_CUBE_SHADOW_TOTAL_LAYERS) return;
     if(GN_Vk.cubeShadowFramebuffer[slot] == VK_NULL_HANDLE) {
         fprintf(stderr, "[cube] face %u (light %u) framebuffer NULL\n", face,
-                s_cubeShadowLightIndex);
+                GN_Vk.cubeShadowLightIndex);
         return;
     }
     if(GN_Vk.cubeShadowPipeline == VK_NULL_HANDLE) {
@@ -222,26 +205,26 @@ void GN_VkCubeShadowFaceBegin(const sVEC3 &lightPos, uint32_t face, float nearZ,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.shadowPipelineLayout, 0, 1,
                                 &set, 0, 0);
     }
-    s_shadowPassPipeline = GN_Vk.cubeShadowPipeline; // 让 GN_VkShadowDraw 用 cube 那条
-    s_inShadowPass = true; // 让 GN_VkShadowDraw 认这个 pass
+    GN_Vk.shadowPassPipeline = GN_Vk.cubeShadowPipeline; // 让 GN_VkShadowDraw 用 cube 那条
+    GN_Vk.inShadowPass = true; // 让 GN_VkShadowDraw 认这个 pass
     GN_Vk.inRenderPass = true;
 }
 
 void GN_VkCubeShadowFaceEnd() {
-    if(!s_inCubeShadowPass || !s_inShadowPass) return;
+    if(!GN_Vk.inCubeShadowPass || !GN_Vk.inShadowPass) return;
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-    s_inShadowPass = false;
+    GN_Vk.inShadowPass = false;
     GN_Vk.inRenderPass = false;
 }
 
 void GN_VkCubeShadowEnd() {
-    if(!s_inCubeShadowPass) return;
-    if(s_inShadowPass) GN_VkCubeShadowFaceEnd();
-    s_inCubeShadowPass = false;
+    if(!GN_Vk.inCubeShadowPass) return;
+    if(GN_Vk.inShadowPass) GN_VkCubeShadowFaceEnd();
+    GN_Vk.inCubeShadowPass = false;
     // 记录"本帧至少渲染到第几盏灯"。着色器侧看到某灯的 layer >= 0 才会去采样，
     // 所以这里只是给诊断/验收用（GN_VkCubeShadowLightCount）。
-    if(GN_Vk.cubeShadowLightCount < s_cubeShadowLightIndex + 1) {
-        GN_Vk.cubeShadowLightCount = s_cubeShadowLightIndex + 1;
+    if(GN_Vk.cubeShadowLightCount < GN_Vk.cubeShadowLightIndex + 1) {
+        GN_Vk.cubeShadowLightCount = GN_Vk.cubeShadowLightIndex + 1;
     }
 }
 
@@ -250,16 +233,16 @@ uint32_t GN_VkCubeShadowLightCount() { return GN_Vk.cubeShadowLightCount; }
 void GN_VkResetCubeShadowLightCount() { GN_Vk.cubeShadowLightCount = 0; }
 
 void GN_VkShadowPassEnd() {
-    if(!GN_Vk.initialized || !s_inShadowPass) return;
+    if(!GN_Vk.initialized || !GN_Vk.inShadowPass) return;
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-    s_inShadowPass = false;
+    GN_Vk.inShadowPass = false;
     GN_Vk.inRenderPass = false; // 阴影渲染通道结束，无活跃通道
 }
 
 void GN_VkShadowDraw(const void *vertices, uint32_t vertexCount,
                      const uint32_t *indices, uint32_t indexCount,
                      const sMAT44 *modelMatrix) {
-    if(!GN_Vk.initialized || !s_inShadowPass || !vertices || vertexCount == 0) return;
+    if(!GN_Vk.initialized || !GN_Vk.inShadowPass || !vertices || vertexCount == 0) return;
 
     // Push model matrix
     vkCmdPushConstants(GN_Vk.commandBuffers[GN_Vk.currentFrame],
@@ -271,30 +254,30 @@ void GN_VkShadowDraw(const void *vertices, uint32_t vertexCount,
     Ensure3DBufferCapacity(vtxSize, idxSize);
 
     void *d;
-    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, s_vtxOfs3D, vtxSize, 0, &d);
+    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, GN_Vk.vtxOfs3D, vtxSize, 0, &d);
     memcpy(d, vertices, vtxSize);
     vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory3D);
 
     // 绑定阴影管线：优先用 pass 指定的那条（cube 需要它自己的动态 viewport 版本）
     const VkPipeline activePipeline =
-        (s_shadowPassPipeline != VK_NULL_HANDLE) ? s_shadowPassPipeline : GN_Vk.shadowPipeline;
+        (GN_Vk.shadowPassPipeline != VK_NULL_HANDLE) ? GN_Vk.shadowPassPipeline : GN_Vk.shadowPipeline;
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame],
                       VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
 
-    VkDeviceSize offs[] = {s_vtxOfs3D};
+    VkDeviceSize offs[] = {GN_Vk.vtxOfs3D};
     vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1,
                            &GN_Vk.vertexBuffer3D, offs);
-    s_vtxOfs3D += vtxSize;
+    GN_Vk.vtxOfs3D += vtxSize;
 
     if(indices && indexCount > 0) {
         void *id;
-        vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, s_idxOfs3D, idxSize, 0, &id);
+        vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, GN_Vk.idxOfs3D, idxSize, 0, &id);
         memcpy(id, indices, idxSize);
         vkUnmapMemory(GN_Vk.device, GN_Vk.indexMemory3D);
 
         vkCmdBindIndexBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame],
-                             GN_Vk.indexBuffer3D, s_idxOfs3D, VK_INDEX_TYPE_UINT32);
-        s_idxOfs3D += idxSize;
+                             GN_Vk.indexBuffer3D, GN_Vk.idxOfs3D, VK_INDEX_TYPE_UINT32);
+        GN_Vk.idxOfs3D += idxSize;
         vkCmdDrawIndexed(GN_Vk.commandBuffers[GN_Vk.currentFrame], indexCount, 1, 0, 0, 0);
     } else {
         vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], vertexCount, 1, 0, 0);
@@ -353,19 +336,19 @@ void GN_VkCompositeToSwapchain() {
 //  天空盒渲染
 //  必须在一个活跃的 RenderPass 中调用 (在 Clear 之后, 3D 绘制之前)
 // ═══════════════════════════════════════════════════════════
-void GN_VkSetSky(const VkSkyParams &params) { s_skyParams = params; }
+void GN_VkSetSky(const VkSkyParams &params) { GN_Vk.aSkyParams = params; }
 // G3：环境重烘读取当前天空参数（天气/时间）。
 void GN_VkGetSky(VkSkyParams *out) {
-    if(out) *out = s_skyParams;
+    if(out) *out = GN_Vk.aSkyParams;
 }
 
 void GN_VkDrawSkybox(const sMAT44 *viewProj) {
-    if(!GN_Vk.initialized || !GN_Vk.skyboxPipeline || !s_in3DPass) return;
+    if(!GN_Vk.initialized || !GN_Vk.skyboxPipeline || !GN_Vk.in3DPass) return;
 
     // UBO: viewProj(64) + VkSkyParams(80) = 144 B
     float ubo[36];
     memcpy(ubo, viewProj->m, 64);
-    memcpy(ubo + 16, &s_skyParams, sizeof(VkSkyParams));
+    memcpy(ubo + 16, &GN_Vk.aSkyParams, sizeof(VkSkyParams));
     void *d;
     vkMapMemory(GN_Vk.device, GN_Vk.skyboxUBOMemory, 0, sizeof(ubo), 0, &d);
     memcpy(d, ubo, sizeof(ubo));
@@ -385,7 +368,7 @@ void GN_VkDrawSkybox(const sMAT44 *viewProj) {
 // ═══════════════════════════════════════════════════════════
 void GN_VkBegin3DPassPBR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                          const void *lightUBO, uint32_t lightUBOSize) {
-    if(!GN_Vk.initialized || s_in3DPass) return;
+    if(!GN_Vk.initialized || GN_Vk.in3DPass) return;
     // 偏移不按 pass 归零：同一帧可能先录 4 级 shadow pass，归零会覆盖其顶点数据
     // （已录制命令在提交时才读取缓冲）。帧首由 GN_VkBeginFrame 归零。
     // 刷新 2D 批次 (与 GN_VkBegin3DPass 相同逻辑)
@@ -456,7 +439,7 @@ void GN_VkBegin3DPassPBR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         cvs[2].color = {{0.0f, 0.0f, 0.0f, 1.0f}}; // resolve clear
         VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         rpi.renderPass = GN_Vk.renderPass3D;
-        rpi.framebuffer = s_framebuffers3D[GN_Vk.currentFrame];
+        rpi.framebuffer = GN_Vk.framebuffers3D[GN_Vk.currentFrame];
         rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
         rpi.clearValueCount = 3;
         rpi.pClearValues = cvs;
@@ -467,7 +450,7 @@ void GN_VkBegin3DPassPBR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     // 绑定 PBR 描述符集 (含 normal sampler + shadow sampler)
     vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
                             GN_Vk.pipelineLayoutPBR, 0, 1, &GN_Vk.descriptorSetPBR, 0, 0);
-    s_in3DPass = true;
+    GN_Vk.in3DPass = true;
     GN_Vk.inRenderPass = true; // 3D 渲染通道活跃
 }
 
@@ -485,9 +468,9 @@ void GN_VkBegin3DPassPBR_HDR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
 // ═══════════════════════════════════════════════════════════
 void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                               const void *lightUBO, uint32_t lightUBOSize) {
-    if(!GN_Vk.initialized || s_in3DPass || !GN_Vk.gBufferPipeline) return;
-    s_deferredViewProj = *viewProj;
-    s_hasDeferredViewProj = true;
+    if(!GN_Vk.initialized || GN_Vk.in3DPass || !GN_Vk.gBufferPipeline) return;
+    GN_Vk.aDeferredViewProj = *viewProj;
+    GN_Vk.hasDeferredViewProj = true;
     // 同 PBR 路径：偏移按帧单调追加，帧首归零（避免覆盖同帧阴影 pass 的顶点数据）。
     // 刷新 2D 批次
     if(GN_Vk.vcnt > 0) {
@@ -543,7 +526,7 @@ void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     }
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.gBufferPipeline);
     vkCmdBindDescriptorSets(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.gBufferPipelineLayout, 0, 1, &GN_Vk.gBufferDescriptorSet, 0, 0);
-    s_in3DPass = true;
+    GN_Vk.in3DPass = true;
     GN_Vk.inRenderPass = true;
 }
 
@@ -551,13 +534,13 @@ void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
 // GI UBO 的 indirect.w<=0 时直接返回（默认关，不跑 pass，观感/开销不变）。
 void GN_VkSSAOPass() {
     if(!GN_Vk.initialized || GN_Vk.ssaoPipeline == VK_NULL_HANDLE) return;
-    if(!isSsaoEnabled() || !s_hasDeferredViewProj) return;
-    if(s_in3DPass) {
+    if(!isSsaoEnabled() || !GN_Vk.hasDeferredViewProj) return;
+    if(GN_Vk.in3DPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_in3DPass = false;
+        GN_Vk.in3DPass = false;
         GN_Vk.inRenderPass = false;
     }
-    updateSsaoUniforms(s_deferredViewProj);
+    updateSsaoUniforms(GN_Vk.aDeferredViewProj);
     recordSsaoPasses(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     GN_Vk.inRenderPass = false;
 }
@@ -566,13 +549,13 @@ void GN_VkSSAOPass() {
 // GI UBO 的 envParams.w<=0 时直接返回（默认关，不跑 pass，观感/开销不变）。
 void GN_VkSSGIPass() {
     if(!GN_Vk.initialized || GN_Vk.ssgiPipeline == VK_NULL_HANDLE) return;
-    if(!isSsgiEnabled() || !s_hasDeferredViewProj) return;
-    if(s_in3DPass) {
+    if(!isSsgiEnabled() || !GN_Vk.hasDeferredViewProj) return;
+    if(GN_Vk.in3DPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_in3DPass = false;
+        GN_Vk.in3DPass = false;
         GN_Vk.inRenderPass = false;
     }
-    updateSsgiUniforms(s_deferredViewProj);
+    updateSsgiUniforms(GN_Vk.aDeferredViewProj);
     recordSsgiPasses(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     GN_Vk.inRenderPass = false;
 }
@@ -693,7 +676,7 @@ void GN_VkDraw3D_GBuffer(const void *vertices, uint32_t vertexCount,
                          float roughness, float metallic, float ao,
                          const sIMAGE *albedoTex, const sIMAGE *normalTex,
                          float alphaCutoff) {
-    if(!GN_Vk.initialized || !s_in3DPass || !vertices || vertexCount == 0) return;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass || !vertices || vertexCount == 0) return;
     if(!GN_Vk.gBufferPipeline) return;
 
     // 不能改写已绑定的 gBufferDescriptorSet（本帧已录制），改为绑定纹理环集。
@@ -728,20 +711,20 @@ void GN_VkDraw3D_GBuffer(const void *vertices, uint32_t vertexCount,
     uint32_t idxSize = (indices && indexCount > 0) ? indexCount * sizeof(uint32_t) : 0;
     Ensure3DBufferCapacity(vtxSize, idxSize);
     void *d;
-    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, s_vtxOfs3D, vtxSize, 0, &d);
+    vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, GN_Vk.vtxOfs3D, vtxSize, 0, &d);
     memcpy(d, vertices, vtxSize);
     vkUnmapMemory(GN_Vk.device, GN_Vk.vertexMemory3D);
     vkCmdBindPipeline(GN_Vk.commandBuffers[GN_Vk.currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, GN_Vk.gBufferPipeline);
-    VkDeviceSize offs[] = {s_vtxOfs3D};
+    VkDeviceSize offs[] = {GN_Vk.vtxOfs3D};
     vkCmdBindVertexBuffers(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0, 1, &GN_Vk.vertexBuffer3D, offs);
-    s_vtxOfs3D += vtxSize;
+    GN_Vk.vtxOfs3D += vtxSize;
     if(indices && indexCount > 0) {
         void *id;
-        vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, s_idxOfs3D, idxSize, 0, &id);
+        vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, GN_Vk.idxOfs3D, idxSize, 0, &id);
         memcpy(id, indices, idxSize);
         vkUnmapMemory(GN_Vk.device, GN_Vk.indexMemory3D);
-        vkCmdBindIndexBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame], GN_Vk.indexBuffer3D, s_idxOfs3D, VK_INDEX_TYPE_UINT32);
-        s_idxOfs3D += idxSize;
+        vkCmdBindIndexBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame], GN_Vk.indexBuffer3D, GN_Vk.idxOfs3D, VK_INDEX_TYPE_UINT32);
+        GN_Vk.idxOfs3D += idxSize;
         vkCmdDrawIndexed(GN_Vk.commandBuffers[GN_Vk.currentFrame], indexCount, 1, 0, 0, 0);
     } else {
         vkCmdDraw(GN_Vk.commandBuffers[GN_Vk.currentFrame], vertexCount, 1, 0, 0);
@@ -752,9 +735,9 @@ void GN_VkDeferredLighting(const sMAT44 *viewProj, const sVEC3 *cameraPos,
                            const void *lightUBO, uint32_t lightUBOSize) {
     if(!GN_Vk.initialized || !GN_Vk.deferredLightPipeline) return;
     // 必须在 G-Buffer Pass 结束后调用
-    if(s_in3DPass) {
+    if(GN_Vk.in3DPass) {
         vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        s_in3DPass = false;
+        GN_Vk.in3DPass = false;
         GN_Vk.inRenderPass = false;
     }
     // G2b：写 GI UBO 的 invViewProj（偏移 192）——延迟 shader 用它重建世界位置，

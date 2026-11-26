@@ -234,7 +234,7 @@ bool GN_VkDraw3DSkinned(const void *vertices, uint32_t vertexCount,
                         const sMAT44 *palette, uint32_t paletteCount,
                         const sMAT44 *modelMatrix,
                         float r, float g, float b) {
-    if(!GN_Vk.initialized || !s_in3DPass) return false;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass) return false;
     if(vertices == nullptr || vertexCount == 0 || palette == nullptr || paletteCount == 0 ||
        modelMatrix == nullptr) {
         return false;
@@ -254,7 +254,7 @@ bool GN_VkDraw3DSkinned(const void *vertices, uint32_t vertexCount,
 
     VkCommandBuffer commandBuffer = GN_Vk.commandBuffers[GN_Vk.currentFrame];
     void *mapped = nullptr;
-    if(vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, s_vtxOfs3D, vtxSize, 0, &mapped) != VK_SUCCESS ||
+    if(vkMapMemory(GN_Vk.device, GN_Vk.vertexMemory3D, GN_Vk.vtxOfs3D, vtxSize, 0, &mapped) != VK_SUCCESS ||
        mapped == nullptr) {
         return false;
     }
@@ -275,21 +275,21 @@ bool GN_VkDraw3DSkinned(const void *vertices, uint32_t vertexCount,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(pushConst), &pushConst);
 
-    VkDeviceSize vertexOffset = s_vtxOfs3D;
+    VkDeviceSize vertexOffset = GN_Vk.vtxOfs3D;
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, &GN_Vk.vertexBuffer3D, &vertexOffset);
-    s_vtxOfs3D += vtxSize;
+    GN_Vk.vtxOfs3D += vtxSize;
 
     if(idxSize > 0) {
         void *indexMapped = nullptr;
-        if(vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, s_idxOfs3D, idxSize, 0, &indexMapped) !=
+        if(vkMapMemory(GN_Vk.device, GN_Vk.indexMemory3D, GN_Vk.idxOfs3D, idxSize, 0, &indexMapped) !=
                VK_SUCCESS ||
            indexMapped == nullptr) {
             return false;
         }
         std::memcpy(indexMapped, indices, idxSize);
         vkUnmapMemory(GN_Vk.device, GN_Vk.indexMemory3D);
-        vkCmdBindIndexBuffer(commandBuffer, GN_Vk.indexBuffer3D, s_idxOfs3D, VK_INDEX_TYPE_UINT32);
-        s_idxOfs3D += idxSize;
+        vkCmdBindIndexBuffer(commandBuffer, GN_Vk.indexBuffer3D, GN_Vk.idxOfs3D, VK_INDEX_TYPE_UINT32);
+        GN_Vk.idxOfs3D += idxSize;
         vkCmdDrawIndexed(commandBuffer, indexCount, 1, 0, 0, 0);
     } else {
         vkCmdDraw(commandBuffer, vertexCount, 1, 0, 0);

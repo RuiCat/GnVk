@@ -2,7 +2,7 @@
 //
 // 这两个东西都是把「两个示例里逐字相同的代码」收进引擎，但价值在别处：
 //   * drawShadowCascades：消除完全相同的 for 循环；
-//   * sFRAME_3D_SCOPE：防住「中途 return 导致 s_in3DPass 永久 true ⇒ 画面冻结」。
+//   * sFRAME_3D_SCOPE：防住「中途 return 导致 GN_Vk.in3DPass 永久 true ⇒ 画面冻结」。
 #include <GN.h>
 #include "GN_Vk.h"
 

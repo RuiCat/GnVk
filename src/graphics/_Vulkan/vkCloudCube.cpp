@@ -200,7 +200,7 @@ bool createCloudCubeResources() {
 } // namespace
 
 bool GN_VkDrawCloudCubes(const sCLOUD_CUBE_PARAMS &params) {
-    if(!GN_Vk.initialized || !s_in3DPass) return false;
+    if(!GN_Vk.initialized || !GN_Vk.in3DPass) return false;
     if(params.aInstances == nullptr || params.aCount == 0 ||
        params.aCount > kCloudCubeMaxInstances) {
         return false;

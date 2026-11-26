@@ -158,3 +158,12 @@ struct sPendingUpload {
     unsigned char *data;
     int w, h, fmt;
 };
+
+// B7-2（2026-11-26）：3D 动态缓冲退休表条目（原 vk3dShutdown.cpp 匿名命名空间定义迁入，
+// GN_VkContext.aRetired3DBuffers 成员需要完整类型）。扩容时旧缓冲先入表，
+// 只在 GN_VkBeginFrame 的 vkWaitForFences 之后释放（防同帧 UAF，见 vk3dShutdown.cpp）。
+struct sRETIRED_3D_BUFFER {
+    VkBuffer aBuffer;
+    VkDeviceMemory aMemory;
+    uint64_t aRetireTick; // 退休时的帧同步点序号
+};

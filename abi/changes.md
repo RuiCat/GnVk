@@ -7,3 +7,4 @@
 |---|---|---|---|---|
 | 2026-11-26 | B2 第一刀（vkRenderTarget 拆出） | 移除导出：`GNg::s_activeRT`、`GNg::s_rtInProgress`（改 GN_VK_INTERNAL 隐藏可见性） | 内部全局变量，历史上泄漏进动态符号表；仅后端内部使用，无仓内/公开消费者 | 无需（仓内引用全部在 _Vulkan 模块内，经 vkInternal.h extern） |
 | 2026-11-26 | B7-1（2D 帧状态收敛 + 引擎上下文门面） | 移除导出：`GNg::s_currentScissor`、`GNg::s_scissorEnabled`、`GNg::s_scissorDirty`（迁入 GN_VkContext.s2DRes）；新增导出：`GN_GetEngineContext`、`sEngineContext` 构造 | c4 状态收敛：scissor 状态进渲染上下文；门面为多实例铺路（D2 允许破坏式重命名） | 仓内引用已全部改 GN_Vk.scissor*；仓外消费者见 U1（未确认，风险已知） |
+| 2026-11-26 | B7-2（渲染状态余量收敛） | 移除导出：`GNg::s_shadowPassPipeline`（迁入 GN_VkContext.s3DPassRes.shadowPassPipeline）；强符号零新增。基线按宿主 GCC 16.2.1 重生成：另有 149 个弱/unique/typeinfo 符号移除、42 个新增（libstdc++ 版本漂移，如 `_M_realloc_insert`→`_M_realloc_append`；旧基线含 GCC≤14 命名，与本批代码改动无关） | c4 状态收敛：3D pass/RT/2D 叠层状态进渲染上下文（D2 允许破坏式重命名） | 仓内引用已全部改 GN_Vk.*；仓外消费者见 U1（未确认，风险已知） |

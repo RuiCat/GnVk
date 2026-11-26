@@ -122,9 +122,9 @@ void GN_VkDrawShadowCascades(const GN3d::cMODEL &caster, const sMAT44 *lightVPs,
                              uint32_t count);
 
 // ── 3D pass 作用域守卫 ────────────────────────────────
-// 为什么需要它：GN_VkBegin3DPass / End3DPass 靠引擎内部的 s_in3DPass 标记成对维持。
+// 为什么需要它：GN_VkBegin3DPass / End3DPass 靠引擎内部的 GN_Vk.in3DPass 标记成对维持。
 // 漏调 End3DPass 的后果不是“少画一点”，而是：
-//   1) s_in3DPass 永远为 true ⇒ 之后所有 Begin3DPass 都静默失效（画面永久冻结）；
+//   1) GN_Vk.in3DPass 永远为 true ⇒ 之后所有 Begin3DPass 都静默失效（画面永久冻结）；
 //   2) GN_VkCompositeToSwapchain 不被调用 ⇒ HDR 从不合成到交换链（纯黑）。
 // 两个都是“静默黑屏”级的难查问题。而“在绘制循环里加个 early return”是很自然的写法。
 // 这个 RAII 对象保证：只要构造成功，无论怎么退出作用域（包括 return / 抛异常），

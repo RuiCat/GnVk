@@ -88,12 +88,8 @@ struct VkUBO {
 
 // B7-1：2D 帧状态 extern 已删除——收敛进 GN_Vk.s2DRes（scissorRect/vbuf/pendingUploads 等）。
 
-// 3D pass 状态（vk3dPasses 与 GN_Vk.cpp 共享）
-GN_VK_INTERNAL extern bool s_in3DPass;
-GN_VK_INTERNAL extern bool s_inShadowPass;
-GN_VK_INTERNAL extern VkFramebuffer *s_framebuffers3D;
-GN_VK_INTERNAL extern VkDeviceSize s_vtxOfs3D;
-GN_VK_INTERNAL extern VkDeviceSize s_idxOfs3D;
+// B7-2：3D pass 状态 extern 已删除——收敛进 GN_Vk.s3DPassRes
+// （in3DPass/inShadowPass/framebuffers3D/vtxOfs3D/idxOfs3D 等，vkContext.inc）。
 
 // 3D 动态缓冲退休表：扩容时旧缓冲先入表，只在 GN_VkBeginFrame 的 vkWaitForFences
 // 之后释放。CSM 4 级在同一 command buffer 内录制，pass 内释放会让已录制的 draw
@@ -124,8 +120,7 @@ GN_VK_INTERNAL void FlushVertexBatch();
 GN_VK_INTERNAL void BeginRTRenderPass();
 GN_VK_INTERNAL void EndRTRenderPass();
 GN_VK_INTERNAL void vkRenderTargetShutdown(); // 销毁 RT framebuffer/renderPass（GN_VkShutdown 调用）
-GN_VK_INTERNAL extern sIMAGE *s_activeRT; // 当前渲染目标（定义在 vkRenderTarget.cpp）
-GN_VK_INTERNAL extern bool s_rtInProgress; // RT pass 进行中
+// B7-2：s_activeRT/s_rtInProgress 已收敛进 GN_Vk.sRtRes（activeRT/rtInProgress）。
 
 // ── 无窗口离屏目标（vkOffscreen.cpp）──────────────────
 GN_VK_INTERNAL extern const uint32_t kHeadlessImageCount; // 离屏图张数（Init/Resize 用）
@@ -133,8 +128,7 @@ GN_VK_INTERNAL bool createOffscreenSwapchain(uint32_t w, uint32_t h, uint32_t co
 GN_VK_INTERNAL void destroyOffscreenSwapchain(); // 只释放图与显存；view 由调用方统一销毁
 
 // ── 交换链格式 / 2D 叠层 / resize（vkSwapchain.cpp）──────────────────
-GN_VK_INTERNAL extern VkRenderPass s_renderPass2DOverlay; // 2D 叠层 pass（Init 创建，Shutdown 销毁）
-GN_VK_INTERNAL extern VkFramebuffer *s_framebuffers2DOverlay; // 以 swapchainView 为附件，resize 重建
+// B7-2：2D 叠层 pass/framebuffers 已收敛进 GN_Vk.sSwapchainRes（renderPass2DOverlay/framebuffers2DOverlay）。
 GN_VK_INTERNAL bool isSrgbSwapchainFormat(VkFormat format);
 GN_VK_INTERNAL VkFormat chooseSwapchainFormat(const VkSurfaceFormatKHR *formats, uint32_t count);
 GN_VK_INTERNAL void createOverlayFramebuffers();
