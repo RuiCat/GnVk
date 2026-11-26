@@ -183,3 +183,28 @@ TEST_CASE(stringExtractToDataUnclosed) {
     P<P<char>> r = GN_StrExtractToData(buf, '{', '}');
     CHECK_EQ(r.Num(), 0u); // 未闭合：计数循环提前返回，不产出半个结果
 }
+
+// ── P0.1（DA-1126-14）：全角→半角转换旧实现是死代码（signed char 与 0xa1/0xa3 比较恒假）──
+TEST_CASE(stringSymbolToSingleCharFullwidth) {
+    char out[64];
+    // ＡＢＣ（GBK A3C1 A3C2 A3C3）→ ABC
+    GN_StrSymbolToSingleChar("\xa3\xc1\xa3\xc2\xa3\xc3", out);
+    CHECK_STREQ(out, "ABC");
+    // ０１２（A3B0 A3B1 A3B2）→ 012
+    GN_StrSymbolToSingleChar("\xa3\xb0\xa3\xb1\xa3\xb2", out);
+    CHECK_STREQ(out, "012");
+    // 标点：“”‘’《》＄。～
+    GN_StrSymbolToSingleChar("\xa1\xb0\xa1\xb1\xa1\xae\xa1\xaf\xa1\xb6\xa1\xb7\xa1\xe7\xa1\xa3\xa1\xab", out);
+    CHECK_STREQ(out, "\"\"''<>$.~");
+    // 混合：ASCII 与普通中文原样通过
+    GN_StrSymbolToSingleChar("a\xd6\xd0z", out);
+    CHECK_STREQ(out, "a\xd6\xd0z");
+}
+
+TEST_CASE(stringSymbolToSingleCharTruncated) {
+    char out[8];
+    // 高字节领头但没有尾字节：安全终止，不越过终结符读
+    const int n = GN_StrSymbolToSingleChar("\xa3", out);
+    CHECK_EQ(n, 0);
+    CHECK_STREQ(out, "");
+}

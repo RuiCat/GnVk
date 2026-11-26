@@ -112,6 +112,7 @@ class GN_API cSCROLL_LIST : public cUI_NEAR_OBJECT, public cSCROLL_CTRL //★滚
 
     void *zUsArg; //保存用户参数
     void (*zDrawCall)(int _x, int _y, int _w, int _h, unsigned int color, unsigned int zid, unsigned int vid, bool has_focus); //保存绘制回调
+    bool zDrawCallHasUsArg; //注册签名标志：true=9参(带void*)，false=8参。分派看它而非 zUsArg（DA-1126-15）
 
     //当滚动筐被重排列后的处理(当前排列起始区域号, 上次的排列起始区域号, 排列是否一起重设了所有区域的弹出效果)
     virtual void zOnReArranged(unsigned short sp, unsigned short sp_last, bool ret_am) {}

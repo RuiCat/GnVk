@@ -202,7 +202,7 @@ GNg::cFRAME *GNu::cSCROLL_LIST::CheckInitDefaultFrameAct() {
     zDefaultFrameAct->Init(0, 1, fev GT_TMP_DEF_FRAME_INIT_ARGS_ONCE_KEEP);
     return zDefaultFrameAct;
 }
-GNu::cSCROLL_LIST::cSCROLL_LIST() : aShowBG(false), aShowInFrame(true), zDrawCall(0), zIsErectArrange(true), zUsArg(0) {
+GNu::cSCROLL_LIST::cSCROLL_LIST() : aShowBG(false), aShowInFrame(true), zDrawCall(0), zDrawCallHasUsArg(false), zIsErectArrange(true), zUsArg(0) {
     aType = GNu::eUI_SCROLL_LIST;
     c = 0xffffffff /*该类忽略该值*/;
     ++zCreateTotalNum; /*创建增加计数*/
@@ -222,14 +222,18 @@ void GNu::cSCROLL_LIST::SetZoningCount(unsigned int zoning_num) {
 }
 void GNu::cSCROLL_LIST::SetZoningDrawCall(void (*draw_func)(int, int, int, int, unsigned int, unsigned int, unsigned int, bool, void *), void *usarg) {
     zUsArg = usarg;
+    zDrawCallHasUsArg = true; //9 参签名：即使 usarg==0 也要按 9 参调用
     zDrawCall = (void (*)(int, int, int, int, unsigned int, unsigned int, unsigned int, bool))draw_func;
-    if(zFFrames->zMax_num != (unsigned int)zDrawRangeData.Num()) zDrawRangeData.New((unsigned int)zFFrames->zMax_num);
+    // zFFrames 可能还没 Init（注册先于初始化的调用顺序）：空守卫，别解引用空指针。
+    if(zFFrames && zFFrames->zMax_num != (unsigned int)zDrawRangeData.Num()) zDrawRangeData.New((unsigned int)zFFrames->zMax_num);
 }
 bool GNu::cSCROLL_LIST::InitStyleToData(void (*draw_func)(int, int, int, int, unsigned int, unsigned int, unsigned int, bool),
                                         short _x, short _y, short _w, short _h,
                                         bool default_am, short dw, short dh, unsigned int zoning_num,
                                         unsigned int focus_color, unsigned short focus_blend) {
     zDrawCall = draw_func;
+    zDrawCallHasUsArg = false; //8 参签名
+    zUsArg = 0; //清掉 9 参注册留下的用户参数，否则分派会按 9 参签名调 8 参回调（DA-1126-15）
     zZoningNum = zoning_num;
 #ifndef GN_USING_ADDITIONAL_LIB //GN_ADD_CONTEN_PRIVATE
     if(!zoning_num) return false;
@@ -376,7 +380,7 @@ unsigned int GNu::cSCROLL_LIST::UpdateRun(unsigned int updatatime, bool bg_eq, u
         unsigned int *time_data = _fframe->zNowtime_s, cmp_time = _fframe->zSrcAmMode ? _fframe->zEnd_time : 0xffffffff;
         GNg::sDRAW_AREA *rng_datas = zDrawRangeData, *_rng_info;
         unsigned int zvi = 0, zvn = _fframe->zMax_num;
-        if(zUsArg) {
+        if(zDrawCallHasUsArg) { //按注册签名分派，不看 zUsArg（DA-1126-15）
             void (*draw_callex)(int, int, int, int, unsigned int, unsigned int, unsigned int, bool, void *) = (void (*)(int, int, int, int, unsigned int, unsigned int, unsigned int, bool, void *))zDrawCall;
 
 #define GT_TMP_SCROLL_RECT_DRAW_ZONING   \

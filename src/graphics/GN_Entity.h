@@ -339,7 +339,7 @@ class cENTITY {
     cANIM_CONTROLLER aAnim;
     cSKELETON_CONTROLLER aSkeleton;
     cPHYSICS_CONTROLLER aPhysics;
-    cCHARACTER aCharacter; // P5：胶囊角色（不参与刚体求解，只消费静态三角网）
+    cCHARACTER aCharacter; // P5：胶囊角色（不参与刚体求解；消费静态三角网，可经 SetPhysicsWorld 单向推动态刚体）
 
     // 局部姿势缓存（动画 → 骨骼之间的那条边）。长度 == 关节数时才有效。
     // 调用方可以直接往里写（例如程序化姿势），也可以 SetLocalPose()。

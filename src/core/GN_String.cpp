@@ -904,13 +904,17 @@ GN_API P<char> GN_StrToPrintFmt(const char *str, short fn,  float *dec_out){
     return fmt;
 }
 GN_API int GN_StrSymbolToSingleChar(const char *str, char *str_out){
+	// GBK 字节必须按无符号比较：char 有符号，str[i]==0xa3/0xa1 恒假，
+	// 旧实现的全角→半角转换分支整个是死代码（DA-1126-14）。
+	const uint8 *u = (const uint8 *)str;
 	int i = 0, i2 = 0;
 	for(;;){
-		if(str[i] & 128){
-			if(str[i] == 0xa3 && str[i+1] >= 0xa0 && str[i+1] <= 0xfe)
-				str_out[i2++] = (str[i+1]  - 0xa0) + ' '; //ASCII都共同有的一些对应全角字符
+		if(u[i] & 128){
+			if(!u[i+1]) { str_out[i2] = 0; return i2; } //尾字节缺失：安全终止，不越过终结符读
+			if(u[i] == 0xa3 && u[i+1] >= 0xa0 && u[i+1] <= 0xfe)
+				str_out[i2++] = (u[i+1] - 0xa0) + ' '; //ASCII都共同有的一些对应全角字符
 			else{
-				if(str[i] == 0xa1){ //全角字符里特有的一些对应字符“”‘’《〈》〉＄。·、～
+				if(u[i] == 0xa1){ //全角字符里特有的一些对应字符“”‘’《〈》〉＄。·、～
 					switch( *((uint8*)(str + i + 1)) ){
 					case 0xb0: case 0xb1: str_out[i2++] = '\"'; break;
 					case 0xae: case 0xaf: str_out[i2++] = '\''; break;

@@ -2,6 +2,20 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-26 — P0 审查遗留小修（NEXT_PHASE_PLAN）：5 处修复，单测 940 → 943
+
+按 `docs/NEXT_PHASE_PLAN.md` P0 执行，台账 §5.4 全部转「已修复」。
+
+| # | 修复 | 验证 |
+|---|---|---|
+| P0.1 | `GN_StrSymbolToSingleChar` 全角→半角转换死代码（signed char 与 0xa1/0xa3 比较恒假）：改 uint8 比较；顺带修尾字节缺失时越过终结符读 | `stringSymbolToSingleChar*` 2 例（全角字母/数字/标点、混合、截断） |
+| P0.2 | 滚动列表回调分派改看注册签名标志 `zDrawCallHasUsArg`：`InitStyleToData` 清残留 `zUsArg`（旧实现会把 8 参回调按 9 参调）；`SetZoningDrawCall(fn9, 0)` 也按 9 参分派 | `scrollListDrawCallSignatureFlag` 1 例（状态迁移，纯 CPU） |
+| P0.2+ | `SetZoningDrawCall` 空守卫：注册先于帧初始化时 `zFFrames->zMax_num` 解引用空指针（DA-1126-18，测试暴露） | 同上测试直接构造后注册即复现旧崩溃 |
+| P0.3 | `GN_Character.h` / `GN_Entity.h` 过期注释改为现行口径（角色可经 SetPhysicsWorld 单向推动态刚体） | `make ci` 注释校验 |
+| P0.4 | 缺口账本 D4 标完成（上一提交已做） | — |
+
+已知边界：回调存储仍经 8 参↔9 参往返 cast（常见 ABI 安全），台账登记不修；绘制路径本身无自动化回归（需 UI 运行时）。
+
 ## 2026-11-26 — 代码缺陷审查批：13 处修复 + 9 条回归测试，单测 931 → 940
 
 方法：GCC 13 扩展警告（`-Wshadow -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wuse-after-free=2

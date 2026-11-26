@@ -106,16 +106,17 @@ rg -n '^[A-Za-z_][A-Za-z0-9_:<>]*[ \*]+(GT_|z)[A-Za-z0-9_]+(\[[^]]*\])?\s*(=|;)'
 `-Wsign-compare` 167、`-Wswitch` 61（多有 default 兜底）。
 复算：`find src -name '*.cpp' | xargs -P2 -I{} g++ <扩展flags> -fsyntax-only {}`（flags 见 CHANGELOG 本轮条目）。
 
-### 5.4 审查批新发现 · 待修（2026-11-26 分析报告）
+### 5.4 审查批新发现（2026-11-26 分析报告；P0 已全部修复，2026-11-26）
 
 | ID | 锚点 | 判定 |
 |---|---|---|
-| DA-1126-14 全角转 ASCII 死代码 | `src/core/GN_String.cpp:910,913` | **仍成立**：`str` 是 `char*`（有符号），`str[i] == 0xa3/0xa1` 恒假，全角→半角转换分支永远进不去；src/tests 无调用方（休眠 API）。修法与验收见 `NEXT_PHASE_PLAN.md` P0.1 |
-| DA-1126-15 回调签名双重转型 | `src/ui/GN_UiBase.cpp:225,380` | **潜在风险**：`zDrawCall` 按 8 参存储，`SetZoningDrawCall` 存 9 参（cast），调用点按 `zUsArg` 决定 cast 回 9 参；若 `zUsArg` 非空而回调经 `InitStyleToData`（8 参）注册 ⇒ 错签名调用。待核 `zUsArg` 生命周期，见 P0.2 |
-| DA-1126-16 角色头注释过期 | `src/graphics/GN_Character.h:14`、`src/graphics/GN_Entity.h:342` | **仍成立**：「角色不推箱子、箱子也不推角色」与 C2 已交付（`SetPhysicsWorld` + 推动态刚体）矛盾。见 P0.3 |
+| DA-1126-14 全角转 ASCII 死代码 | `src/core/GN_String.cpp:906`（GN_StrSymbolToSingleChar） | **已修复**：改 `uint8` 比较 + 尾字节缺失安全终止；`stringSymbolToSingleChar*` 2 例 |
+| DA-1126-15 回调签名双重转型 | `src/ui/GN_UiBase.cpp`（SetZoningDrawCall / InitStyleToData / 分派点）、`src/ui/GN_UiBase.h`（zDrawCallHasUsArg） | **已修复**：分派改看注册签名标志 `zDrawCallHasUsArg`；`InitStyleToData` 清 `zUsArg`；`SetZoningDrawCall(fn9, 0)` 也按 9 参分派；`scrollListDrawCallSignatureFlag` 1 例。存储 cast 保留（往返转型），登记不修 |
+| DA-1126-16 角色头注释过期 | `src/graphics/GN_Character.h:14`、`src/graphics/GN_Entity.h:342` | **已修复**：改为现行口径（可经 SetPhysicsWorld 单向推动态刚体） |
 | DA-1126-17 缺口账本 D4 过期 | `docs/REMAINING_GAPS.md` D4 行 | **已修正**（2026-11-26）：deploy key 可用，容器内直接 push |
+| DA-1126-18 SetZoningDrawCall 空指针 | `src/ui/GN_UiBase.cpp`（SetZoningDrawCall 尾行） | **已修复**（P0.2 测试暴露）：注册先于帧初始化时 `zFFrames->zMax_num` 解引用空指针；加空守卫。复现：构造后直接 SetZoningDrawCall |
 
-复算：`grep -n 'str\[i\] == 0xa' src/core/GN_String.cpp`（14）；`grep -n 'zUsArg' src/ui/GN_UiBase.cpp | head`（15）；`sed -n '14p' src/graphics/GN_Character.h`（16）。
+复算：`make unit` → `stringSymbolToSingleChar*` 2 例 + `scrollListDrawCallSignatureFlag` 1 例（943/0）。
 
 ## 6. 相关台账
 

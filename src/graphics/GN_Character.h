@@ -11,7 +11,7 @@
 //
 // 设计（与刚体完全分开）：
 //   * 角色**不向物理世界加入刚体**，只消费**静态三角网**。它自己积分、自己解穿透。
-//     这样角色与动态刚体不会互相踩（角色不推箱子、箱子也不推角色 —— v1 边界）。
+//     动态刚体不反推角色（单向：角色可经 SetPhysicsWorld 推动态刚体，C2 已交付）。
 //   * 几何来源：`AddStaticMesh(const sMESH&)`（与 cPHYSICS_WORLD::AddStaticMesh 同一个
 //     顶点布局，11 floats/顶点）或直接 `AddTriangle`。窄相复用引擎已有的
 //     `queryCapsuleTriangle`（同一份三角形数学，不存在第二套）。
