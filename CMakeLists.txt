@@ -92,15 +92,15 @@ target_compile_definitions(GN_mini PUBLIC
     GN_NET_USING_SOURCE_CODE GNm_USING_SOURCE_CODE
     ${GN_FEATURE_DEFS})
 # parity：-O3 来自 CMAKE_CXX_FLAGS_RELEASE；其余与 CXXFLAGS_BASE+EXTRA 一致
-target_compile_options(GN_mini PRIVATE -fpermissive -Wall -Wextra -msse2 -include cctype)
+target_compile_options(GN_mini PRIVATE -Wall -Wextra -msse2 -include cctype)
 target_link_libraries(GN_mini PUBLIC glfw vulkan png openal z ${GN_FEATURE_LIBS})
 
-# ── 测试与示例（-O2 -fpermissive，与 Makefile 各 *_FLAGS 一致）───
+# ── 测试与示例（-O2；B9-1 起无 -fpermissive）───
 if(GN_BUILD_TESTS)
     function(gn_add_exe name)
         cmake_parse_arguments(ARG "" "" "SRCS;INCS" ${ARGN})
         add_executable(${name} ${ARG_SRCS})
-        target_compile_options(${name} PRIVATE -O2 -fpermissive)
+        target_compile_options(${name} PRIVATE -O2)
         if(ARG_INCS)
             target_include_directories(${name} PRIVATE ${ARG_INCS})
         endif()

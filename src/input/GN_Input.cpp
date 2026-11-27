@@ -909,7 +909,7 @@ GN_INIT_API void GN_InputProc(unsigned int nTime) {
 #if defined _GN_2D_H_ && defined _GN_MAIN_H_
     GN::sLIST<GNg::cVIEW2D *>::iterator itv = GNg::cVIEW2D::zTotalList.begin(), etv = GNg::cVIEW2D::zTotalList.end();
     GNg::cVIEW2D *pv;
-    GNg::sRECT *_rng = GN_GetSoftKeyboardRange();
+    GNg::sRECT *_rng = (GNg::sRECT *)GN_GetSoftKeyboardRange();
     if(_rng) { //如有软键盘 就传递它的范围到各个窗口
         for(; itv != etv; ++itv) {
             pv = (*itv);

@@ -51,7 +51,7 @@ void GNg::cVIEW2D::BeginRender2D() {
 
         if(zOrthoLeftTg == ortho_left && zOrthoTopTg == ortho_top) zHasOrthoOfsTg = false; //到补间结束的一刻
     }
-    GT_ReSetRenderView2D(this, true);
+    GT_ReSetRenderView2D(); // B9-1: compat stub no-op; old call truncated this ptr to short
 }
 void GNg::cVIEW2D::EndRender2Dand3D() {
     GNg::GN_VkEndFrame();
@@ -459,7 +459,7 @@ GN_API bool GNg::SaveImageToFile(const char *filename, sIMAGE *img, short x, sho
         if(!data) return false;
         if(img->texnum > 1) sprintf(_name, "%04d.png", i);
         else strcpy(_name, ".png");
-        if(!SavePngFile(fn, data, img->cFormat, w, h, true))
+        if(!SavePngFile(fn, data, (GNg::COLOR_FORMAT)img->cFormat, w, h, true))
             GN_Log("调用 sIMAGE::SaveToFile %s 有错!\n", fn);
         delete[] data;
     }

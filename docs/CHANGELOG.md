@@ -2,6 +2,24 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-28 — B9-1：移除 -fpermissive（9 处非法转换显式化）+ B9-0 构建卫生
+
+**B9-0（先行提交 48587b1）**：拉取 B7/B8 后旧 CMake 配置的 GLOB 未含新测试文件，单测停在 943；
+`file(GLOB)` 全加 `CONFIGURE_DEPENDS`；Makefile 运行目标显式 `LD_LIBRARY_PATH=$(BUILD)`
+（仓库根残留旧 `libGN_mini.so` 时经 cwd 回退加载旧库 → undefined symbol: GN_InputState 的根因）。
+
+**B9-1**：全量 190 cpp 无 `-fpermissive` 语法扫描仅 **9 处错误**（C++11/17 同集合），全部保行为显式化：
+GN_Init `(void*)window`；GN_2D `GT_ReSetRenderView2D()` 无参化（空操作兼容桩，旧写法把 this 截断成 short，
+潜在缺陷 DA-1128-01）+ `SavePngFile` 枚举 cast；GN_3Dasset cgltf `void*` cast；GN_Input `sRECT*` cast；
+sysMutexIo Linux 分支 `static const char sysInfo[]` 改 `static char`（原经 cast 写 const 对象）；
+GN_UiFBrowser 宏内枚举 cast + `DataFill` 第 7 参改传 `&_icon_ids[_i]`（ushort 值被当指针，
+Vulkan 后端忽略 texid 故行为不变，潜在缺陷 DA-1128-02）；uiPalette `eNEAR_TYPE` cast。
+CMakeLists 引擎/测试两处 `-fpermissive` 移除。
+
+验证：`make ci` 全绿（单测 **955/0**、smoke 13/0、gpuCheck 126/0、doc-check/spv-check/lint-strict）；
+同工具链前后 `nm -D` 对比 **diff=0**；对远程基线强符号（T/D/B）**零差异**（弱符号 191 处差异为
+GCC 13.3 vs 基线 GCC 16.2.1 工具链漂移，B7-2 已登记，与本批无关）。
+
 ## 2026-11-27 — B8 收口：make 薄封装（CMake 驱动）+ 旧规则归档
 
 **Makefile 从 1022 行手写规则改为薄封装**：目标名 → CMake 目标映射（`build-cmake/` 产物），

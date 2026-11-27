@@ -389,7 +389,7 @@ bool GNu::cPALETTE::UpdateRun(unsigned int updatetime, unsigned int dc) {
             GNg::ImageDraw(zAlphaBgImg, dlgx, by2, dlgw, 24, 0xffffffff, 0, 1, zAlphaBgUV, zAlphaBgUV, u2, zAlphaBgUV + 3.0f);
             zAlphaBgUV += 0.02f * GN::TimeRatio;
         }
-        GNu::eNEAR_TYPE near_type = GNg::Draw2DAlphaDirectionGet();
+        GNu::eNEAR_TYPE near_type = (GNu::eNEAR_TYPE)GNg::Draw2DAlphaDirectionGet();
         GNg::Draw2DAlphaDirectionSet(GNu::eNEAR_LEFT);
         GNg::ImageDraw(0, dlgx, by2, dlgw, 24, zColor.COLOR | 0xff000000); //显示选中的颜色透明渐变
         GNg::Draw2DAlphaDirectionSet(near_type);

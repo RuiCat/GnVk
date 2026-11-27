@@ -119,6 +119,13 @@ rg -n '^[A-Za-z_][A-Za-z0-9_:<>]*[ \*]+(GT_|z)[A-Za-z0-9_]+(\[[^]]*\])?\s*(=|;)'
 
 复算：`make unit` → `stringSymbolToSingleChar*` 2 例 + `scrollListDrawCallSignatureFlag` 1 例（943/0）。
 
+### 5.5 B9-1 去 -fpermissive 暴露的潜在缺陷（2026-11-28，已修复）
+
+| ID | 锚点 | 判定 |
+|---|---|---|
+| DA-1128-01 `GT_ReSetRenderView2D(this, true)` 指针截断 | `src/graphics/GN_2D.cpp:54` | **已修复**：该函数是空操作兼容桩（`GN_Main.h`，参数全 `(void)`），旧写法经 -fpermissive 把 `this` 指针截断成 short、true 转 short；改无参调用，行为不变。复算：`grep -n 'GT_ReSetRenderView2D' src/graphics/GN_2D.cpp` |
+| DA-1128-02 `DataFill` 第 7 参值当指针 | `src/ui/GN_UiFBrowser.cpp:1469` | **已修复**：`unsigned short*` 形参收到 `_icon_ids[_i]` 值（-fpermissive 整数转指针）；改传 `&_icon_ids[_i]`。Vulkan 后端 `(void)texid` 忽略该参，行为不变；若将来后端启用 texid 语义，此修复是正确前提。复算：`make ci` |
+
 ## 6. 相关台账
 
 - `docs/DEFECT_AUDIT_2026-11-21.md` — B5e 逐条复核（判定、锚点、17 条差集、越界发现）。

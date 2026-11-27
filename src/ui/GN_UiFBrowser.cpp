@@ -31,12 +31,12 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 #define GN_USING_FILE_PREVIEW
 
 //填充空图标图数据( 参考大小的图像 )
-#define GT_TMP_FILL_EMPTY_IMG_DATA(IMG)                                                  \
-    uint8 locbuf[32768];                                                                 \
-    GN::sTBUF_INT tbuf(locbuf, 32768);                                                   \
-    unsigned int dsize = IMG->width * IMG->height * GNg::ImgFmtGetByteNum(IMG->cFormat); \
-    uint8 *buf0 = (uint8 *)tbuf.GetSpace(dsize);                                         \
-    memset(buf0, 0, dsize);                                                              \
+#define GT_TMP_FILL_EMPTY_IMG_DATA(IMG)                                                                     \
+    uint8 locbuf[32768];                                                                                    \
+    GN::sTBUF_INT tbuf(locbuf, 32768);                                                                      \
+    unsigned int dsize = IMG->width * IMG->height * GNg::ImgFmtGetByteNum((GNg::COLOR_FORMAT)IMG->cFormat); \
+    uint8 *buf0 = (uint8 *)tbuf.GetSpace(dsize);                                                            \
+    memset(buf0, 0, dsize);                                                                                 \
     icon.DataFill(buf0, IMG->cFormat); //第0层贴图为空
 
 // B7-4：文件浏览上下文（原 DA-M2 批 2a 的 sUI_FB_CONTEXT + 文件级 GNg::GN_UiBrowserState.aLastFileBrowser）已迁
@@ -1466,7 +1466,7 @@ int8 GNu::cFILE_BROWSER::UpdateRun(unsigned int updatatime, GNg::sIMAGE **img_ou
                                         GN_Swap(unsigned int, ad->icon.texture[_icon_ids[_i]], ((GNg::sIMAGE *)icon_data)->texture[0]);
                                         icon_check_state -= 8;
                                     } else { //把数据填充到图标里
-                                        ad->icon.DataFill((uint8 *)icon_data, GNg::CR_RGBA, 0, 0, 0, 0, _icon_ids[_i], true);
+                                        ad->icon.DataFill((uint8 *)icon_data, GNg::CR_RGBA, 0, 0, 0, 0, &_icon_ids[_i], true); // B9-1: 7th param is ushort*
                                     }
                                     _states[_i] = (icon_check_state > 2) ? 3 : 2;
                                     if((icon_check_state == 2 || icon_check_state == 4) && _i >= _first && _i <= _last) _ntime_data[_i - _first] = 0;

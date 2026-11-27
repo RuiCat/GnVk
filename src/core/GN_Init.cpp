@@ -442,7 +442,7 @@ static void GT_InitAllAndRun(const int *window, short view_w, short view_h, shor
 #endif
     GN_SetAppKey(0x77777777);
     GN_InitWords();
-    GN_InitGraphics(window, view_w, view_h, color_bit, back_src_left, back_src_top, back_src_right, back_src_bottom, full_screen, window_zoom, dp_buf, ms_buf);
+    GN_InitGraphics((void *)window, view_w, view_h, color_bit, back_src_left, back_src_top, back_src_right, back_src_bottom, full_screen, window_zoom, dp_buf, ms_buf);
     GN_InitInput();
 
 #ifdef _GN_NET_H_

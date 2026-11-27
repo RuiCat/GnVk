@@ -222,7 +222,7 @@ void importTextures(const cgltf_data *data, sASSET &out, const char *baseDir) {
                 // .glb / 内嵌 buffer：cgltf_load_buffers 已把字节读进 buffer->data。
                 if(view->buffer != 0 && view->buffer->data != 0 && view->buffer->size >= view->offset &&
                    view->buffer->size - view->offset >= view->size) {
-                    const uint8_t *start = view->buffer->data + view->offset;
+                    const uint8_t *start = (const uint8_t *)view->buffer->data + view->offset;
                     target.aImageBytes.assign(start, start + view->size);
                 }
             } else if(!target.aUri.empty() && target.aUri.compare(0, 5, "data:") != 0 && baseDir != 0) {

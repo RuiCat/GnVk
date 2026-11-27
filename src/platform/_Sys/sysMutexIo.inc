@@ -228,12 +228,12 @@ GN_SYS_API char *const GN_GetInerfaceInfoSys() {
         }
     }
 #elif defined _LINUX_
-    static const char sysInfo[64] = "";
+    static char sysInfo[64] = ""; // B9-1: was const but written via casts; align with _MAC_ branch
     if(!sysInfo[0]) {
         struct utsname uinfos;
         if(uname(&uinfos)) {
-            strncpy((char *)sysInfo, "Linux ?", 63);
-            ((char *)sysInfo)[63] = 0;
+            strncpy(sysInfo, "Linux ?", 63);
+            sysInfo[63] = 0;
         } else sprintf(sysInfo, "%s %s", uinfos.sysname, uinfos.release);
     }
 #endif
