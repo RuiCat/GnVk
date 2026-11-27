@@ -69,7 +69,7 @@ if(GN_JPEG_FOUND)
 endif()
 
 # ── 引擎共享库（源文件集合与 Makefile 的 ENGINE_SRC 一致）────────
-file(GLOB GN_ENGINE_SRC
+file(GLOB GN_ENGINE_SRC CONFIGURE_DEPENDS
     src/core/*.cpp
     src/graphics/*.cpp src/graphics/_Vulkan/*.cpp
     src/audio/*.cpp src/audio/_Sound/*.cpp
@@ -110,7 +110,7 @@ if(GN_BUILD_TESTS)
     endfunction()
 
     # 单测：tests/unit + 两个示例的键位绑定表/换装规则 + 程序化资产生成器
-    file(GLOB GN_UNIT_SRC tests/unit/*.cpp)
+    file(GLOB GN_UNIT_SRC CONFIGURE_DEPENDS tests/unit/*.cpp)
     gn_add_exe(unit_tests SRCS ${GN_UNIT_SRC}
         tests/mmdViewer/mmdViewerActions.cpp
         tests/imoScene/imoSceneActions.cpp
@@ -119,25 +119,25 @@ if(GN_BUILD_TESTS)
         tests/fixtures/fixtures.cpp
         INCS tests/unit tests/mmdViewer tests/imoScene tests/fixtures)
 
-    file(GLOB GN_FIXTURE_SRC tests/fixtures/*.cpp)
+    file(GLOB GN_FIXTURE_SRC CONFIGURE_DEPENDS tests/fixtures/*.cpp)
     gn_add_exe(fixtures SRCS ${GN_FIXTURE_SRC} INCS tests/fixtures)
 
-    file(GLOB GN_GPU_SRC tests/gpu/*.cpp)
+    file(GLOB GN_GPU_SRC CONFIGURE_DEPENDS tests/gpu/*.cpp)
     gn_add_exe(gpuCheck SRCS ${GN_GPU_SRC} tests/fixtures/fixtures.cpp INCS tests/fixtures)
 
-    file(GLOB GN_HEADLESS_SRC tests/headless/*.cpp)
+    file(GLOB GN_HEADLESS_SRC CONFIGURE_DEPENDS tests/headless/*.cpp)
     gn_add_exe(headlessCheck SRCS ${GN_HEADLESS_SRC})
 
     # 普通示例：tests/<dir>/*.cpp → <name>
     foreach(name physicsBoxes characterDemo physicsVideo clothDemo fireLighting
                  editorGizmo gizmoInput undoDemo characterPush mmdViewer imoScene)
-        file(GLOB GN_SRC_${name} tests/${name}/*.cpp)
+        file(GLOB GN_SRC_${name} CONFIGURE_DEPENDS tests/${name}/*.cpp)
         gn_add_exe(${name} SRCS ${GN_SRC_${name}})
     endforeach()
 
     # 带 tests/common 的示例
     foreach(name shadowProbe multiShadowDemo ragdollDemo ikDemo rootMotion animBlend)
-        file(GLOB GN_SRC_${name} tests/${name}/*.cpp)
+        file(GLOB GN_SRC_${name} CONFIGURE_DEPENDS tests/${name}/*.cpp)
         gn_add_exe(${name} SRCS ${GN_SRC_${name}} INCS tests/common)
     endforeach()
 

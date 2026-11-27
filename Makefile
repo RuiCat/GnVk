@@ -42,7 +42,7 @@ configure:
 unit:
 	$(call cmakeBuild,unit_tests)
 	@echo "$(YELLOW)🧪 运行单元测试...$(RESET)"
-	@./$(BUILD)/unit_tests
+	@LD_LIBRARY_PATH=$(BUILD):$$LD_LIBRARY_PATH ./$(BUILD)/unit_tests
 
 fixtures:
 	$(call cmakeBuild,fixtures)
@@ -53,26 +53,26 @@ fixtures:
 gpuCheck:
 	$(call cmakeBuild,gpuCheck)
 	@echo "$(YELLOW)▶ 运行 GPU 验收（无 /dev/dri 时会 SKIP）...$(RESET)"
-	@./$(BUILD)/gpuCheck
+	@LD_LIBRARY_PATH=$(BUILD):$$LD_LIBRARY_PATH ./$(BUILD)/gpuCheck
 
 headlessCheck:
 	$(call cmakeBuild,headlessCheck)
 	@echo "$(YELLOW)▶ 运行无窗口渲染验收（不需要 DISPLAY）...$(RESET)"
-	@./$(BUILD)/headlessCheck
+	@LD_LIBRARY_PATH=$(BUILD):$$LD_LIBRARY_PATH ./$(BUILD)/headlessCheck
 	@mkdir -p .local/tmp
 	@echo "$(YELLOW)▶ 帧编排等价性（cRENDER_FRAME vs 裸 sFRAME_3D_SCOPE 逐字节比对）...$(RESET)"
-	@./$(BUILD)/headlessCheck 640 400 4 .local/tmp/frame_parity.png frame; \
+	@LD_LIBRARY_PATH=$(BUILD):$$LD_LIBRARY_PATH ./$(BUILD)/headlessCheck 640 400 4 .local/tmp/frame_parity.png frame; \
 		rc=$$?; if [ $$rc -eq 2 ]; then echo "  [SKIP] 无 Vulkan 设备"; elif [ $$rc -ne 0 ]; then exit $$rc; fi
 
 physicsBoxes:
 	$(call cmakeBuild,physicsBoxes)
 	@echo "$(YELLOW)📦 物理场景验收（20 箱堆叠 + 球撞倒，120 帧）...$(RESET)"
-	@./$(BUILD)/physicsBoxes
+	@LD_LIBRARY_PATH=$(BUILD):$$LD_LIBRARY_PATH ./$(BUILD)/physicsBoxes
 
 characterDemo:
 	$(call cmakeBuild,characterDemo)
 	@echo "$(YELLOW)🚶 角色场景验收（台阶 + 斜坡 + 跳跃，240 帧）...$(RESET)"
-	@./$(BUILD)/characterDemo
+	@LD_LIBRARY_PATH=$(BUILD):$$LD_LIBRARY_PATH ./$(BUILD)/characterDemo
 
 .PHONY: check smoke
 check: unit physicsBoxes characterDemo
