@@ -5,6 +5,7 @@
 
 | 日期 | 批次 | 变更 | 原因 | 消费者同步 |
 |---|---|---|---|---|
+| 2026-11-28 | B9-1/B9-2（去 -fpermissive + C++17） | 强符号（T/D/B）零变化。弱符号：对远程基线 191 处差异为 GCC 13.3（容器）vs 16.2.1（基线宿主）工具链漂移（B7-2 已登记同类）；B9-1→B9-2 同工具链另有 7 个弱模板符号实例化漂移（GN_ListWheelListPushBack/cLAUNCHER_SEED/P<sAM_EVENT>::Delete 等，register 清除与 std 切换所致），无强符号/签名变更 | 质量门：非法转换显式化 + 标准升级，均不改公共签名 | 无需（仓内消费者经 make ci 955/0 验证） |
 | 2026-11-26 | B2 第一刀（vkRenderTarget 拆出） | 移除导出：`GNg::s_activeRT`、`GNg::s_rtInProgress`（改 GN_VK_INTERNAL 隐藏可见性） | 内部全局变量，历史上泄漏进动态符号表；仅后端内部使用，无仓内/公开消费者 | 无需（仓内引用全部在 _Vulkan 模块内，经 vkInternal.h extern） |
 | 2026-11-26 | B7-1（2D 帧状态收敛 + 引擎上下文门面） | 移除导出：`GNg::s_currentScissor`、`GNg::s_scissorEnabled`、`GNg::s_scissorDirty`（迁入 GN_VkContext.s2DRes）；新增导出：`GN_GetEngineContext`、`sEngineContext` 构造 | c4 状态收敛：scissor 状态进渲染上下文；门面为多实例铺路（D2 允许破坏式重命名） | 仓内引用已全部改 GN_Vk.scissor*；仓外消费者见 U1（未确认，风险已知） |
 | 2026-11-27 | B7-4（输入/UI/平台/音频上下文） | 新增导出：`GNg::GN_InputState`（B）、`GNg::GN_UiBrowserState`（B）、`GNg::GN_MainState`（D）、`GNg::GN_SoundState`（B）；弱符号变更：移除 4 个（旧 sINPUT_CONTEXT/sUI_FB_CONTEXT 析构 D1/D2）、新增 4 个（GN_InputContext/GN_UiBrowserContext 析构 D1/D2） | c4 状态收敛：四个子系统状态进上下文，门面统一持有（D2 允许破坏式重命名） | 仓内引用已改 `GN_InputState.*`/`GN_UiBrowserState.*`/`GN_MainState.*`/`GN_SoundState.*`；导出计时/配置变量按 API 保留 |
