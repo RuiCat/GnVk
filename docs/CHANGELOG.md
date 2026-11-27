@@ -2,6 +2,17 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-28 — B9-2：升级 C++17（全仓切换）
+
+`CMAKE_CXX_STANDARD 11→17`（Linux-only，D3；全仓 190 cpp 在 C++17 无 -fpermissive 下 0 error，
+与 C++11 同错误集合，故不采用双标准过渡，直接切换并登记）。清除 C++17 废弃的 `register` 关键字 5 处
+（GN_Parallel.h / GN_File.cpp×3 / GN_2Dmath.cpp）。`tests/lint/headers.sh` 同步 `-std=c++17` 去 -fpermissive，
+并补基线门禁（abi/headers-baseline.txt 66 项，只许减不许增；实测 66/140 持平）。
+Makefile.legacy 交叉平台仍 c++11（experimental，D3 不动）。
+
+验证：`make ci` 全绿（单测 **955/0**、smoke 13/0、gpuCheck 126/0）；`nm -D` 对 B9-1 产物 **diff=0**
+（强符号/弱符号均零变化）；头自包含失败集合与基线逐行一致。
+
 ## 2026-11-28 — B9-1：移除 -fpermissive（9 处非法转换显式化）+ B9-0 构建卫生
 
 **B9-0（先行提交 48587b1）**：拉取 B7/B8 后旧 CMake 配置的 GLOB 未含新测试文件，单测停在 943；

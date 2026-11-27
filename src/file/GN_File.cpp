@@ -660,7 +660,7 @@ GN_API bool GN_StrcmpFileSN(const char *str1, GNf::sFILE *text) {
         }
     }
     GNf::Seek(text, -1, GNf::eSEEK_CUR);
-    register int p;
+    int p;
     for(;;) {
         p = GNf::Getc(text);
         if(!isspace(p)) { //把文件流的指针移到空白间断处
@@ -696,7 +696,7 @@ GN_API char *GN_StrCopyFileSegmentToData(GNf::sFILE *load, char start_key, char 
     char *ret = (char *)malloc(GNf::GetSize(load)); //分配整个文件空间大小的空间
     char *pc = ret;
     bool starting = false, ended = false;
-    register char p;
+    char p;
     for(;;) {
         p = (char)GNf::Getc(load);
         if(!p) break;
@@ -742,7 +742,7 @@ GN_API char *GN_StrCopyFileSegmentToData(GNf::sFILE *load, char start_key, char 
 GN_API bool GN_StrFileSeekToSegmentBack(GNf::sFILE *text, char start_key, char end_key) {
     if(!text) return 0;
     int sn = 0;
-    register char p;
+    char p;
     for(;;) {
         p = (char)GNf::Getc(text);
         if(!p) return 0;

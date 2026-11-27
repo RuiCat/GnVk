@@ -1,6 +1,6 @@
 # B9 质量门全量（c7）执行账本
 
-> **状态**：🚧 进行中 — B9-1 ✅（9 处修复 + 去 -fpermissive，955/0，ABI 零变化）；B9-2 待做
+> **状态**：🚧 进行中 — B9-1/B9-2 ✅（去 -fpermissive + C++17，955/0，ABI 零变化）；B9-3 待做
 > **上游**：`docs/REFACTOR_PLAN.md` §5 阶段5 / §11 B9；依赖 B7/B8（已完成）。
 > **开工基线**：`ab9264e`（2026-11-27，单测 955/0）；快照 `snap-20261128-013049`。
 
@@ -19,7 +19,7 @@
 | 批 | 范围 | 状态 |
 |---|---|---|
 | B9-1 | 修 9 处非法转换 + 移除 `-fpermissive`（保持 C++11） | ✅ 2026-11-28，ci 全绿 955/0，同工具链 ABI diff=0 |
-| B9-2 | 升级 C++17（全仓切换；ABI/单测/冒烟验证） | 待做 |
+| B9-2 | 升级 C++17（全仓切换；ABI/单测/冒烟验证） | ✅ 2026-11-28，ci 全绿 955/0，ABI diff=0；register×5 清除；headers lint 同步 17 并加基线门禁 |
 | B9-3 | 告警大扫除：-Wreorder/-Wignored-qualifiers/-Wmissing-field-initializers/-Wdeprecated(access decl)/-Wunknown-pragmas(#pragma comment)/-Wshadow 等 + `make warnings` 门禁 | 待做 |
 | B9-4 | 字符串安全清零：strcpy/strcat/sprintf → 有界 API；output.sh 基线收 0 | 待做 |
 | B9-5 | 解析器 fuzz：PNG/ZIP/WAV/glTF/OBJ 边界加固 + fuzz 种子 + 1 小时无崩溃 | 待做 |

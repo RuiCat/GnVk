@@ -360,7 +360,7 @@ class GN_API GN_cPARALLEL //★并行处理  提供高性能并行处理计算 �
 
 #define GN_PROC_BEGIN /*处理数据循环准备 配合 Proc 用*/ for(;;) {
 #define GN_PROC_END /*处理数据循环结束 配合 Proc 用*/ \
-    register unsigned int st1 = ds->st + 1;           \
+    unsigned int st1 = ds->st + 1;           \
     if(st1 < ds->GetEnd()) {                          \
         ds->SetSt(st1);                               \
         GN_MemBarrier();                              \

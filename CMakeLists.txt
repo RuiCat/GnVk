@@ -15,9 +15,9 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "GnVk CMake 构建仅支持 Linux（D3）。experimental 平台请用 Makefile PLATFORM=...")
 endif()
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17) # B9-2：C++17（Linux-only，D3；全仓扫描 0 error）
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF) # parity：Makefile 用 -std=c++11（不是 gnu++11）
+set(CMAKE_CXX_EXTENSIONS OFF) # -std=c++17（不是 gnu++17）；Makefile.legacy 交叉平台仍 c++11（experimental）
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()

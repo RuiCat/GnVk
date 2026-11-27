@@ -1281,7 +1281,7 @@ GN_API void GNg::M33GetInverse(sMAT33 &m_out, sMAT33 &m_in) {
     s[1] = r2;
     s[2] = r3;
 
-    register int8 i, j, p, jj;
+    int8 i, j, p, jj;
     for(i = 0; i < 3; ++i) {
         for(j = 0; j < 3; ++j) {
             s[i][j] = m_in(i, j);
