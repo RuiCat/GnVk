@@ -43,7 +43,7 @@
 | `external/` soundcard.h（BSD-3-Clause 式） | ✅ |
 | `external/` cgltf v1.15（MIT，文件尾全文，SHA-256 已核） | ✅ |
 | `external/` WinSock2/Iphlpapi 兼容头（本项目 MIT） | ✅ |
-| **`external/` AL/（Creative Labs OpenAL 1.1 SDK 头）** | ⛔ **待核对（发布阻塞）**：本副本许可文本被剥离，无法确认。运行期链接系统 OpenAL Soft（LGPL）。**发布前须**改用系统 libopenal-dev 带许可头，或补齐 Creative Labs 许可文本。 |
+| `external/` AL/（OpenAL Soft，Debian libopenal-dev） | ✅ **已核对**：LGPL-2.0-or-later，许可全文 `AL/COPYRIGHT`；2026-11-28 由 Creative Labs 旧头替换，无引用旧头已移除 |
 
 ## 已知边界（如实披露）
 
@@ -55,6 +55,6 @@
 
 ## 发布阻塞项
 
-1. **AL 头许可待核对**（见上）——法律前提，须用户决策（替换 OpenAL Soft 头 / 补齐许可）。
+无。AL 头许可已于 2026-11-28 解决（替换为 OpenAL Soft 带许可头，LGPL-2+，见 `external/AL/COPYRIGHT`）。
 
-> 其余核对项在 B10 各批已落地；解除 AL 阻塞后即可按本清单发布。
+> 全部核对项已落地，可按本清单发布。
