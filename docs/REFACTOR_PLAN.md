@@ -485,7 +485,7 @@ nm -D --defined-only libGN_mini.so | sort | diff abi/baseline.txt -   # 只允�
 | B7 | 上下文收敛（c4）：门面 → 渲染状态 → 资源缓存 → 输入/UI → 审计（账本见 B7_STATIC_LEDGER.md） | 全仓（**串行**，一次一个模块） | B2–B6 | 🚧 B7-1 ✅（945/0）+ B7-2 ✅（渲染状态 24 变量，948/0）+ B7-3 ✅（资源缓存 6 变量 → GN_Core/GN_FileState，950/0）+ B7-4 ✅（输入/UI/平台/音频 14 变量 → 4 子系统上下文，952/0）+ B7-5 ✅（30 项函数内 static 审计：迁 10/留 20；全仓复审；多实例测试，955/0）⇒ **B7 全批完成**，ABI 零变化 |
 | B8 | CMake + presets + make 薄封装；双构建 parity 后删旧规则 | `CMakeLists.txt`、`CMakePresets.json`、`Makefile` | B2–B6（可与 B7 并行） | ✅ 2026-11-27 收口：Makefile 1022 行手写规则 → 薄封装（目标名 → CMake，产物 build-cmake/）；旧规则移 `Makefile.legacy`（experimental 交叉平台，D3 不静默删能力）；ci/check/smoke/stats/doc-check 全链路 CMake；单测 955/0、CMake 产物 `nm -D` 与基线零差异 |
 | B9 | 质量门全量（c7）：去 -fpermissive、C++17、告警预算 19385→<500、字符串安全清零、解析器 fuzz | 全仓 | B7/B8 | ✅ 2026-11-28：去 -fpermissive（9 处）+ C++17 + 告警 19385→7（make warnings 门禁）+ strcpy/strcat 清零/sprintf→snprintf（9 契约登记）+ fuzz 1 小时 5683 万次无崩溃（WAV DA-1128-03 修复）；详见 B9_QUALITY_GATE_PLAN.md |
-| B10 | 文档与发布（c8）：版本单一来源、README 重写、ABI 基线随版本、过期文档退役 | `docs/`、`README.md` | 全部 | 待做 |
+| B10 | 文档与发布（c8）：版本单一来源、README 重写、ABI 基线随版本、过期文档退役 | `docs/`、`README.md` | 全部 | ✅ 2026-11-28：version-check 门禁 + CONTRIBUTING + README 核对/目标表 + 过期文档退役标注 + RELEASE 清单（ABI 基线绑定版本）；唯一发布阻塞 AL 头许可待核对；详见 B10_DOC_RELEASE_PLAN.md |
 
 **停止点**：每批次可独立停止，停止时保证绿构建 + 文档同步。B7 不得与拆分并行。
 

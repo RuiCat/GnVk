@@ -1,6 +1,7 @@
 # 符号变更登记（REFACTOR_PLAN C1 修订版：破坏性变更必须登记）
 
 基线：`abi/baseline.txt`（nm -D --defined-only，每批次更新）。
+当前基线对应版本：`GN_VERSION 2026.07.04` / `GN_INTERFACE_VERSION 2.2.0`（见 `RELEASE.md`）。
 比较口径：按符号名（地址随代码布局变化，不算变更）。
 
 | 日期 | 批次 | 变更 | 原因 | 消费者同步 |

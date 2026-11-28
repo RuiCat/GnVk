@@ -51,6 +51,7 @@
 | 查 API（含 3D 实体层导航） | [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) |
 | 写代码前看注释约定 | [`docs/COMMENT_STYLE.md`](docs/COMMENT_STYLE.md) |
 | 提交代码前看贡献约定 | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| 发布前核对清单 | [`RELEASE.md`](RELEASE.md) |
 | 看还剩什么没做 | [`docs/REMAINING_GAPS.md`](docs/REMAINING_GAPS.md) |
 | 查某个改动为什么这么写 | [`docs/CHANGELOG.md`](docs/CHANGELOG.md) |
 
