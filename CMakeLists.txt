@@ -133,7 +133,7 @@ if(GN_BUILD_TESTS)
 
     # 普通示例：tests/<dir>/*.cpp → <name>
     foreach(name physicsBoxes characterDemo physicsVideo clothDemo fireLighting
-                 editorGizmo gizmoInput undoDemo characterPush mmdViewer imoScene)
+                 editorGizmo gizmoInput undoDemo characterPush mmdViewer imoScene deskLamp)
         file(GLOB GN_SRC_${name} CONFIGURE_DEPENDS tests/${name}/*.cpp)
         gn_add_exe(${name} SRCS ${GN_SRC_${name}})
     endforeach()

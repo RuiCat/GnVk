@@ -178,9 +178,11 @@ define runVideo
 	@ls -lh $(VIDEO_OUT)/$(5)
 endef
 
-.PHONY: physicsVideo clothVideo fireVideo gizmoVideo gizmoInput undoDemo shadowProbe multiShadowDemo ragdollDemo ikDemo rootMotion animBlend characterPush
+.PHONY: deskLampVideo physicsVideo clothVideo fireVideo gizmoVideo gizmoInput undoDemo shadowProbe multiShadowDemo ragdollDemo ikDemo rootMotion animBlend characterPush
 physicsVideo:
 	$(call runVideo,physicsVideo,physics-frames,240,1280 720,physics-collision.mp4)
+deskLampVideo:
+	$(call runVideo,deskLamp,deskLamp-frames,300,1280 720,desk-lamp.mp4)
 clothVideo:
 	$(call runVideo,clothDemo,cloth-frames,300,1280 720,cloth-collision.mp4)
 fireVideo:
