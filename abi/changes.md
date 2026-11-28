@@ -5,6 +5,7 @@
 
 | 日期 | 批次 | 变更 | 原因 | 消费者同步 |
 |---|---|---|---|---|
+| 2026-11-28 | B7-7（L2 图形 API static 收敛） | 新增导出 2：`GNg::GN_ScissorState`/`GN_ImageLoadState`（B）；弱符号零变化（sRECT 数组+uint8、char* 均平凡可析构，无析构符号）；无移除 | c4：L2 2D 剪裁嵌套栈/图像加载类型名作为 L2 子系统上下文纳入门面（前向声明头同层包含，无需跨层白名单；不塞进 L3 GN_Vk） | 仓内引用改 GNg::GN_ScissorState/GN_ImageLoadState（仅本文件）；make ci 955/0 |
 | 2026-11-28 | B7-6（非渲染模块 static 收敛） | 新增导出 4：`GNg::GN_ParallelState`/`GN_NetTransState`/`GN_UserThreadState`/`GN_ClipboardState`（B）；弱符号 4 移除（旧 static sNetTransContext/sUserThreadContext 析构 D1/D2）/4 新增（GNg::GN_NetTransContext/GN_UserThreadContext 析构 D1/D2）；sParallelContext/sClipboardContext 平凡类型无析构符号 | c4 状态收敛：parallel/network/userthread/clipboard 文件级 static 纳入 sEngineContext 门面（前向声明头 + 非 static 全局实例，结构体定义留实现文件） | 仓内引用改 GNg::GN_XxxState（含跨 .inc：sysThread/sysMutexIo）；make ci 955/0 |
 | 2026-11-28 | B9-4（字符串安全） | 强/弱符号零变化（nm -D diff=0）。strcpy/strcat→memcpy、sprintf→snprintf 均不改签名/符号 | 字符串安全清零（9 处契约登记） | 无需（make ci 955/0 + smoke 13/0） |
 | 2026-11-28 | B9-3（告警大扫除） | 强符号/弱符号均零变化（同工具链 nm -D diff=0）。构造初始化列表重排、Vulkan {sType}→{}+赋值、顶层限定符去除、字面量 cast 等均不改签名/符号 | 质量门：告警 19385→7 | 无需（make ci 955/0 + smoke 13/0 验证） |

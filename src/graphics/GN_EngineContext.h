@@ -22,6 +22,8 @@ struct GN_ParallelContext; // 定义在 core/GN_ParallelContext.h（L1，B7-6；
 struct GN_NetTransContext; // 定义在 network/GN_NetTransContext.h（L5，B7-6；定义体留 GN_NetTrans.cpp）
 struct GN_UserThreadContext; // 定义在 platform/_Sys/GN_UserThreadContext.h（L0，B7-6）
 struct GN_ClipboardContext; // 定义在 platform/_Sys/GN_ClipboardContext.h（L0，B7-6）
+struct GN_ScissorContext; // 定义在 graphics/GN_ScissorContext.h（L2，B7-7；定义体留 GN_2D.cpp）
+struct GN_ImageLoadContext; // 定义在 graphics/GN_ImageLoadContext.h（L2，B7-7；定义体留 GN_2Dtype.cpp）
 } // namespace GNg
 
 struct sEngineContext {
@@ -36,6 +38,8 @@ struct sEngineContext {
     GNg::GN_NetTransContext *nettrans; // 网络传输上下文（B7-6）；默认指向全局 GN_NetTransState
     GNg::GN_UserThreadContext *userthread; // 用户线程上下文（B7-6）；默认指向全局 GN_UserThreadState
     GNg::GN_ClipboardContext *clipboard; // 剪贴板上下文（B7-6）；默认指向全局 GN_ClipboardState
+    GNg::GN_ScissorContext *scissor; // L2 2D 剪裁嵌套栈（B7-7）；默认指向全局 GN_ScissorState
+    GNg::GN_ImageLoadContext *imageload; // L2 图像加载上下文（B7-7）；默认指向全局 GN_ImageLoadState
     sEngineContext();
 };
 

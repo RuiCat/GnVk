@@ -7,6 +7,8 @@
 #include "GN_NetTransContext.h" // B7-6
 #include "_Sys/GN_UserThreadContext.h" // B7-6
 #include "_Sys/GN_ClipboardContext.h" // B7-6
+#include "GN_ScissorContext.h" // B7-7
+#include "GN_ImageLoadContext.h" // B7-7
 #include "GN_Vk.h"
 #include "GN_CoreContext.h" // B7-3：core 上下文默认值
 #include "GN_FileContext.h" // B7-3：file 上下文默认值
@@ -89,6 +91,8 @@ TEST_CASE(engineContextMultiInstanceContract) {
     CHECK(second.core == &GNg::GN_Core && second.platform == &GNg::GN_MainState);
     CHECK(second.parallel == &GNg::GN_ParallelState && second.nettrans == &GNg::GN_NetTransState);
     CHECK(second.userthread == &GNg::GN_UserThreadState && second.clipboard == &GNg::GN_ClipboardState);
+    CHECK(second.scissor == def.scissor && second.imageload == def.imageload);
+    CHECK(second.scissor == &GNg::GN_ScissorState && second.imageload == &GNg::GN_ImageLoadState);
 }
 
 TEST_CASE(coreContextSecondInstanceIndependent) {

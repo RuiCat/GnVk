@@ -11,13 +11,16 @@
 #include "GN_NetTransContext.h" // B7-6：network 上下文（L2→L5 向上，白名单登记；只取地址）
 #include "_Sys/GN_UserThreadContext.h" // B7-6：用户线程上下文（L2→L0 向下）
 #include "_Sys/GN_ClipboardContext.h" // B7-6：剪贴板上下文（L2→L0 向下）
+#include "GN_ScissorContext.h" // B7-7：L2 2D 剪裁栈上下文（L2→L2 同层）
+#include "GN_ImageLoadContext.h" // B7-7：L2 图像加载上下文（L2→L2 同层）
 
 sEngineContext::sEngineContext()
     : vk(&GNg::GN_Vk), core(&GNg::GN_Core), file(&GNg::GN_FileState),
       input(&GNg::GN_InputState), ui(&GNg::GN_UiBrowserState),
       platform(&GNg::GN_MainState), audio(&GNg::GN_SoundState),
       parallel(&GNg::GN_ParallelState), nettrans(&GNg::GN_NetTransState),
-      userthread(&GNg::GN_UserThreadState), clipboard(&GNg::GN_ClipboardState) {}
+      userthread(&GNg::GN_UserThreadState), clipboard(&GNg::GN_ClipboardState),
+      scissor(&GNg::GN_ScissorState), imageload(&GNg::GN_ImageLoadState) {}
 
 sEngineContext &GN_GetEngineContext() {
     static sEngineContext ctx; // 默认上下文：老 API 行为不变

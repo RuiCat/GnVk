@@ -62,10 +62,12 @@ GN_API GNg::PF_LOAD_IMG_FILE_DATA GT_ImageFileNameSet(const char *filename, int 
     return pf_load;
 }
 // DA-M2 批 4：最近一次图像加载类型名收敛进文件内上下文。
-struct sImageLoadContext {
+namespace GNg {
+struct GN_ImageLoadContext {
     char *aLoadLastTypeName = (char *)GNg::ImgFileTypeNames[GNg::eIMG_FILE_PNG];
 };
-static sImageLoadContext gImageLoadContext;
+GN_ImageLoadContext GN_ImageLoadState; // B7-7：默认图像加载上下文（原 GNg::GN_ImageLoadState）
+} // namespace GNg
 
 GN_API uint8 *GT_ImageFileLoadToData(const char *filename, int fname_len, GNg::PF_LOAD_IMG_FILE_DATA load_func, int i, GNg::COLOR_FORMAT *format_out, int *w_out, int *h_out) {
     if(fname_len) {
@@ -76,7 +78,7 @@ GN_API uint8 *GT_ImageFileLoadToData(const char *filename, int fname_len, GNg::P
         snprintf(ext_name, (int)(sizeof(tmp_flienmae) - fname_len), "%04d.", i); /*有动画序列就接上序好来读取*/
         ext_name += 5;
         ext_name[3] = 0; //先设好结束符
-        char *types = gImageLoadContext.aLoadLastTypeName;
+        char *types = GNg::GN_ImageLoadState.aLoadLastTypeName;
         bool can_ext_name = true;
         uint8 *t_data;
         if(GNf::sFILE::DefaultH) {
@@ -91,7 +93,7 @@ GN_API uint8 *GT_ImageFileLoadToData(const char *filename, int fname_len, GNg::P
 
 #define GT_TMP_LOOP_LOAD_ALL_IMG_FMT_END                                                                                 \
     if(t_data) {                                                                                                         \
-        gImageLoadContext.aLoadLastTypeName = types;                                                                                \
+        GNg::GN_ImageLoadState.aLoadLastTypeName = types;                                                                                \
         return t_data;                                                                                                   \
     }                                                                                                                    \
     }                                                                                                                    \
@@ -102,7 +104,7 @@ GN_API uint8 *GT_ImageFileLoadToData(const char *filename, int fname_len, GNg::P
                 can_ext_name = false;                                                                                    \
                 types = GNg::GetSupportImgFmtFileExtName();                                                              \
             } else {                                                                                                     \
-                gImageLoadContext.aLoadLastTypeName = types;                                                                        \
+                GNg::GN_ImageLoadState.aLoadLastTypeName = types;                                                                        \
                 return 0;                                                                                                \
             }                                                                                                            \
         }                                                                                                                \
@@ -152,7 +154,7 @@ GN_API uint8 *GNg::ImageLoadFileToData(const char *filename, int i, COLOR_FORMAT
         ++ext_name;
         ext_name[3] = 0; //先设好结束符
         uint8 *t_data;
-        char *types = gImageLoadContext.aLoadLastTypeName;
+        char *types = GNg::GN_ImageLoadState.aLoadLastTypeName;
         bool can_ext_name = true;
         GNg::PF_LOAD_IMG_FILE_DATA load_func;
         GT_TMP_LOOP_LOAD_ALL_IMG_FMT_BEGIN
@@ -161,7 +163,7 @@ GN_API uint8 *GNg::ImageLoadFileToData(const char *filename, int i, COLOR_FORMAT
     }
 }
 GN_API char * GNg::ImageLoadLastTypeNameGet() {
-    return gImageLoadContext.aLoadLastTypeName;
+    return GNg::GN_ImageLoadState.aLoadLastTypeName;
 }
 bool GNg::sWINDOW::FullScreen = false;
 bool GNg::sWINDOW::WindowZoom = true;

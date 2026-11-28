@@ -1,6 +1,6 @@
 # B7 static 收敛账本（c4）
 
-> **状态**：✅ 已完成 — B7 全批（B7-1…B7-6）；B7-6 补收非渲染模块 static（parallel/network/userthread/clipboard）。口径、批次与审计记录见下。
+> **状态**：✅ 已完成 — B7 全批（B7-1…B7-7）；B7-6 非渲染模块、B7-7 L2 图形 API。口径、批次与审计记录见下。
 
 ## 口径
 
@@ -19,6 +19,7 @@
 | B7-4 | 输入/UI/平台：GN_Input、GN_UiFBrowser、GN_Main（9 static）、GN_Sound | ✅ 2026-11-27，14 变量 → GN_InputState/GN_UiBrowserState/GN_MainState/GN_SoundState（新品 4 头），952/0，ABI 登记 4 强新增 + 弱变更 4/4；预览上下文与公共变量保留见文末登记 |
 | B7-5 | 函数内 static 审计 + 全仓复审 + 多实例测试 | ✅ 2026-11-27，30 项函数内 static 审计（迁 10 / 留 20，逐类登记）；全仓复审补 2 项漏计（sysProcClipboard.inc）；多实例契约测试 +3 例；955/0，ABI 零变化；留后续批清单见文末 |
 | B7-6 | 非渲染模块 static 收敛：parallel/network/userthread/clipboard | ✅ 2026-11-28，4 上下文 → sEngineContext 门面（前向声明头 + 非 static 全局实例）；955/0，ABI 4 强新增 + 弱 4/4；L2 API/纹理环集/X11 仍留后续 |
+| B7-7 | L2 图形 API static 收敛：scissor 栈/imageload | ✅ 2026-11-28，2 上下文 → 门面（L2 同层头，无需跨层白名单，不塞 L3 GN_Vk）；955/0，ABI 2 强新增、弱零变化；纹理环集/X11/预览仍留后续 |
 
 ## 文件级 static 变量清单（33）
 
@@ -52,11 +53,11 @@
 
 - L894 `gFileLogContext`
 
-### src/graphics/GN_2D.cpp（1，留后续批：L2 API 层，见 B7-2 范围登记）
+### src/graphics/GN_2D.cpp（1，✅ B7-7 迁 GNg::GN_ScissorState，L2 子系统上下文）
 
 - L76 `gScissorContext`
 
-### src/graphics/GN_2Dtype.cpp（1，留后续批：L2 API 层，见 B7-2 范围登记）
+### src/graphics/GN_2Dtype.cpp（1，✅ B7-7 迁 GNg::GN_ImageLoadState，L2 子系统上下文）
 
 - L68 `gImageLoadContext`
 

@@ -2,6 +2,21 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-28 — B7-7：L2 图形 API static 收敛（B7 遗漏补收）
+
+把 B7-2「留后续批」的 2 个 L2 图形 API 文件级 static 纳入 sEngineContext 门面：
+`gScissorContext`（2D 剪裁嵌套栈）→`GNg::GN_ScissorState`、`gImageLoadContext`（最近图像加载类型名）→`GN_ImageLoadState`。
+
+**架构裁决**：作为 **L2 子系统上下文**（头在 graphics/，与门面同层，无需跨层白名单），
+而非塞进 L3 的 GN_Vk——剪裁嵌套栈是 L2 API 状态，区别于 GN_Vk.s2DRes 的后端当前剪裁。
+手法同 B7-6：前向声明头 + 非 static 导出实例，结构体定义留实现文件（依赖 sRECT/ImgFileTypeNames 可见处）。
+门面 +2 指针；多实例测试扩展。
+
+验证：`make ci` 全绿（955/0、smoke 13/0、gpuCheck 126/0、warnings 7<500）；ABI 2 强新增、弱零变化、无移除。
+
+**B7 至此文件级 static 全部收敛或按设计保留**；余纹理环集描述符缓存（按设计保留）、GT_X11Clip（X11 #ifdef）、
+gFbPreviewContext（宏关闭不可验证）为明确保留项，非遗漏。
+
 ## 2026-11-28 — B7-6：非渲染模块 static 收敛（B7 遗漏补收）
 
 把 B7-5 审计「未批次化」的 4 个非渲染模块文件级 static 上下文纳入 sEngineContext 门面：
