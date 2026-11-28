@@ -138,6 +138,12 @@ doc-check:
 	@python3 tests/tools/check_docs_index.py
 	@echo "$(YELLOW)💬 校验头文件注释覆盖...$(RESET)"
 	@bash tests/tools/check_comments.sh
+	@echo "$(YELLOW)🏷  校验版本单一来源...$(RESET)"
+	@bash tests/tools/version_check.sh
+
+.PHONY: version-check
+version-check:
+	@bash tests/tools/version_check.sh
 
 # ── 着色器（与构建系统无关）──────────────────────────────
 SHADER_DIR := assets/shaders
