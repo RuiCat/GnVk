@@ -16,7 +16,7 @@
 | B2 | 多层渲染 P1a：管线缓存加特殊化常量/键版本（done）；P1b：按帧回收 API（done，销毁路径 GPU 未验） | **in-progress（API done / destruction GPU-unverified）** |
 | B3 | DDGI：2f 法线偏置（code done，A/B 不判定）→ 2e relocation（CPU v1-lite + GPU 6 轴 done，视觉不判定）→ 2d 异步更新（**软件 compute done + parity/收敛/inactive/切光已验**；HW ray-query 变体未做） | **in-progress（仅剩 HW 变体与视觉）** |
 | B4 | 引擎 RT GI S2–S5、G5 探针动态化 | planned（GPU） |
-| B5 | 残余缺陷/文档漂移清理（HDR 双 tonemap、延迟上传 TODO、审计 P2、DEFECT_AUDIT 遗留项） | **done（B5b–B5g）**；残余 DA-M2 planned / DA-M3 blocked / DA-M1r blocked（需 ABI 决策） |
+| B5 | 残余缺陷/文档漂移清理（HDR 双 tonemap、延迟上传 TODO、审计 P2、DEFECT_AUDIT 遗留项） | **done（B5b–B5g）**；DA-M2 done（CPU 部分收口，B7 再统一进 sEngineContext）/ DA-M3 blocked（缺样本+GPU）/ DA-M1r blocked（需 ABI 决策） |
 | **P0** | 控制器规划 P0：`cINPUT_MAP` + `cGAME_CLOCK` + 两个示例的键位迁移（取代 42 处 `GN::Key1/Mouse` 直读） | **done（2026-11-24）** |
 | **P1** | 控制器规划 P1：`GN_Entity`（cENTITY + 四控制器）+ `cRENDER_FRAME` + `sSHADOW_STATE` + `tests/fixtures` 程序化资产 + 两个示例接线（画面逐字节不变） | **done（2026-11-24）** |
 | **P2** | 控制器规划 P2：`selectSkinPalettePath` 分流（UBO≤128/SSBO≤4096/超限拒绝）+ `cSKELETON_CONTROLLER::PalettePath` + `GN_VkDrawSkinnedAuto` + GPU 6 站验收（轮廓逐采样点比对） | **done（2026-11-24）** |
@@ -281,7 +281,7 @@ LD_LIBRARY_PATH=. VK_ICD_FILENAMES=$PWD/.local/probes/lvp_icd.json CORNELL_GPU_R
 | DA-M2 61 全局状态→Context | **done（CPU 可验部分，2026-11-22）**：批 1a/1b/2a/2b/3/4 全收；**保留 4 个**有明确理由（见 §2 行） | `make` exit=0、`make unit` 463/0；lint naming/comments 0 告警；`GN_NetTrans`/`GN_Sys`/`GN_UiFBrowser` 历史超限 | 保留项复算：`GN_Main.h:47`（公共 ABI）、`GN_Sound.cpp:43`（WCE 分支）、`GN_Sys.cpp:111`（Android extern 对）、`GN_Sys.cpp:1087`（`LARGE_INTEGER`）；多词类型盲区已在 §2 记为口径订正 |
 | DA-M3 UI Vulkan | blocked（环境+GPU） | 缺 Vulkan UI samples 且无 GPU | 提供 samples/GPU 后评估 |
 
-**CPU 可验剩余**：仅 DA-M2（分批迁移）。其余全部 done 或 blocked（GPU/ABI/环境）。
+**CPU 可验剩余**：无新增——DA-M2 已 done（B7 统一进 sEngineContext）；B9 质量门全量 done（含遗留清理：死代码/布局栈越界/过时注释）。其余全部 done 或 blocked（GPU/ABI/环境/用户决策）；B7 留后续批（L2 API 层 static、资源缓存、多实例兼容层）属未来重构批次，需先定设计。
 
 > 单页总结（进度/blocked/下一步）：`docs/REMAINING_WORK_SUMMARY_2026-11-21.md`。
 
