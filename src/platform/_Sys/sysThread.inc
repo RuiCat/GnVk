@@ -40,12 +40,12 @@ GN_sTHREAD::~GN_sTHREAD() {
 unsigned WINAPI GT_ThreadStartPoint(void *arg) {
     GT_sTHREAD_ARG *del_tr = (GT_sTHREAD_ARG *)arg;
     del_tr->fun(del_tr->tr, del_tr->arg, del_tr->arg2);
-    gUserThreadContext.aUsThreadTable.del(del_tr);
+    GNg::GN_UserThreadState.aUsThreadTable.del(del_tr);
     return 0;
 }
 GN_SYS_API P<GN_sTHREAD> GN_ThreadStart(void (*proc)(P<GN_sTHREAD> this_thread, void *arg, void *arg2), void *_arg, void *_arg2) {
     P<GN_sTHREAD> p_tr(1);
-    GT_sTHREAD_ARG *del_tr = gUserThreadContext.aUsThreadTable.add(GT_sTHREAD_ARG(p_tr, _arg, _arg2, proc));
+    GT_sTHREAD_ARG *del_tr = GNg::GN_UserThreadState.aUsThreadTable.add(GT_sTHREAD_ARG(p_tr, _arg, _arg2, proc));
     unsigned pid;
     HANDLE porc = (HANDLE)::_beginthreadex(0, 0, GT_ThreadStartPoint, del_tr, 0 /*CREATE_SUSPENDED*/, &pid);
     if(porc) {
@@ -54,7 +54,7 @@ GN_SYS_API P<GN_sTHREAD> GN_ThreadStart(void (*proc)(P<GN_sTHREAD> this_thread, 
         p_tr->id = porc;
         return p_tr;
     } else {
-        gUserThreadContext.aUsThreadTable.del(del_tr);
+        GNg::GN_UserThreadState.aUsThreadTable.del(del_tr);
         return P_();
     }
 }
@@ -101,20 +101,20 @@ void *GT_ThreadStartPoint(void *arg) {
         GT_JEnv = 0;
     }
 #endif
-    gUserThreadContext.aUsThreadTable.del(del_thread);
+    GNg::GN_UserThreadState.aUsThreadTable.del(del_thread);
     return 0;
 }
 GN_SYS_API P<GN_sTHREAD> GN_ThreadStart(void (*proc)(P<GN_sTHREAD> this_thread, void *arg, void *arg2), void *_arg, void *_arg2) {
     void *proc_id;
     P<GN_sTHREAD> p_thread(1);
-    GT_sTHREAD_ARG *del_thread = gUserThreadContext.aUsThreadTable.add(GT_sTHREAD_ARG(p_thread, _arg, _arg2, proc));
+    GT_sTHREAD_ARG *del_thread = GNg::GN_UserThreadState.aUsThreadTable.add(GT_sTHREAD_ARG(p_thread, _arg, _arg2, proc));
     int ret = pthread_create((pthread_t *)&proc_id, 0, GT_ThreadStartPoint, del_thread);
     if(ret != -1) {
         /*存在问题:还未设为高优先级*/
         p_thread->id = proc_id;
         return p_thread;
     } else {
-        gUserThreadContext.aUsThreadTable.del(del_thread);
+        GNg::GN_UserThreadState.aUsThreadTable.del(del_thread);
         return P_();
     }
 }

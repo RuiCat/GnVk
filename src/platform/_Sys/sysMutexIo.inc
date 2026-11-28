@@ -112,13 +112,13 @@ GN_SYS_API void GN_InitSys() {
     GT_SystemInited |= 1 << 5;
 }
 GN_SYS_API void GN_UnInitSys() {
-    GN_DeleteArray(gClipboardContext.aStrPasteBuffer); //删除剪贴板内容
+    GN_DeleteArray(GNg::GN_ClipboardState.aStrPasteBuffer); //删除剪贴板内容
     UnInitUsIO();
-    if(!gUserThreadContext.aUsThreadTable.empty()) {
+    if(!GNg::GN_UserThreadState.aUsThreadTable.empty()) {
 #ifdef GN_DEBUG
-        GN_Log("还有线程 %d 个没有退出!!\n", gUserThreadContext.aUsThreadTable.size());
+        GN_Log("还有线程 %d 个没有退出!!\n", GNg::GN_UserThreadState.aUsThreadTable.size());
 #endif
-        gUserThreadContext.aUsThreadTable.clear();
+        GNg::GN_UserThreadState.aUsThreadTable.clear();
     }
     GT_SystemInited -= 1 << 5;
 }

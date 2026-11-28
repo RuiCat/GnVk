@@ -18,6 +18,10 @@ struct GN_InputContext; // 定义在 input/GN_InputContext.h（L5，B7-4）
 struct GN_UiBrowserContext; // 定义在 ui/GN_UiBrowserContext.h（L5，B7-4）
 struct GN_MainContext; // 定义在 platform/_Main/GN_MainContext.h（L0，B7-4）
 struct GN_SoundContext; // 定义在 audio/_Sound/GN_SoundContext.h（L5，B7-4）
+struct GN_ParallelContext; // 定义在 core/GN_ParallelContext.h（L1，B7-6；定义体留 GN_Parallel.cpp）
+struct GN_NetTransContext; // 定义在 network/GN_NetTransContext.h（L5，B7-6；定义体留 GN_NetTrans.cpp）
+struct GN_UserThreadContext; // 定义在 platform/_Sys/GN_UserThreadContext.h（L0，B7-6）
+struct GN_ClipboardContext; // 定义在 platform/_Sys/GN_ClipboardContext.h（L0，B7-6）
 } // namespace GNg
 
 struct sEngineContext {
@@ -28,6 +32,10 @@ struct sEngineContext {
     GNg::GN_UiBrowserContext *ui; // ui 文件浏览上下文（B7-4）；默认指向全局 GN_UiBrowserState
     GNg::GN_MainContext *platform; // 平台主循环上下文（B7-4）；默认指向全局 GN_MainState
     GNg::GN_SoundContext *audio; // 音频子系统上下文（B7-4）；默认指向全局 GN_SoundState
+    GNg::GN_ParallelContext *parallel; // 并行任务上下文（B7-6）；默认指向全局 GN_ParallelState
+    GNg::GN_NetTransContext *nettrans; // 网络传输上下文（B7-6）；默认指向全局 GN_NetTransState
+    GNg::GN_UserThreadContext *userthread; // 用户线程上下文（B7-6）；默认指向全局 GN_UserThreadState
+    GNg::GN_ClipboardContext *clipboard; // 剪贴板上下文（B7-6）；默认指向全局 GN_ClipboardState
     sEngineContext();
 };
 

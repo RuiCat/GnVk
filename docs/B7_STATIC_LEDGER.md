@@ -1,6 +1,6 @@
 # B7 static 收敛账本（c4）
 
-> **状态**：✅ 已完成 — B7 全批（B7-1…B7-5）；口径、批次与审计记录见下。
+> **状态**：✅ 已完成 — B7 全批（B7-1…B7-6）；B7-6 补收非渲染模块 static（parallel/network/userthread/clipboard）。口径、批次与审计记录见下。
 
 ## 口径
 
@@ -18,6 +18,7 @@
 | B7-3 | 资源缓存：core（GN_Init/GN_Format*）+ file（GN_File） | ✅ 2026-11-26，6 变量 → GNg::GN_Core / GN_FileState（新品 2 头），950/0，ABI 登记 2 强新增 + 弱变更 2/2；公共配置变量保留见文末登记 |
 | B7-4 | 输入/UI/平台：GN_Input、GN_UiFBrowser、GN_Main（9 static）、GN_Sound | ✅ 2026-11-27，14 变量 → GN_InputState/GN_UiBrowserState/GN_MainState/GN_SoundState（新品 4 头），952/0，ABI 登记 4 强新增 + 弱变更 4/4；预览上下文与公共变量保留见文末登记 |
 | B7-5 | 函数内 static 审计 + 全仓复审 + 多实例测试 | ✅ 2026-11-27，30 项函数内 static 审计（迁 10 / 留 20，逐类登记）；全仓复审补 2 项漏计（sysProcClipboard.inc）；多实例契约测试 +3 例；955/0，ABI 零变化；留后续批清单见文末 |
+| B7-6 | 非渲染模块 static 收敛：parallel/network/userthread/clipboard | ✅ 2026-11-28，4 上下文 → sEngineContext 门面（前向声明头 + 非 static 全局实例）；955/0，ABI 4 强新增 + 弱 4/4；L2 API/纹理环集/X11 仍留后续 |
 
 ## 文件级 static 变量清单（33）
 
@@ -43,7 +44,7 @@
 - L62 `gUserModuleContext`
 - L76 `gPathDirContext`
 
-### src/core/GN_Parallel.cpp（1，待迁）
+### src/core/GN_Parallel.cpp（1，✅ B7-6 迁 GNg::GN_ParallelState）
 
 - L34 `gParallelContext`
 
@@ -87,7 +88,7 @@
 
 - L125 `gInputContext`
 
-### src/network/GN_NetTrans.cpp（1，待迁）
+### src/network/GN_NetTrans.cpp（1，✅ B7-6 迁 GNg::GN_NetTransState）
 
 - L1215 `gNetTransContext`
 
@@ -103,7 +104,7 @@
 - L37 `GT_ImeBuffer`
 - L38 `GT_ImeBufLen`
 
-### src/platform/_Sys/sysProcess.inc（1，待迁）
+### src/platform/_Sys/sysProcess.inc（1，✅ B7-6 迁 GNg::GN_UserThreadState）
 
 - L207 `gUserThreadContext`
 

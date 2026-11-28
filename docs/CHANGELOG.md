@@ -2,6 +2,23 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-28 — B7-6：非渲染模块 static 收敛（B7 遗漏补收）
+
+把 B7-5 审计「未批次化」的 4 个非渲染模块文件级 static 上下文纳入 sEngineContext 门面：
+`gParallelContext`→`GNg::GN_ParallelState`、`gNetTransContext`→`GN_NetTransState`、
+`gUserThreadContext`→`GN_UserThreadState`、`gClipboardContext`→`GN_ClipboardState`。
+
+**手法（低风险）**：新增 4 个前向声明头（仅 `struct X; extern X XState;`，门面只取地址），
+结构体定义留实现文件（依赖类型 GN_sTASK_LIST_NODE/P<cSOC_UDP>/GT_sTHREAD_ARG 可见处），
+实例改非 static 导出；引用改 `GNg::GN_XxxState`（含跨 .inc：sysThread/sysMutexIo）。
+门面加 4 指针 + 默认指向全局；分层白名单 +GN_NetTransContext.h（L2→L5 只取地址）；多实例测试扩展覆盖 4 指针。
+
+**仍留后续（明确登记）**：L2 图形 API（gScissorContext/gImageLoadContext，需跨层白名单）、
+纹理环集描述符缓存（非平凡类型，按设计保留）、GT_X11Clip（X11 专属类，#ifdef）、gFbPreviewContext（宏关闭不可验证）。
+
+验证：`make ci` 全绿（955/0、smoke 13/0、gpuCheck 126/0、warnings 7<500、layers/headers/context_groups 全过）；
+ABI 4 强新增 + 弱 4 移除/4 新增（旧 static 析构→命名空间析构），无强符号移除。
+
 ## 2026-11-28 — 遗留清理：死代码删除 + 布局栈越界加固 + 过时注释
 
 - **死代码删除**：`fmtPixelUtil.inc` 的 `GT_PixelAvgColor3x3`/`GT_PixelColorAccum`（全仓无调用，

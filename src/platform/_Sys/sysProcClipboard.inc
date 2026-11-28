@@ -51,25 +51,27 @@ GN_SYS_API unsigned int GT_GetSysCoreCount() {
 #endif
 }
 // DA-M2 批 3：剪贴板文本缓冲收敛进文件内上下文（跨平台各分支共用同一字段）。
-struct sClipboardContext {
+namespace GNg {
+struct GN_ClipboardContext {
     char *aStrPasteBuffer = 0;
 };
-static sClipboardContext gClipboardContext;
+GN_ClipboardContext GN_ClipboardState; // B7-6：默认剪贴板上下文（原 GNg::GN_ClipboardState）
+} // namespace GNg
 #if defined(_WIN32_) || defined(_WIN32_WCE)
 GN_SYS_API char const *GN_StrGetPasteText() {
-    GN_DeleteArray(gClipboardContext.aStrPasteBuffer);
+    GN_DeleteArray(GNg::GN_ClipboardState.aStrPasteBuffer);
     if(IsClipboardFormatAvailable(CF_TEXT)) { //确定剪贴板是否含有CF_TEXT格式的数据
         OpenClipboard(0 /*(HWND)GNg::sWINDOW::Hwnd*/); //打开剪贴板
         HGLOBAL hGlobal = GetClipboardData(CF_TEXT); //获得引用文本的内存块句柄
         size_t clipSize = GlobalSize(hGlobal);
-        gClipboardContext.aStrPasteBuffer = new char[clipSize]; //分配一块与剪贴板数据块大小相同的内存块
+        GNg::GN_ClipboardState.aStrPasteBuffer = new char[clipSize]; //分配一块与剪贴板数据块大小相同的内存块
         LPVOID pGlobal = GlobalLock(hGlobal);
-        strncpy(gClipboardContext.aStrPasteBuffer, (char *)pGlobal, clipSize - 1);
-        gClipboardContext.aStrPasteBuffer[clipSize - 1] = 0;
+        strncpy(GNg::GN_ClipboardState.aStrPasteBuffer, (char *)pGlobal, clipSize - 1);
+        GNg::GN_ClipboardState.aStrPasteBuffer[clipSize - 1] = 0;
         GlobalUnlock(hGlobal);
         CloseClipboard();
     }
-    return gClipboardContext.aStrPasteBuffer;
+    return GNg::GN_ClipboardState.aStrPasteBuffer;
 }
 GN_SYS_API void GN_StrSetPasteText(const char *text) {
     OpenClipboard(0); //打开剪贴板
@@ -94,8 +96,8 @@ GN_SYS_API void GN_StrSetPasteText(const char *text) {
 #elif defined _MAC_
 GN_SYS_API char const *GN_StrGetPasteText() {
     char const *text = macGetPasteText();
-    GN_StrcpyData(gClipboardContext.aStrPasteBuffer, text);
-    return gClipboardContext.aStrPasteBuffer;
+    GN_StrcpyData(GNg::GN_ClipboardState.aStrPasteBuffer, text);
+    return GNg::GN_ClipboardState.aStrPasteBuffer;
 }
 GN_SYS_API void GN_StrSetPasteText(const char *text) {
     macSetPasteText(text ? text : "");
@@ -158,23 +160,23 @@ struct GT_ClipboardX11 {
 };
 static GT_ClipboardX11 GT_X11Clip;
 GN_SYS_API char const *GN_StrGetPasteText() {
-    GN_DeleteArray(gClipboardContext.aStrPasteBuffer);
+    GN_DeleteArray(GNg::GN_ClipboardState.aStrPasteBuffer);
     char *text = GT_X11Clip.ReadSelection(GT_X11Clip.clip);
     if(!text) text = GT_X11Clip.ReadSelection(XA_PRIMARY);
     if(text) {
-        gClipboardContext.aStrPasteBuffer = text;
-        return gClipboardContext.aStrPasteBuffer;
+        GNg::GN_ClipboardState.aStrPasteBuffer = text;
+        return GNg::GN_ClipboardState.aStrPasteBuffer;
     }
     FILE *fp = popen("wl-paste -t text 2>/dev/null", "r");
     if(fp) {
         char buf[4096] = {0};
-        if(fread(buf, 1, sizeof(buf) - 1, fp) > 0) GN_StrcpyData(gClipboardContext.aStrPasteBuffer, buf);
+        if(fread(buf, 1, sizeof(buf) - 1, fp) > 0) GN_StrcpyData(GNg::GN_ClipboardState.aStrPasteBuffer, buf);
         pclose(fp);
     }
-    return gClipboardContext.aStrPasteBuffer;
+    return GNg::GN_ClipboardState.aStrPasteBuffer;
 }
 GN_SYS_API void GN_StrSetPasteText(const char *text) {
-    GN_StrcpyData(gClipboardContext.aStrPasteBuffer, text ? text : "");
+    GN_StrcpyData(GNg::GN_ClipboardState.aStrPasteBuffer, text ? text : "");
     if(GT_X11Clip.Setup(), GT_X11Clip.disp) {
         XSetSelectionOwner(GT_X11Clip.disp, XA_PRIMARY, GT_X11Clip.win, CurrentTime);
         XSetSelectionOwner(GT_X11Clip.disp, GT_X11Clip.clip, GT_X11Clip.win, CurrentTime);
@@ -195,7 +197,7 @@ GN_SYS_API void GN_StrSetPasteText(const char *text) {
             } else {
                 XChangeProperty(GT_X11Clip.disp, ev.xselectionrequest.requestor,
                                 ev.xselectionrequest.property, ev.xselectionrequest.target, 8, PropModeReplace,
-                                (unsigned char *)gClipboardContext.aStrPasteBuffer, strlen(gClipboardContext.aStrPasteBuffer));
+                                (unsigned char *)GNg::GN_ClipboardState.aStrPasteBuffer, strlen(GNg::GN_ClipboardState.aStrPasteBuffer));
             }
             XSendEvent(GT_X11Clip.disp, ev.xselectionrequest.requestor, False, 0, (XEvent *)&sev);
         }
@@ -211,17 +213,17 @@ GN_SYS_API void GN_StrSetPasteText(const char *text) {
 }
 #else
 GN_SYS_API char const *GN_StrGetPasteText() {
-    GN_DeleteArray(gClipboardContext.aStrPasteBuffer);
+    GN_DeleteArray(GNg::GN_ClipboardState.aStrPasteBuffer);
     FILE *fp = popen("wl-paste -t text 2>/dev/null", "r");
     if(fp) {
         char buf[4096] = {0};
-        if(fread(buf, 1, sizeof(buf) - 1, fp) > 0) GN_StrcpyData(gClipboardContext.aStrPasteBuffer, buf);
+        if(fread(buf, 1, sizeof(buf) - 1, fp) > 0) GN_StrcpyData(GNg::GN_ClipboardState.aStrPasteBuffer, buf);
         pclose(fp);
     }
-    return gClipboardContext.aStrPasteBuffer;
+    return GNg::GN_ClipboardState.aStrPasteBuffer;
 }
 GN_SYS_API void GN_StrSetPasteText(const char *text) {
-    GN_StrcpyData(gClipboardContext.aStrPasteBuffer, text ? text : "");
+    GN_StrcpyData(GNg::GN_ClipboardState.aStrPasteBuffer, text ? text : "");
     if(text && text[0]) {
         FILE *fp = popen("wl-copy 2>/dev/null", "w");
         if(fp) {
@@ -233,10 +235,10 @@ GN_SYS_API void GN_StrSetPasteText(const char *text) {
 #endif
 #else
 GN_SYS_API char const *GN_StrGetPasteText() {
-    return gClipboardContext.aStrPasteBuffer;
+    return GNg::GN_ClipboardState.aStrPasteBuffer;
 }
 GN_SYS_API void GN_StrSetPasteText(const char *text) {
-    GN_StrcpyData(gClipboardContext.aStrPasteBuffer, text);
+    GN_StrcpyData(GNg::GN_ClipboardState.aStrPasteBuffer, text);
 }
 #endif
 

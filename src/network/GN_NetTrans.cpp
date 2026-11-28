@@ -1208,26 +1208,28 @@ void GNn::cSERVER_UDP::Shutdown() {
 }
 /***************************************************** 快捷外部通讯 ***************************************************************************/
 // DA-M2 批 4：外部通知 socket 收敛进文件内上下文。
-struct sNetTransContext {
+namespace GNg {
+struct GN_NetTransContext {
     P<GNn::cSOC_UDP> aExternNoticeSoc;
     unsigned short aExternNoticePort = 0; //外部通知端口（原多词类型全局，批 3 补收）
 };
-static sNetTransContext gNetTransContext;
+GN_NetTransContext GN_NetTransState; // B7-6：默认网络传输上下文（原 GNg::GN_NetTransState）
+} // namespace GNg
 void GT_ExternNoticePost(const char *msg) {
-    static GNn::sADDR en_addr(gNetTransContext.aExternNoticePort, "127.0.0.1", true);
-    if(!gNetTransContext.aExternNoticeSoc) {
-        gNetTransContext.aExternNoticeSoc.New(1);
-        gNetTransContext.aExternNoticeSoc->Open();
+    static GNn::sADDR en_addr(GNg::GN_NetTransState.aExternNoticePort, "127.0.0.1", true);
+    if(!GNg::GN_NetTransState.aExternNoticeSoc) {
+        GNg::GN_NetTransState.aExternNoticeSoc.New(1);
+        GNg::GN_NetTransState.aExternNoticeSoc->Open();
     }
-    if(GT_AppDefault_MsgCode) gNetTransContext.aExternNoticeSoc->SendTo(en_addr, msg, strlen(msg) + 1);
+    if(GT_AppDefault_MsgCode) GNg::GN_NetTransState.aExternNoticeSoc->SendTo(en_addr, msg, strlen(msg) + 1);
     else {
         char wmsg[1024];
         GN_StrCharToWChar(msg, wmsg, 512);
-        gNetTransContext.aExternNoticeSoc->SendTo(en_addr, wmsg, (strlen(msg) + 1) << 1);
+        GNg::GN_NetTransState.aExternNoticeSoc->SendTo(en_addr, wmsg, (strlen(msg) + 1) << 1);
     }
 }
 NET_API GN_VOID_PFUNC_PCHAR GN_GetDefExternNoticeFunc(unsigned short port) {
-    gNetTransContext.aExternNoticePort = port;
+    GNg::GN_NetTransState.aExternNoticePort = port;
     return GT_ExternNoticePost;
 }
 NET_API void (*GN_ExternNoticePost)(const char *msg) = 0;
@@ -1245,7 +1247,7 @@ NET_API void GN_InitNetwork() {
     GT_SystemInited |= 1 << 4;
 }
 NET_API void GN_UnInitNetwork() {
-    gNetTransContext.aExternNoticeSoc.Delete();
+    GNg::GN_NetTransState.aExternNoticeSoc.Delete();
     GT_UnInitNetwork();
 
     GNn_ErrorLast.Delete();

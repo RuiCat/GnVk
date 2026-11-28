@@ -3,6 +3,10 @@
 
 #include <GN.h>
 #include "GN_EngineContext.h"
+#include "GN_ParallelContext.h" // B7-6
+#include "GN_NetTransContext.h" // B7-6
+#include "_Sys/GN_UserThreadContext.h" // B7-6
+#include "_Sys/GN_ClipboardContext.h" // B7-6
 #include "GN_Vk.h"
 #include "GN_CoreContext.h" // B7-3：core 上下文默认值
 #include "GN_FileContext.h" // B7-3：file 上下文默认值
@@ -80,7 +84,11 @@ TEST_CASE(engineContextMultiInstanceContract) {
     CHECK(second.vk == def.vk && second.core == def.core && second.file == def.file);
     CHECK(second.input == def.input && second.ui == def.ui);
     CHECK(second.platform == def.platform && second.audio == def.audio);
+    CHECK(second.parallel == def.parallel && second.nettrans == def.nettrans);
+    CHECK(second.userthread == def.userthread && second.clipboard == def.clipboard);
     CHECK(second.core == &GNg::GN_Core && second.platform == &GNg::GN_MainState);
+    CHECK(second.parallel == &GNg::GN_ParallelState && second.nettrans == &GNg::GN_NetTransState);
+    CHECK(second.userthread == &GNg::GN_UserThreadState && second.clipboard == &GNg::GN_ClipboardState);
 }
 
 TEST_CASE(coreContextSecondInstanceIndependent) {

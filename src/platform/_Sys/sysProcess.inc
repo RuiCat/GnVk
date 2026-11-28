@@ -200,9 +200,11 @@ struct GT_sTHREAD_ARG {
     GT_sTHREAD_ARG(P<GN_sTHREAD> &_tr, void *_arg, void *_arg2, void (*_fun)(P<GN_sTHREAD>, void *, void *)) : arg(_arg), arg2(_arg2), fun(_fun), tr(_tr) {}
 };
 // DA-M2 批 3：用户线程登记表收敛进文件内上下文。
-struct sUserThreadContext {
+namespace GNg {
+struct GN_UserThreadContext {
     GN::sLIST<GT_sTHREAD_ARG> aUsThreadTable;
 };
-static sUserThreadContext gUserThreadContext;
+GN_UserThreadContext GN_UserThreadState; // B7-6：默认用户线程上下文（原 GNg::GN_UserThreadState）
+} // namespace GNg
 
 GN_SYS_API bool GN_ThreadSupport = false;

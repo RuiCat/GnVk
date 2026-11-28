@@ -7,11 +7,17 @@
 #include "GN_UiBrowserContext.h" // B7-4：ui 文件浏览上下文（同上）
 #include "_Main/GN_MainContext.h" // B7-4：platform 上下文（L2→L0 向下；头在 platform/_Main）
 #include "_Sound/GN_SoundContext.h" // B7-4：audio 上下文（L2→L5 向上，白名单登记；头在 audio/_Sound）
+#include "GN_ParallelContext.h" // B7-6：parallel 上下文（L2→L1 向下）
+#include "GN_NetTransContext.h" // B7-6：network 上下文（L2→L5 向上，白名单登记；只取地址）
+#include "_Sys/GN_UserThreadContext.h" // B7-6：用户线程上下文（L2→L0 向下）
+#include "_Sys/GN_ClipboardContext.h" // B7-6：剪贴板上下文（L2→L0 向下）
 
 sEngineContext::sEngineContext()
     : vk(&GNg::GN_Vk), core(&GNg::GN_Core), file(&GNg::GN_FileState),
       input(&GNg::GN_InputState), ui(&GNg::GN_UiBrowserState),
-      platform(&GNg::GN_MainState), audio(&GNg::GN_SoundState) {}
+      platform(&GNg::GN_MainState), audio(&GNg::GN_SoundState),
+      parallel(&GNg::GN_ParallelState), nettrans(&GNg::GN_NetTransState),
+      userthread(&GNg::GN_UserThreadState), clipboard(&GNg::GN_ClipboardState) {}
 
 sEngineContext &GN_GetEngineContext() {
     static sEngineContext ctx; // 默认上下文：老 API 行为不变
