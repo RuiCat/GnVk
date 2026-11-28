@@ -249,8 +249,6 @@ void GN_VkBegin2DPass() {
     vkCmdSetScissor(commandBuffer, 0, 1, &fullScreen);
 }
 
-// 历史遗留：pass 内 DataFill 的 staging 暂存数组（当前未使用；释放逻辑已并入 vkFrame2d.cpp）
-
 // ── 帧结束入口：转发到 vkFrame2d.cpp 的 GN_VkEndFrame ──
 void RenderFinish(bool only3d) {
     (void)only3d;

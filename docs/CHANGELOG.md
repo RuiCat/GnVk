@@ -2,6 +2,20 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-28 — 遗留清理：死代码删除 + 布局栈越界加固 + 过时注释
+
+- **死代码删除**：`fmtPixelUtil.inc` 的 `GT_PixelAvgColor3x3`/`GT_PixelColorAccum`（全仓无调用，
+  B4 登记待删）连同其专用宏 `GT_TMP_LOOP_ADJ_PIXEL` 删除；保留同文件活函数
+  （ImgDataHdrToLinearData/LoadImgFileData/SaveImgFile/ImgFileScale/GetImgFmtTypeFromFileName）。
+- **布局栈越界加固（B9-5 fuzz 附带发现，真实缺陷）**：`uiScrollList.inc` 的 pic_id 缓冲多分配 1 字节
+  并 NUL 终止——zZoningNum==0 时 ComputeArrangeRangeData 的 `while(text[])` 无界扫描会越界读 locbuf。
+  ASan 单测复跑 **exit=0、955/0、无 ASan 崩溃**。
+- **过时注释**：删 vkFrame2d.cpp 孤儿 staging 注释（B5c）。
+- **接受项**：3 处负向测试 UBSan 枚举加载噪声（Material/PhysicsJoint/Visibility）登记 BACKLOG accepted，
+  生产校验正确，不改测试。
+
+验证：`make ci` 全绿（955/0、smoke 13/0、gpuCheck 126/0、warnings 7<500）；ASan 单测无崩溃。
+
 ## 2026-11-28 — B9-5：解析器 fuzz harness + WAV 加固（DA-1128-03）
 
 **harness**：`tests/fuzz/fuzzParsers.cpp` + `make fuzz`（ASan/UBSan，build-fuzz/）。6 个纯 CPU

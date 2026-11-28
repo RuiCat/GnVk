@@ -286,12 +286,9 @@ LD_LIBRARY_PATH=. VK_ICD_FILENAMES=$PWD/.local/probes/lvp_icd.json CORNELL_GPU_R
 > 单页总结（进度/blocked/下一步）：`docs/REMAINING_WORK_SUMMARY_2026-11-21.md`。
 
 
-## B9-5 fuzz 附带发现（out-of-scope，2026-11-28，ASan/UBSan 全量单测）
+## B9-5 fuzz 附带发现（2026-11-28 发现，遗留清理批处置）
 
-> 这些在 UI/材质/物理层，非 B9 改动文件（git diff ab9264e..HEAD 为空），`make asan` 本不在 ci。登记待后续专项。
-
-| 项 | 锚点 | 现象 | 备注 |
+| 项 | 锚点 | 现象 | 处置 |
 |---|---|---|---|
-| 布局栈越界 | `src/graphics/GN_Layout.cpp:848` ComputeArrangeRangeData | ASan stack-buffer-overflow READ size 1 | scrollListDrawCallSignatureFlag 测试经 cSCROLL_LIST::InitStyleToData→SetText 触发；需核 sDRAW_RANGE 缓冲尺寸 |
-| 非法枚举加载 | `src/graphics/GN_Material.cpp:39` | UBSan load of value 99 for eMATERIAL_BINDING_KIND | 负向测试故意传非法 kind，validKind 已拒绝；UBSan 枚举加载噪声，可考虑测试侧用合法中间值 |
-| 非法枚举加载 | `src/graphics/GN_PhysicsJoint.cpp:281` | UBSan load of value 99 for eJOINT_TYPE | 同上 |
+| 布局栈越界 | `src/ui/GN_Layout.cpp:848` ComputeArrangeRangeData | ASan stack-buffer-overflow READ size 1 | **done（遗留清理批）**：根因 zZoningNum==0 时 `pic_id=GetSpace(0)` 未 NUL 终止，count==0 走 `while(text[])` 无界扫描越界。加固 `uiScrollList.inc`：pic_id 多分配 1 字节并 memset 0（NUL 终止）。ASan 单测复跑 exit=0 955/0 无崩溃 |
+| 非法枚举加载 ×3 | `GN_Material.cpp:39` / `GN_PhysicsJoint.cpp:281` / `GN_Visibility.cpp:118` | UBSan load of value 99 for enum | **accepted（负向测试噪声）**：测试故意 `(enum)99` 验拒绝，生产代码正确拒绝；UBSan 对越界枚举加载的固有告警，非缺陷。`make asan` 不在 ci，不改测试/不弱化校验 |

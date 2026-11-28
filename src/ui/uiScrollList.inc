@@ -65,8 +65,10 @@ bool GNu::cSCROLL_LIST::InitStyleToData(void (*draw_func)(int, int, int, int, un
     char *pic_id;
     if(zInternalImg) pic_id = GNg::cFRAME_LAUNCHER_FONT::aPicIndex;
     else {
-        pic_id = (char *)tbuf.GetSpace(zZoningNum);
-        memset(pic_id, 0, zZoningNum);
+        // 遗留加固：多分配 1 字节并 NUL 终止。zZoningNum==0 时 ComputeArrangeRangeData
+        // 走 while(text[]) 无界扫描路径，未终止的 GetSpace(0) 缓冲会越界读（ASan 发现）。
+        pic_id = (char *)tbuf.GetSpace(zZoningNum + 1);
+        memset(pic_id, 0, zZoningNum + 1);
     }
     GNg::cFRAME_LAUNCHER_FONT *_fframe = zFFrames;
     if(_fframe) {
