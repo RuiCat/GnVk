@@ -39,12 +39,12 @@ extern GN_INIT_API const char *GN_RunPauseFileName; //运行暂停通告文件�
 extern GN_INIT_API char *GN_RunStateFileName; //运行状态记录文件名 你可以把该指针指向另一个名 来更变状态记录文件名 如果作为服务器开发时 一般都把该名更变一下加上一个日期时间 以保留每次运行结果待管理查询 而且又可以防止引擎检测到相同的文件而弹出错误修复窗口卡住服务程序运行
 
 //得到一个用引擎核心系统目录续上指定路径文件名的路径文件名(路径文件名)返回路径文件名 这个便于用户读取引擎核心共享资源定位用的 因为有时版本不同这个目录也会不同
-GN_INIT_API char *const GN_SysDir(const char *path_file);
+GN_INIT_API char * GN_SysDir(const char *path_file);
 
 /**************************************************************** 用户应用资源目录 **************************************************************************************************************************/
 
 //得到一个用引擎当前用户资源目录续上指定路径文件名的路径文件名()返回路径文件名 这个便于用户读取自身资源定位用的 因为用户资源可能是固定的单机模式存在于本地 也可能是在网上更新下载回来的 这时它的存放相对目录可能会有差异! 该函数通常在引擎回调 读取用户资源函数如"AppInit"时才开始生效
-GN_INIT_API char *const GN_AppDir(const char *path_file);
+GN_INIT_API char * GN_AppDir(const char *path_file);
 //设置引擎当前用户资源目录(目录路径) 示范: GN_AppDirSet("app/source");
 GN_INIT_API void GN_AppDirSet(const char *dir);
 //获得引擎当前用户资源目录(目录路径输出)

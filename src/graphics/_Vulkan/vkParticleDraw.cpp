@@ -49,8 +49,7 @@ void writeDrawDescriptorSet() {
     ssbo.buffer = s_boundBuffer;
     ssbo.offset = 0;
     ssbo.range = VK_WHOLE_SIZE;
-    VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet writes[2]{}; writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = s_drawSet;
     writes[0].dstBinding = 0;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -74,7 +73,7 @@ bool createDrawPipeline() {
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     dslci.bindingCount = 2;
     dslci.pBindings = bindings;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &s_particleDrawSetLayout) !=
@@ -83,7 +82,7 @@ bool createDrawPipeline() {
         return false;
     }
 
-    VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     plci.setLayoutCount = 1;
     plci.pSetLayouts = &s_particleDrawSetLayout;
     if(vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &s_particleDrawPipelineLayout) != VK_SUCCESS) {
@@ -147,7 +146,7 @@ bool particleDrawBindBuffer(VkBuffer buffer, uint32_t capacity) {
     if(!GN_Vk.device || !GN_Vk.descriptorPool || !s_drawUboMapped) return false;
     if(buffer == VK_NULL_HANDLE || capacity == 0) return false;
     if(s_drawSet == VK_NULL_HANDLE) {
-        VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         dai.descriptorPool = GN_Vk.descriptorPool;
         dai.descriptorSetCount = 1;
         dai.pSetLayouts = &s_particleDrawSetLayout;

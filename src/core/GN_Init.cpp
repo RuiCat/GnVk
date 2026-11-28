@@ -48,22 +48,22 @@ GT_PFUNC_VOID GN_cMODULE::GetFunction(const char *func_name) {
 // B7-3：系统资源目录 + 写入游标（原 sPathDirContext 的 char[]/char* 别名对）已并入 GNg::GN_Core；
 // 游标在 GN_CoreContext 构造里指向各自缓冲区（sys="assets/"、app 空）。
 
-GN_INIT_API char *const GN_SysDir(const char *pathfile) {
+GN_INIT_API char * GN_SysDir(const char *pathfile) {
     if(pathfile) {
         strncpy(GNg::GN_Core.aSysFile, pathfile, sizeof(GNg::GN_Core.aSysDir) - (GNg::GN_Core.aSysFile - GNg::GN_Core.aSysDir) - 1);
         GNg::GN_Core.aSysFile[sizeof(GNg::GN_Core.aSysDir) - (GNg::GN_Core.aSysFile - GNg::GN_Core.aSysDir) - 1] = 0;
     }
-    return (char *const)GNg::GN_Core.aSysDir;
+    return (char *)GNg::GN_Core.aSysDir;
 }
 /*------------------------------------------------------------ 用户应用资源目录 -------------------------------------------------------------------------*/
 // 应用资源目录与其写入游标已并入 GNg::GN_Core（aAppDir/aAppFile 两字段，B7-3）。
 
-GN_INIT_API char *const GN_AppDir(const char *pathfile) {
+GN_INIT_API char * GN_AppDir(const char *pathfile) {
     if(pathfile) {
         strncpy(GNg::GN_Core.aAppFile, pathfile, sizeof(GNg::GN_Core.aAppDir) - 1);
         GNg::GN_Core.aAppFile[sizeof(GNg::GN_Core.aAppDir) - 1] = 0;
     } else *GNg::GN_Core.aAppFile = 0;
-    return (char *const)GNg::GN_Core.aAppDir;
+    return (char *)GNg::GN_Core.aAppDir;
 }
 GN_INIT_API void GN_AppDirSet(const char *dir) {
     if(dir && dir[0]) GNg::GN_Core.aAppFile = sprintf(GNg::GN_Core.aAppDir, "%s/", dir) + GNg::GN_Core.aAppDir;
@@ -249,7 +249,7 @@ GN_INIT_API void GF_FrameCycleBeginProc() {
         if(GT_AppDefaultSrcDownloadDir && GN_CallBackFuncIsNull()) {
             char mou_fname[384]; //有指定用户下载目录且没有手动设置回调就常试用默认名来加载程序模块来获取回调
             sprintf(mou_fname, "%s/%s", GT_AppDefaultSrcDownloadDir.Begin(), GN_APP_MODULE_NAME);
-            bool init_func_err = !GN_InitCallBackFuncFromModule(mou_fname);
+            bool init_func_err = !GN_InitCallBackFuncFromModule(mou_fname); (void)init_func_err;
         }
     }
     GNg::sIMAGE start_logo;

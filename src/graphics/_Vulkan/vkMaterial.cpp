@@ -45,7 +45,7 @@ bool createMaterialPipeline(const std::vector<uint32_t> &vertSpv,
     dslb[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     dslb[1].descriptorCount = 1;
     dslb[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     dslci.bindingCount = 2;
     dslci.pBindings = dslb;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &s_materialSetLayout) != VK_SUCCESS) {
@@ -58,7 +58,7 @@ bool createMaterialPipeline(const std::vector<uint32_t> &vertSpv,
     pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pcr.offset = 0;
     pcr.size = 64;
-    VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     plci.setLayoutCount = 1;
     plci.pSetLayouts = &s_materialSetLayout;
     plci.pushConstantRangeCount = 1;
@@ -123,7 +123,7 @@ bool GN_VkMaterialCreate(GN3d::sMATERIAL_RES *material) {
     if(!tex || !tex->aImageView || !tex->aSampler) return false;
 
     VkDescriptorSet set = VK_NULL_HANDLE;
-    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &s_materialSetLayout;
@@ -137,8 +137,7 @@ bool GN_VkMaterialCreate(GN3d::sMATERIAL_RES *material) {
     dii.sampler = tex->aSampler;
     dii.imageView = tex->aImageView;
     dii.imageLayout = tex->aLayout;
-    VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet writes[2]{}; writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = set;
     writes[0].dstBinding = 0;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;

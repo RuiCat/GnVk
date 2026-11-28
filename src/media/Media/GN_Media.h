@@ -33,7 +33,7 @@
 #if !defined(GNm_USING_SOURCE_CODE) && !defined(GN_USING_SDK_INTEGRATION) && !defined(GNm_USING_LIB_EXPORTS)
 #pragma comment(lib, "GN_Media_win32.LIB")
 #endif
-GNm_API char *const GNm_GetVersion(); //获得引擎多媒体版本号
+GNm_API char * GNm_GetVersion(); //获得引擎多媒体版本号
 
 /*****************************************************************************************************************************************/
 

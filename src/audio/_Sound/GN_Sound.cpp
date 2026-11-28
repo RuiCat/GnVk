@@ -199,8 +199,8 @@ void GNa::cSOUND_SRC::InitToData(const GNa_sSOUND *sound, bool playloop, unsigne
         sr->zCount = 0xffff;
         ALuint sid;
         alGenSources(1, &sid);
-        sr->zSource = (ALuint *)sid;
-        sr->zPauseState = (uint8 *)1;
+        sr->zSource = (ALuint *)(uintptr_t)sid; // 整型句柄存指针字段（既有设计），经 uintptr_t 中转
+        sr->zPauseState = (uint8 *)(uintptr_t)1;
 
 #define GT_TMP_SET_SOUND_SRC_STATE                     \
     alSourcei(sid, AL_BUFFER, *buf);                   \
@@ -240,7 +240,7 @@ void GNa::cSOUND_SRC::Pause(unsigned short ID) {
         if(sr->zCount == 0xffff) {
             if(sr->zPauseState) alSourcePause((ALuint)((uintptr_t)(sr->zSource)));
             else alSourcePlay((ALuint)((uintptr_t)(sr->zSource)));
-            sr->zPauseState = (uint8 *)(sr->zPauseState ? 0 : 1);
+            sr->zPauseState = (uint8 *)(uintptr_t)(sr->zPauseState ? 0 : 1);
         } else {
             unsigned short id = ID % sr->zCount;
             if(sr->zPauseState[id]) alSourcePause(sr->zSource[id]);
@@ -894,9 +894,9 @@ GN_SOUND_API bool GN_HasSoundAccelerate() {
     return true;
 }
 
-GN_SOUND_API char *const GN_GetInterfaceInfoSound() {
+GN_SOUND_API char * GN_GetInterfaceInfoSound() {
     static const char soundInfo[] = "OpenAL 1";
-    return (char *const)soundInfo;
+    return (char *)soundInfo;
 }
 #else
 GN_SOUND_API void GT_ReSetSoundMode2D() {

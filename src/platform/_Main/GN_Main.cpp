@@ -407,7 +407,7 @@ GN_MAIN_API bool GN_GetFullScreen() {
 GN_MAIN_API bool GN_Has3DAccelerate() {
     return true;
 }
-GN_MAIN_API char *const GN_GetInterfaceInfoRender() {
+GN_MAIN_API char * GN_GetInterfaceInfoRender() {
     return (char *)"Vulkan";
 }
 GN_MAIN_API void (*GN_GameBreakLoopProc)(void) = nullptr;

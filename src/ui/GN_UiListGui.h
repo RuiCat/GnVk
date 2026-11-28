@@ -63,7 +63,7 @@ class GN_API cSCROLL_LIST_GUI : public cSCROLL_LIST //★滚动嵌套UI列表
     cSCROLL_LIST::InitStyleToData;
 #endif
 #ifndef _APPLE_
-    cSCROLL_LIST::SetZoningDrawCall; //使基类该函数不能用
+    using cSCROLL_LIST::SetZoningDrawCall; //使基类该函数不能用
 #endif
   protected:
     uint8 *zDataSave(uint8 *wpos, cSHARE_DATA *share_objs); //保存该对象的2进制数据(当前写入位置, 收集共享对象集)返回最后的写完位置

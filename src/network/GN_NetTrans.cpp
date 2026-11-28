@@ -989,10 +989,10 @@ NET_API P<char> GNn::FileDownloadFromUrl(const char *url, const char *save_path,
 NET_API P<char> GNn::FileUploadToUrl(const char *url, const char *file_path, int flags, const char *file_buf, float *prog_out) {
     GT_TMP_HTTP_URL_ANALYSIS;
     P<sHTTP_POST> post_data(1);
-    if(file_buf) post_data->Init("file", (char *)file_path, (char *)file_buf, flags);
+    if(file_buf) post_data->Init((char *)"file", (char *)file_path, (char *)file_buf, flags);
     else {
         if(GNf::Access(file_path, 0)) return file_date;
-        post_data->Init("file", (char *)file_path, flags ? true : false);
+        post_data->Init((char *)"file", (char *)file_path, flags ? true : false);
     }
     file_date = h_client.RequestPost(srcname, post_data, 0, prog_out, false);
     return file_date;

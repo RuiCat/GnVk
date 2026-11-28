@@ -219,9 +219,9 @@ extern GN_API unsigned int GT_SystemInited; //标记引擎系统各部分是否�
 #pragma comment(lib, "GN_mini.LIB")
 #endif
 
-GN_API char *const GN_GetInterfaceVersion(); //获得引擎接口版本号
+GN_API char * GN_GetInterfaceVersion(); //获得引擎接口版本号
 
-GN_API char *const GN_GetVersion(); //获得引擎主版本号
+GN_API char * GN_GetVersion(); //获得引擎主版本号
 
 GN_API unsigned int GN_GetModuleConstitute(); //获得引擎里的所有构成模块 返回一个模块构成标记位集
 //你可这样来判断包含的模块 if(GN_GetModuleConstitute() & GN_USING_UTILITY_LIB)...; 表示包含实用功能库

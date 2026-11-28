@@ -262,7 +262,7 @@ GN_API int GN_Plugins2DObjectRemove();
 GN_API int GN_PluginsRemoveAll();
 
 //获得所有指定类型对象支持插件(类型 0:UI组件 1:2D对象, 2:3D对象)返回这组插件 返回0表示没有支持的
-GN_API GN::sLIST<int *> *const GN_PluginsClassifyGet(uint8 obj_class);
+GN_API GN::sLIST<int *> * GN_PluginsClassifyGet(uint8 obj_class);
 
 //移除插件列表里的所有插件(插件列表)返回本次移除插件数
 int GT_RemoveListPlugins(GN::sLIST<int *> &plugins);

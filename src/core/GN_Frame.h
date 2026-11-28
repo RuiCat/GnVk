@@ -622,7 +622,7 @@ class GN_API cFRAME_LAUNCHER_FONT : public cFRAME_LAUNCHER, public sDRAW_ARRANGE
     void GetTextRange(sRECT *_range_out, bool is_stark = true); //获取确定排好的所有字筐整个范围(范围输出, 是否绝对范围)
     void GetTextRange(sRECT2 *_range_out, bool is_stark = true); //获取确定排好的所有字筐整个范围(范围输出, 是否绝对范围)
     bool GetFontFrameRange(unsigned int id, sQUADS2 *out); //获取现时指定字筐的判断范围四边形(可视字筐ID, 四边型输出) 返回1表示成功 返回0表示失败或字筐已经播放完消失
-    inline cFRAME *const GetFontFrame() { return zFontFrame; } //获得艺术字体式样动画筐
+    inline cFRAME * GetFontFrame() { return zFontFrame; } //获得艺术字体式样动画筐
     inline sIMAGE *GetFontMap() { return zFontFrame->zPlay_obj; } //获得该对象正在使用的字体图()
 
     unsigned int GetEndtime(); //获得播放结束时间

@@ -127,13 +127,13 @@ GN_NET_API void GT_UnInitNetwork() {
     WSACleanup();
 #endif
 }
-GN_NET_API char *const GN_GetInterfaceInfoNetwork() {
+GN_NET_API char * GN_GetInterfaceInfoNetwork() {
 #if defined(_WIN32_) || defined(_WIN32_WCE)
     static const char netInfo[] = "Winsock 2";
 #else
     static const char netInfo[] = "Socket";
 #endif
-    return (char *const)netInfo;
+    return (char *)netInfo;
 }
 GN_NET_API int GNn::GetLocalMac(unsigned char mac[8][6]) {
     /*模板代码:GT_GET_LOCAL_MAC*/

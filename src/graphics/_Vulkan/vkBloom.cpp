@@ -68,7 +68,7 @@ void destroyBloomTargets() {
 
 bool createBloomImage(sBloomLevel &level, uint32_t width, uint32_t height) {
     level.extent = {width > 0 ? width : 1, height > 0 ? height : 1};
-    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.extent = {level.extent.width, level.extent.height, 1};
     ii.mipLevels = 1;
@@ -83,13 +83,13 @@ bool createBloomImage(sBloomLevel &level, uint32_t width, uint32_t height) {
 
     VkMemoryRequirements mr;
     vkGetImageMemoryRequirements(GN_Vk.device, level.image, &mr);
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if(vkAllocateMemory(GN_Vk.device, &mai, 0, &level.memory) != VK_SUCCESS) return false;
     vkBindImageMemory(GN_Vk.device, level.image, level.memory, 0);
 
-    VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     vi.image = level.image;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = BLOOM_FORMAT;
@@ -98,7 +98,7 @@ bool createBloomImage(sBloomLevel &level, uint32_t width, uint32_t height) {
     vi.subresourceRange.layerCount = 1;
     if(vkCreateImageView(GN_Vk.device, &vi, 0, &level.view) != VK_SUCCESS) return false;
 
-    VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fci.renderPass = s_downPass;
     fci.attachmentCount = 1;
     fci.pAttachments = &level.view;
@@ -125,7 +125,7 @@ VkRenderPass createBloomPass(VkAttachmentLoadOp loadOp, VkImageLayout initialLay
     sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     sp.colorAttachmentCount = 1;
     sp.pColorAttachments = &ar;
-    VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rpi.attachmentCount = 1;
     rpi.pAttachments = &ad;
     rpi.subpassCount = 1;
@@ -141,7 +141,7 @@ bool createBloomLayouts() {
     binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     binding.descriptorCount = 1;
     binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     dslci.bindingCount = 1;
     dslci.pBindings = &binding;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &s_setLayout) != VK_SUCCESS) return false;
@@ -150,7 +150,7 @@ bool createBloomLayouts() {
     range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     range.offset = 0;
     range.size = sizeof(sBloomPush);
-    VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     plci.setLayoutCount = 1;
     plci.pSetLayouts = &s_setLayout;
     plci.pushConstantRangeCount = 1;
@@ -159,7 +159,7 @@ bool createBloomLayouts() {
 }
 
 bool createBloomSampler() {
-    VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     sci.magFilter = VK_FILTER_LINEAR;
     sci.minFilter = VK_FILTER_LINEAR;
     sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
@@ -174,7 +174,7 @@ bool allocateBloomSets() {
     const uint32_t total = BLOOM_MIP_COUNT + (BLOOM_MIP_COUNT - 1);
     VkDescriptorSetLayout layouts[BLOOM_MIP_COUNT * 2] = {};
     for(uint32_t i = 0; i < total; ++i) layouts[i] = s_setLayout;
-    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = total;
     dai.pSetLayouts = layouts;
@@ -320,7 +320,7 @@ bool recreate3DBloomTargets() {
         bi.sampler = s_sampler;
         bi.imageView = s_levels[0].view;
         bi.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        VkWriteDescriptorSet w{}; w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         w.dstSet = GN_Vk.compositeDescriptorSet;
         w.dstBinding = 3;
         w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -342,7 +342,7 @@ void recordBloomPasses(VkCommandBuffer cb) {
     for(uint32_t i = 0; i < BLOOM_MIP_COUNT; ++i) {
         VkClearValue clear = {};
         clear.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-        VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpi.renderPass = s_downPass;
         rpi.framebuffer = s_levels[i].downFb;
         rpi.renderArea = {{0, 0}, s_levels[i].extent};
@@ -363,7 +363,7 @@ void recordBloomPasses(VkCommandBuffer cb) {
     }
 
     for(int j = (int)BLOOM_MIP_COUNT - 2; j >= 0; --j) {
-        VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpi.renderPass = s_upPass;
         rpi.framebuffer = s_levels[j].upFb;
         rpi.renderArea = {{0, 0}, s_levels[j].extent};

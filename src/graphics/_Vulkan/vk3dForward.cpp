@@ -53,7 +53,7 @@ VkDescriptorSet findOrCreateForwardSet(VkImageView albedo, VkSampler sampler) {
     if(s_forwardTextureSets.size() >= kTextureSetCacheCap) {
         return GN_Vk.descriptorSet3D; // 同 PBR：录制中不释放、不改写规范集
     }
-    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &GN_Vk.descriptorLayout3D;
@@ -100,7 +100,7 @@ VkDescriptorSet findOrCreatePBRSet(VkImageView albedo, VkSampler albedoSampler,
         }
         return GN_Vk.descriptorSetPBR;
     }
-    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &GN_Vk.descriptorLayoutPBR;
@@ -128,7 +128,7 @@ void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry) {
         // B2：12 -> 13（含 binding 12 的 cube shadow）。新增槽位自动被复制，
         // 不需要在每个纹理组合里单独写一遍。
         for(uint32_t binding = 0; binding < 13; ++binding) {
-            VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
+            VkCopyDescriptorSet copy{}; copy.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
             copy.srcSet = GN_Vk.descriptorSetPBR;
             copy.srcBinding = binding;
             copy.srcArrayElement = 0;
@@ -147,8 +147,7 @@ void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry) {
         normalInfo.sampler = entry.aNormalSampler ? entry.aNormalSampler : GN_Vk.defaultSampler;
         normalInfo.imageView = entry.aNormal ? entry.aNormal : GN_Vk.defaultImageView;
         normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                          {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        VkWriteDescriptorSet writes[2]{}; writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = entry.aSet;
         writes[0].dstBinding = 1;
         writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -167,7 +166,7 @@ void syncPBRTextureSet(const sPBR_TEXTURE_SET &entry) {
 void syncForwardTextureSet(const sFORWARD_TEXTURE_SET &entry) {
         // 同上：逐绑定复制，避免多绑定连续复制触发校验层 VUID。
         for(uint32_t binding = 0; binding < 5; ++binding) {
-            VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
+            VkCopyDescriptorSet copy{}; copy.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
             copy.srcSet = GN_Vk.descriptorSet3D;
             copy.srcBinding = binding;
             copy.dstSet = entry.aSet;
@@ -180,7 +179,7 @@ void syncForwardTextureSet(const sFORWARD_TEXTURE_SET &entry) {
         info.sampler = entry.aSampler ? entry.aSampler : GN_Vk.defaultSampler;
         info.imageView = entry.aAlbedo ? entry.aAlbedo : GN_Vk.defaultImageView;
         info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        VkWriteDescriptorSet write{}; write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write.dstSet = entry.aSet;
         write.dstBinding = 1;
         write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -337,7 +336,7 @@ void GN_VkBegin3DPass(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         cvs[0].color = {{0.05f, 0.05f, 0.1f, 1.0f}}; // MSAA color — 深蓝背景
         cvs[1].depthStencil = {1.0f, 0}; // MSAA depth
         cvs[2].color = {{0.0f, 0.0f, 0.0f, 1.0f}}; // Resolve — 会被覆盖
-        VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpi.renderPass = GN_Vk.renderPass3D;
         rpi.framebuffer = GN_Vk.framebuffers3D[GN_Vk.currentFrame];
         rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};

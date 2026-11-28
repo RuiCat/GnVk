@@ -25,7 +25,7 @@ class GN_API cFILE_BROWSER : public cUI_NEAR_OBJECT, public cSCROLL_CTRL // ★�
     friend void ::GT_FILE_BROWSER_FindCopy(P<GN_sTHREAD>, void *, void *);
     friend void ::GT_FILE_BROWSER_FindDel(P<GN_sTHREAD>, void *, void *);
 #ifndef _APPLE_
-    cSCROLL_CTRL::RePos;
+    using cSCROLL_CTRL::RePos;
 #endif
   protected:
     P<GNg::cFRAME_LAUNCHER_FONT> zFFrames; //图标发射器
@@ -182,7 +182,7 @@ class GN_API cFILE_BROWSER : public cUI_NEAR_OBJECT, public cSCROLL_CTRL // ★�
     inline short GetIconRangeY() { return zFFrames->zParame.j_compartment; } //获得图标排列的垂直间距
     //	inline unsigned int  GetFocusChangeColor(){ return zArrowAm.aLevel_color; }     //获得焦点动画当前变化的颜色 !已在基类有定义
     inline eFILE_SORT_TYPE GetSortMode() { return zSortType; } //获得当前图标排列方式类型
-    inline GNg::cTEXT_ART *const GetTextStyle() { return &zTextOut; } //获得文本输出式样
+    inline GNg::cTEXT_ART * GetTextStyle() { return &zTextOut; } //获得文本输出式样
     inline int8 GetLastClickType() { return zLastClickType; } //返回最近是否有触发双击点中东西 1:文件 -1:文件夹 0:没点中东西 2:该层文件夹的内容已经消失了 !当调用无返回值的UpdateRun时就会用这个来缓返回值
     inline bool IsBusy() { return zTkThread ? true : false; } //返回当前是否正在忙碌中
     inline bool IsFindIng() { return zIsFindIng; } //返回当前是否正在检索文件和目录以准备在视图中显示

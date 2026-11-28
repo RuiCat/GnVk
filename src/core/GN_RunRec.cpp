@@ -106,20 +106,20 @@ GT_cRUN_REC::~GT_cRUN_REC() {
     Release();
 }
 
-GT_cRUN_REC::GT_cRUN_REC() : zMaxInfoStrNum(65536),
-                             zpErrorInfo(0),
-                             zTextOutDatas(0),
-                             zTextOutNum(0),
-                             zTextOutID(0),
-                             zRuntimeStrNum(0),
-                             zFocus(0),
-                             zUpdownValue(0.0f),
-                             zUpdownValueTg(0.0f),
+GT_cRUN_REC::GT_cRUN_REC() :
                              zFPS_AddTime(0),
                              zFPS_AddCount(0),
-                             zFPS_Value(0),
-                             zInfoIsOpen(false),
+                             zFPS_Value(0), zTextOutID(0),
+                             zTextOutNum(0),
+                             zTextOutDatas(0),
+                             zFocus(0),
+                             zpErrorInfo(0),
+                             zMaxInfoStrNum(65536),
+                             zUpdownValue(0.0f),
+                             zUpdownValueTg(0.0f),
                              zInfoOpenChange(false),
+                             zInfoIsOpen(false),
+                             zRuntimeStrNum(0),
                              zGWPrintReady(false),
                              aFontColor(GT_AppDefaultColorFont),
                              aBackColor(GT_AppDefaultColorBack),
@@ -751,7 +751,7 @@ void GT_cRUN_REC::ValueCheck(int value, char *name, int ID_order) {
     GT_TMP_VALUE_CHECK("%s:%d")
 }
 void GT_cRUN_REC::ValueCheck(long value, char *name, int ID_order) {
-    GT_TMP_VALUE_CHECK("%s:%d")
+    GT_TMP_VALUE_CHECK("%s:%ld") // B9-3: long 用 %ld
 }
 void GT_cRUN_REC::ValueCheck(short value, char *name, int ID_order) {
     GT_TMP_VALUE_CHECK("%s:%d")
@@ -763,7 +763,7 @@ void GT_cRUN_REC::ValueCheck(unsigned int value, char *name, int ID_order) {
     GT_TMP_VALUE_CHECK("%s:%d")
 }
 void GT_cRUN_REC::ValueCheck(unsigned long value, char *name, int ID_order) {
-    GT_TMP_VALUE_CHECK("%s:0x%08X")
+    GT_TMP_VALUE_CHECK("%s:0x%08lX") // B9-3: unsigned long 用 %lX
 }
 void GT_cRUN_REC::ValueCheck(unsigned char value, char *name, int ID_order) {
     GT_TMP_VALUE_CHECK("%s:%d")
@@ -788,7 +788,7 @@ void GT_cRUN_REC::ValueCheck(bool value, char *name, int ID_order) {
     zPushShowValueInfo(ID_order, str);
 }
 void GT_cRUN_REC::ValueCheck(void *value, char *name, int ID_order) { //指针类型
-    GT_TMP_VALUE_CHECK("%s:0x%08X")
+    GT_TMP_VALUE_CHECK("%s:%p") // B9-3: 指针用 %p
 }
 void GT_cRUN_REC::ProgressDraw(float progress, uint8 style, bool re_draw, int cx, int cy, unsigned int icon_color, unsigned int text_color, unsigned int frame_color, unsigned int bar_color, unsigned short bmode) {
     if(!zGWPrintReady) return;
@@ -802,8 +802,8 @@ void GT_cRUN_REC::ProgressDraw(float progress, uint8 style, bool re_draw, int cx
 
         dw += zIconLoad.width + 6;
         dh += 2;
-        if(style < 2) aFont.SetText("LOADING", 7, dw, dh);
-        else aFont.SetText("EXECING", 7, dw, dh);
+        if(style < 2) aFont.SetText((char *)"LOADING", 7, dw, dh);
+        else aFont.SetText((char *)"EXECING", 7, dw, dh);
         aFont.Show(text_color, bmode);
 
         dh += (int)((float)aFont.GetFontHeight() * 1.08f);
@@ -836,12 +836,11 @@ void GT_cRUN_REC::VersionDraw(int x, int y, unsigned int icon_color, unsigned in
     if(!zGWPrintReady) return;
     char ver_str[32] = "V ";
     strcat(ver_str, GN_VERSION);
-    int logo_w = 10 + zIconLoad.width + (aFont.GetFontRangeX() * (strlen(ver_str) + 6));
 
     GNg::ImageDraw(&zIconLoad, x, y, 0, 0, icon_color);
     x += 10 + zIconLoad.width;
     y += 6;
-    aFont.SetText("ENGIN", 0, x, y);
+    aFont.SetText((char *)"ENGIN", 0, x, y);
     aFont.Show(text_color);
     x += 6 * aFont.GetFontRangeX();
     aFont.SetText(ver_str, 0, x, y);

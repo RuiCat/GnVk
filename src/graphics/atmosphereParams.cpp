@@ -136,7 +136,6 @@ bool computeTransmittance(const sATMOSPHERE_PARAMS& params, const float origin[3
     normalize3(dir, d);
     const float r = std::sqrt(origin[0] * origin[0] + origin[1] * origin[1] + origin[2] * origin[2]);
     if(!(r > 0.0f)) return false;
-    const float mu = (origin[0] * d[0] + origin[1] * d[1] + origin[2] * d[2]) / r;
 
     bool hitsGround = false;
     const float tTop = intersectAtmosphere(p, origin, d, &hitsGround);

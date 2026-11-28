@@ -261,19 +261,19 @@ uint8_t *GN_VkReadBack(int x, int y, int w, int h, int *size_out) {
     // One-time command: transition → copy region → transition back
     VkCommandBuffer cb;
     {
-        VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        VkCommandBufferAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         ai.commandPool = GN_Vk.commandPool;
         ai.commandBufferCount = 1;
         vkAllocateCommandBuffers(GN_Vk.device, &ai, &cb);
     }
     {
-        VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(cb, &bi);
     }
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = GN_Vk.swapFinalLayout; // 窗口=PRESENT_SRC；无窗口=TRANSFER_SRC
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -297,7 +297,7 @@ uint8_t *GN_VkReadBack(int x, int y, int w, int h, int *size_out) {
         vkCmdCopyImageToBuffer(cb, srcImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, stagingBuf, 1, &rgn);
     }
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         b.newLayout = GN_Vk.swapFinalLayout; // 回读后恢复同一个稳定布局
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -313,7 +313,7 @@ uint8_t *GN_VkReadBack(int x, int y, int w, int h, int *size_out) {
     }
     vkEndCommandBuffer(cb);
     {
-        VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         si.commandBufferCount = 1;
         si.pCommandBuffers = &cb;
         vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);

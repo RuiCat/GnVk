@@ -27,7 +27,7 @@ static VkRenderPass CreateRTRenderPass() {
     sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     sp.colorAttachmentCount = 1;
     sp.pColorAttachments = &ar;
-    VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rpi.attachmentCount = 1;
     rpi.pAttachments = &ad;
     rpi.subpassCount = 1;
@@ -46,7 +46,7 @@ void BeginRTRenderPass() {
         GN_Vk.inRenderPass = false;
     }
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         b.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -64,7 +64,7 @@ void BeginRTRenderPass() {
     if(!GN_Vk.rtRenderPass) GN_Vk.rtRenderPass = CreateRTRenderPass();
     if(GN_Vk.rtFramebuffer) vkDestroyFramebuffer(GN_Vk.device, GN_Vk.rtFramebuffer, 0);
     {
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fci.renderPass = GN_Vk.rtRenderPass;
         fci.attachmentCount = 1;
         fci.pAttachments = &GN_Vk.activeRT->vkImageView;
@@ -76,10 +76,10 @@ void BeginRTRenderPass() {
     }
     {
         VkClearValue cv = {{{0.0f, 0.0f, 0.0f, 0.0f}}};
-        VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpi.renderPass = GN_Vk.rtRenderPass;
         rpi.framebuffer = GN_Vk.rtFramebuffer;
-        rpi.renderArea = {{0, 0}, {GN_Vk.activeRT->width, GN_Vk.activeRT->height}};
+        rpi.renderArea = {{0, 0}, {(uint32_t)GN_Vk.activeRT->width, (uint32_t)GN_Vk.activeRT->height}};
         rpi.clearValueCount = 1;
         rpi.pClearValues = &cv;
         vkCmdBeginRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame], &rpi, VK_SUBPASS_CONTENTS_INLINE);
@@ -111,7 +111,7 @@ void EndRTRenderPass() {
     FlushVertexBatch();
     vkCmdEndRenderPass(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -128,7 +128,7 @@ void EndRTRenderPass() {
     }
     {
         VkClearValue cv = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
-        VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpi.renderPass = GN_Vk.renderPass;
         rpi.framebuffer = GN_Vk.framebuffers[GN_Vk.currentFrame];
         rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};

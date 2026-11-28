@@ -20,7 +20,7 @@ struct GN_API GT_sBUF_MAPPING //自动增长的缓冲映射
     unsigned int zUnitSize; //单个数据大小字节
     unsigned int zBufElmNum; //单个缓冲可存多少个数据
 
-    inline GT_sBUF_MAPPING(unsigned int unit_size = 1) : zUnitSize(unit_size), zBufLen(0) {}
+    inline GT_sBUF_MAPPING(unsigned int unit_size = 1) : zBufLen(0), zUnitSize(unit_size) {}
     inline ~GT_sBUF_MAPPING() { this->Release(); }
 
     //释放内部数据

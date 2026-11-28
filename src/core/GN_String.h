@@ -120,7 +120,7 @@ GN_API int GN_StrExtractFromMultiItem_s(char *dst, int cap, const char *str, int
 GN_API bool GN_StrHasName(const char *name, const char *str, char split_key = ' ');
 
 //检测指定字符串里有没包含文件路径名里禁用的字符(字符串) 如果含有就返回所有被禁用的字符组成的字符串如 "\\ / : * ? \" < > |"  如果不含有则返回0
-GN_API char *const GN_StrHasPathDisableSymbol(const char *str);
+GN_API char * GN_StrHasPathDisableSymbol(const char *str);
 
 //把字符串指针移到指定字符首次出现处之后(源字符串, 指定字符）返回移动后的指针 返回0表示失败没有搜到
 GN_API char *GN_StrToKey(const char *str, char key);

@@ -5,6 +5,7 @@
 
 | 日期 | 批次 | 变更 | 原因 | 消费者同步 |
 |---|---|---|---|---|
+| 2026-11-28 | B9-3（告警大扫除） | 强符号/弱符号均零变化（同工具链 nm -D diff=0）。构造初始化列表重排、Vulkan {sType}→{}+赋值、顶层限定符去除、字面量 cast 等均不改签名/符号 | 质量门：告警 19385→7 | 无需（make ci 955/0 + smoke 13/0 验证） |
 | 2026-11-28 | B9-1/B9-2（去 -fpermissive + C++17） | 强符号（T/D/B）零变化。弱符号：对远程基线 191 处差异为 GCC 13.3（容器）vs 16.2.1（基线宿主）工具链漂移（B7-2 已登记同类）；B9-1→B9-2 同工具链另有 7 个弱模板符号实例化漂移（GN_ListWheelListPushBack/cLAUNCHER_SEED/P<sAM_EVENT>::Delete 等，register 清除与 std 切换所致），无强符号/签名变更 | 质量门：非法转换显式化 + 标准升级，均不改公共签名 | 无需（仓内消费者经 make ci 955/0 验证） |
 | 2026-11-26 | B2 第一刀（vkRenderTarget 拆出） | 移除导出：`GNg::s_activeRT`、`GNg::s_rtInProgress`（改 GN_VK_INTERNAL 隐藏可见性） | 内部全局变量，历史上泄漏进动态符号表；仅后端内部使用，无仓内/公开消费者 | 无需（仓内引用全部在 _Vulkan 模块内，经 vkInternal.h extern） |
 | 2026-11-26 | B7-1（2D 帧状态收敛 + 引擎上下文门面） | 移除导出：`GNg::s_currentScissor`、`GNg::s_scissorEnabled`、`GNg::s_scissorDirty`（迁入 GN_VkContext.s2DRes）；新增导出：`GN_GetEngineContext`、`sEngineContext` 构造 | c4 状态收敛：scissor 状态进渲染上下文；门面为多实例铺路（D2 允许破坏式重命名） | 仓内引用已全部改 GN_Vk.scissor*；仓外消费者见 U1（未确认，风险已知） |

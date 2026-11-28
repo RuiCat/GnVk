@@ -160,7 +160,7 @@ GN_API uint8 *GNg::ImageLoadFileToData(const char *filename, int i, COLOR_FORMAT
         GT_TMP_LOOP_LOAD_ALL_IMG_FMT_END
     }
 }
-GN_API char *const GNg::ImageLoadLastTypeNameGet() {
+GN_API char * GNg::ImageLoadLastTypeNameGet() {
     return gImageLoadContext.aLoadLastTypeName;
 }
 bool GNg::sWINDOW::FullScreen = false;

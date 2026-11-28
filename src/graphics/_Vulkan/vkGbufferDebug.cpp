@@ -15,7 +15,7 @@ bool createDebugPipelineLayout() {
     pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     pcr.offset = 0;
     pcr.size = sizeof(int);
-    VkPipelineLayoutCreateInfo pl = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo pl{}; pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pl.setLayoutCount = 1;
     pl.pSetLayouts = &GN_Vk.deferredLightDescriptorLayout;
     pl.pushConstantRangeCount = 1;
@@ -101,7 +101,7 @@ void GN_VkDebugGBuffer(int channel) {
     VkCommandBuffer cb = GN_Vk.commandBuffers[GN_Vk.currentFrame];
     VkClearValue cv;
     cv.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass = GN_Vk.deferredLightRenderPass;
     rpi.framebuffer = GN_Vk.deferredLightFramebuffers[GN_Vk.currentFrame];
     rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};

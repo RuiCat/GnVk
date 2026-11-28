@@ -61,7 +61,7 @@ static void createGBufferAttachment(eGBUFFER_ATTACHMENT a) {
     VkImageView *view = gbufferView(a);
     if(!img || !mem || !view) return;
     const bool depth = (a == eGBUFFER_DEPTH);
-    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.extent = {GN_Vk.swapchainExtent.width, GN_Vk.swapchainExtent.height, 1};
     ii.mipLevels = 1;
@@ -79,12 +79,12 @@ static void createGBufferAttachment(eGBUFFER_ATTACHMENT a) {
     vkCreateImage(GN_Vk.device, &ii, 0, img);
     VkMemoryRequirements mr;
     vkGetImageMemoryRequirements(GN_Vk.device, *img, &mr);
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     vkAllocateMemory(GN_Vk.device, &mai, 0, mem);
     vkBindImageMemory(GN_Vk.device, *img, *mem, 0);
-    VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     vi.image = *img;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = ii.format;
@@ -126,7 +126,7 @@ static void destroyGBufferAttachments() {
 
 // G-Buffer 采样器（最近邻，尺寸无关，resize 不重建）。
 static void createGBufferSampler() {
-    VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     sci.magFilter = VK_FILTER_NEAREST;
     sci.minFilter = VK_FILTER_NEAREST;
     sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -181,7 +181,7 @@ static void createGBufferRenderPass() {
     deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
                             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rpi.attachmentCount = eGBUFFER_ATTACHMENT_COUNT;
     rpi.pAttachments = ads;
     rpi.subpassCount = 1;
@@ -201,7 +201,7 @@ static void createGBufferFramebuffer() {
     for(uint32_t i = 0; i < eGBUFFER_ATTACHMENT_COUNT; ++i) {
         atts[i] = gbufferAttachmentView((eGBUFFER_ATTACHMENT)i);
     }
-    VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fci.renderPass = GN_Vk.gBufferRenderPass;
     fci.attachmentCount = eGBUFFER_ATTACHMENT_COUNT;
     fci.pAttachments = atts;
@@ -237,7 +237,7 @@ static void createGBufferDescriptors() {
     dslb[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     dslb[2].descriptorCount = 1;
     dslb[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutCreateInfo dci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo dci{}; dci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     dci.bindingCount = 3;
     dci.pBindings = dslb;
     vkCreateDescriptorSetLayout(GN_Vk.device, &dci, 0, &GN_Vk.gBufferDescriptorLayout);
@@ -246,14 +246,14 @@ static void createGBufferDescriptors() {
         pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pcr.offset = 0;
         pcr.size = sizeof(VkModelPushConstPBR);
-        VkPipelineLayoutCreateInfo pl = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        VkPipelineLayoutCreateInfo pl{}; pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pl.setLayoutCount = 1;
         pl.pSetLayouts = &GN_Vk.gBufferDescriptorLayout;
         pl.pushConstantRangeCount = 1;
         pl.pPushConstantRanges = &pcr;
         vkCreatePipelineLayout(GN_Vk.device, &pl, 0, &GN_Vk.gBufferPipelineLayout);
     }
-    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &GN_Vk.gBufferDescriptorLayout;
@@ -261,9 +261,7 @@ static void createGBufferDescriptors() {
     VkDescriptorBufferInfo dbi = {GN_Vk.uniformBuffer3D, 0, sizeof(VkSceneUBO)};
     VkDescriptorImageInfo dii = {GN_Vk.defaultSampler, GN_Vk.defaultImageView,
                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet w[3] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                 {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                 {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet w[3]{}; w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     w[0].dstSet = GN_Vk.gBufferDescriptorSet;
     w[0].dstBinding = 0;
     w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;

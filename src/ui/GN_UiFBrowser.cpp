@@ -63,7 +63,7 @@ GN_UiBrowserContext GN_UiBrowserState; // 默认 ui 文件浏览上下文（仿 
 void GT_FbIconOptInitToData() {
     GNf_DirStatePush(false);
     //读取文件加载图标和筐和信息的内容用于生成预览图用 ------------------------------------------------------------------------------------
-    bool _is_bmp_, _add_0000_;
+    bool _add_0000_;
     char *file_name__, *file_name;
     int ifname_len;
 
@@ -493,13 +493,13 @@ void GNu::cFILE_BROWSER::UsShowPreview(bool yes) {}
 
 
 float GNu::cFILE_BROWSER::aCurProcFileProgress = 1.0f;
-char *GNu::cFILE_BROWSER::aCurProcFileName = "\0";
+char *GNu::cFILE_BROWSER::aCurProcFileName = (char *)"\0";
 unsigned short GNu::cFILE_BROWSER::zCreateTotalNum = 0;
 GNf::sFILE *(*GNu::cFILE_BROWSER::aOnFileCopyBeginCallBack)(const char *, const char *, void *, void *) = 0;
 void (*GNu::cFILE_BROWSER::aOnFileCopyEndCallBack)(const char *, const char *, void *, void *) = 0;
 
-GNu::cFILE_BROWSER::cFILE_BROWSER() : zRelate(0), zActIconTmpData(0), zClickLastFile(0), zShowReady(0), zReArrange(0), zReLoadIcon(1), zIsFindIng(0), zReGenIcon(0), zReArrangeParame(0), zSortType(eFILE_SORT_NAME),
-                                      aDisableControl(0), aIgnoreSED(0), aShowOffsetX(0), aShowOffsetY(0), aSearchTotalSizeB(0), aSearchTotalSizeGB(0), aSearchTotalFileN(0), aSearchTotalDirN(0) {
+GNu::cFILE_BROWSER::cFILE_BROWSER() : zShowReady(0), zReArrange(0), zReArrangeParame(0), zReLoadIcon(1), zReGenIcon(0), zIsFindIng(0), zClickLastFile(0), zSortType(eFILE_SORT_NAME), zRelate(0), zActIconTmpData(0),
+                                      aShowOffsetX(0), aShowOffsetY(0), aIgnoreSED(0), aDisableControl(0), aSearchTotalFileN(0), aSearchTotalDirN(0), aSearchTotalSizeGB(0), aSearchTotalSizeB(0) {
     aType = GNu::eUI_FILE_BROWSER;
     c = 0xffffffff /*该类忽略该值*/;
     ++zCreateTotalNum;
@@ -535,7 +535,7 @@ void GNu::cFILE_BROWSER::InitNoUiMode() {
     zShowReady = true;
 }
 bool GNu::cFILE_BROWSER::InitStyleToData(const GNg::cTEXT_ART *text_style, const char *open_dir,
-                                         short x, short y, short w, short h, short tw, short th, eNEAR_TYPE near_pos,
+                                         short px, short py, short pw, short ph, short tw, short th, eNEAR_TYPE near_pos, // B9-3: 参数避免阴影成员 x/y/w/h
                                          unsigned int text_color, unsigned int focus_color, unsigned short text_blend, unsigned short focus_blend) {
     zTextOut.Release(); //释放之前的内部资源
     if(text_style) {
@@ -553,7 +553,7 @@ bool GNu::cFILE_BROWSER::InitStyleToData(const GNg::cTEXT_ART *text_style, const
     aTextBlend = text_blend;
     aFocusBlend = focus_blend;
     zShowReady = true;
-    zInitInternalObj(x, y, w, h, tw);
+    zInitInternalObj(px, py, pw, ph, tw);
     zTextW = tw ? tw : zFFrames->zParame.width;
     zTextH = th ? th : zFFrames->zParame.height;
     zNearPos = near_pos != eNEAR_NULL ? near_pos : eNEAR_BOTTOM;
@@ -1050,7 +1050,6 @@ inline void GT_FileBrowserCopyDirAndFile(GNf::sFILE_INFO *file_info) {
 }
 void GT_FILE_BROWSER_FindCopy(P<GN_sTHREAD> this_thread, void *arg, void *arg2) {
     GNu::cFILE_BROWSER *fb = (GNu::cFILE_BROWSER *)arg;
-    char *dir = (char *)fb->zTkArgSDir;
     fb->zTkArgSSubDir = 1; //临时用该值来标记是否无错
     GNg::GN_UiBrowserState.aLastFileBrowser = fb;
     GNf_DirStatePush(true);
@@ -1269,7 +1268,7 @@ void GT_FILE_BROWSER_FindDir(P<GN_sTHREAD> this_thread, void *arg, void *arg2) {
     fb->zInfoP.Delete();
     fb->zFileList.clear();
     fb->zDirList.clear();
-    int err = GNf::FindFileDirInfoData(open_dir, true, &(fb->zFileList), &(fb->zDirList));
+    int err = GNf::FindFileDirInfoData(open_dir, true, &(fb->zFileList), &(fb->zDirList)); (void)err;
 #ifdef GN_USING_OPENGLes_ANDROID_JAVA
     if(!err) {
         bool no_retdir = true; //检测是否没有返回目录 ".."
@@ -1597,7 +1596,8 @@ int8 GNu::cFILE_BROWSER::UpdateRun(unsigned int updatatime, GNg::sIMAGE **img_ou
                 tx = oW + _icon_rng->x + (_icon_rng->w >> 1) - (int)tfw2;
                 ty = oH + _icon_rng->y - (int)zTextH - fw2; //距图标半个字高度
                 break;
-        }
+                    default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
         tx += 4, ty += 4; //文本筐与选中焦点边距4象素
         tw = tw_8;
         th = th_8;
@@ -1747,13 +1747,12 @@ void GNu::cFILE_BROWSER::UpdateRun(unsigned int updatetime, sUI_LEVEL *parent) {
     if(RecvInputUiObject != this) GNg::ViewCur->mouseMX += 10000;
     zLastClickType = UpdateRun(updatetime, 0, 0, parent->c);
     if(RecvInputUiObject != this) GNg::ViewCur->mouseMX -= 10000;
-    if(zLastClickType) UiActionCall(this, zLastClickType == 2 ? eUI_ACT_VANISH : zLastClickType);
+    if(zLastClickType) UiActionCall(this, zLastClickType == 2 ? (int)eUI_ACT_VANISH : zLastClickType); // B9-3: 枚举/非枚举条件表达式
 }
 void GNu::cFILE_BROWSER::zScrollProc(unsigned int updatatime) {
     GNg::cFRAME_LAUNCHER_FONT *_fframe = zFFrames;
     GNg::sARRANGE_FMT *pfmt = &(_fframe->zParame);
     GT_TMP_FFRAME_RANGE_GET;
-    unsigned int focus_color = zArrowAm.aLevel_color;
     GT_TMP_UI_SCROLL_VIEW(zOffsetAdd, 1, zFileNum, );
 }
 void GNu::cFILE_BROWSER::GetShowIconPosInfo(unsigned int icon_sid, GNg::sDRAW_RANGE *info_out) {

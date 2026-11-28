@@ -53,7 +53,7 @@ struct GN_API sDRAW_ARRANGE //绘制排列器
     //	void SetArrangeFormat(GNg::sARRANGE_FMT *_fmt){ zParame = *_fmt; }
 
     //获得排列格式()返回格式
-    inline sARRANGE_FMT *const GetArrangeFormat() { return &zParame; }
+    inline sARRANGE_FMT * GetArrangeFormat() { return &zParame; }
 
     inline short GetFontRangeX() { return zParame.i_compartment; } //获得文本字体每只字输出向X方向的跨距()
     inline short GetFontRangeY() { return zParame.j_compartment; } //获得文本字体每只字输出向Y方向的跨距()
@@ -168,7 +168,7 @@ struct GT_sTEXT_LABLE_STR //标签文本
     unsigned int (*onCpProc)(const char *str, unsigned short start_vid, unsigned short end_vid); //指向当点击到标签时的处理
 
     GT_sTEXT_LABLE_STR() : onCpProc(0) {}
-    GT_sTEXT_LABLE_STR(const char *str, bool _absolute, GNg::sCOLOR c, unsigned int (*on_cp_proc)(const char *str, unsigned short start_vid, unsigned short end_vid)) : lableStr(str, 0), absolute(_absolute), color(c), onCpProc(on_cp_proc) {}
+    GT_sTEXT_LABLE_STR(const char *str, bool _absolute, GNg::sCOLOR c, unsigned int (*on_cp_proc)(const char *str, unsigned short start_vid, unsigned short end_vid)) : lableStr(str, 0), color(c), absolute(_absolute), onCpProc(on_cp_proc) {}
 };
 struct GT_sTEXT_LABLE_RANGE : public GT_sSEGMENT_S //标签文本段
 {

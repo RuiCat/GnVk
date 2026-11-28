@@ -256,9 +256,9 @@ GNg::cVIEW2D::~cVIEW2D() {
     zTotalList.remove(this);
 }
 GNg::cVIEW2D::cVIEW2D() : touchX(0), touchY(0), touchSX(0), touchSY(0),
-                          zHasOrthoOfsIng(false), zHasOrthoOfsTg(false),
                           orthoOffsetX(0), orthoOffsetY(0),
-                          softKeyboardW(0), softKeyboardH(0) {
+                          softKeyboardW(0), softKeyboardH(0),
+                          zHasOrthoOfsTg(false), zHasOrthoOfsIng(false) {
     const short scr_w = 800, scr_h = 600;
     zBackScreenW = scr_w;
     zBackScreenH = scr_h;
@@ -515,7 +515,7 @@ GN_API void GNg::Draw2DLine(sIMAGE *img, int x, int y, int x2, int y2, int line_
     Draw2DLine(img, &p1, &p2, line_w, cv, color, texID, blendmode);
 }
 GN_API void GNg::Draw2DLine(sIMAGE *img, const sVEC2 *p1, const sVEC2 *p2, int line_w, float cv, unsigned int color, unsigned short texID, unsigned short blendmode) {
-    float left_top_u = 0.0f, left_top_v = 0.0f, right_bottom_u = 1.0f, right_bottom_v = 1.0f;
+    float right_bottom_u = 1.0f, right_bottom_v = 1.0f;
     sVEC2 vw = *p2 - *p1, vh, vt[4];
     float len = Vec2Length(&vw);
     if(img) {

@@ -7,7 +7,7 @@ P<GNg::sIMAGE> GNu::cPALETTE::zColorBarImg;
 GN::sLIST<GNg::sCOLOR> GNu::cPALETTE::aColorPasteTable;
 unsigned short GNu::cPALETTE::zCreateTotalNum = 0;
 
-GNu::cPALETTE::cPALETTE() : aColorTablePosType(0), aDisableControl(false), zOffsetSheep(1.0f) {
+GNu::cPALETTE::cPALETTE() : zOffsetSheep(1.0f), aDisableControl(false), aColorTablePosType(0) {
     ++zCreateTotalNum;
     if(zCreateTotalNum == 1) {
         const int img_w = 128, img_h = 4;
@@ -54,7 +54,6 @@ void GNu::cPALETTE::zUpdateColorFromOffsetState() {
 }
 void GNu::cPALETTE::zComputeColorImgData(GNg::sCOLOR base) {
     float ratio;
-    uint8 locbuf[65536]; //64K
     GN::sTBUF_INT tbuf;
     int imgw = zColorImg->width, imgh = zColorImg->height;
     uint8 *img_data = (uint8 *)tbuf.GetSpace(imgw * imgh * 3);
@@ -259,7 +258,7 @@ bool GNu::cPALETTE::UpdateRun(unsigned int updatetime, unsigned int dc) {
             if(cid > (short)ti2) cid = (short)ti2;
             if(mouse_cp && mouse_y >= tby && mouse_y <= y + dlgh) {
                 if(tn_ && mouse_x >= tbx && mouse_x <= tbx + tbw1) {
-                    if(cid < tn_) {
+                    if((unsigned int)cid < tn_) {
                         SetColor(_pccc[cid]);
                         ret = true;
                     }
@@ -308,7 +307,7 @@ bool GNu::cPALETTE::UpdateRun(unsigned int updatetime, unsigned int dc) {
             if(cid > (short)ti2) cid = (short)ti2;
             if(mouse_cp && mouse_x >= tbx && mouse_x <= x + w) {
                 if(tn_ && mouse_y >= tby && mouse_y <= tby + tbh1) {
-                    if(cid < tn_) {
+                    if((unsigned int)cid < tn_) {
                         SetColor(_pccc[cid]);
                         ret = true;
                     }

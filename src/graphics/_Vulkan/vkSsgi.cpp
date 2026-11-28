@@ -23,7 +23,7 @@ void halfExtent(uint32_t *width, uint32_t *height) {
 bool createSsgiImage(VkImage *image, VkDeviceMemory *memory, VkImageView *view) {
     uint32_t width = 0, height = 0;
     halfExtent(&width, &height);
-    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.extent = {width, height, 1};
     ii.mipLevels = 1;
@@ -37,12 +37,12 @@ bool createSsgiImage(VkImage *image, VkDeviceMemory *memory, VkImageView *view) 
     if(vkCreateImage(GN_Vk.device, &ii, 0, image) != VK_SUCCESS) return false;
     VkMemoryRequirements mr;
     vkGetImageMemoryRequirements(GN_Vk.device, *image, &mr);
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if(vkAllocateMemory(GN_Vk.device, &mai, 0, memory) != VK_SUCCESS) return false;
     vkBindImageMemory(GN_Vk.device, *image, *memory, 0);
-    VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     vi.image = *image;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = SSGI_FORMAT;
@@ -78,7 +78,7 @@ bool createSsgiRenderPass(VkRenderPass *renderPass) {
     deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rpi.attachmentCount = 1;
     rpi.pAttachments = &ad;
     rpi.subpassCount = 1;
@@ -91,7 +91,7 @@ bool createSsgiRenderPass(VkRenderPass *renderPass) {
 bool createSsgiFramebuffer(VkRenderPass renderPass, VkImageView view, VkFramebuffer *fb) {
     uint32_t width = 0, height = 0;
     halfExtent(&width, &height);
-    VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fci.renderPass = renderPass;
     fci.attachmentCount = 1;
     fci.pAttachments = &view;
@@ -212,7 +212,7 @@ void writeSsgiDescriptors() {
     vkUpdateDescriptorSets(GN_Vk.device, 9, w, 0, 0);
     // 延迟 layout binding 13 = 去噪后的 SSGI（半分辨率，线性上采样）。
     if(GN_Vk.deferredLightDescriptorSet) {
-        VkWriteDescriptorSet wd = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        VkWriteDescriptorSet wd{}; wd.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         wd.dstSet = GN_Vk.deferredLightDescriptorSet;
         wd.dstBinding = 13;
         wd.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -242,7 +242,7 @@ bool createSsgiLayouts() {
     ssgiBindings[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     ssgiBindings[5].descriptorCount = 1;
     ssgiBindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutCreateInfo slci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo slci{}; slci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     slci.bindingCount = 6;
     slci.pBindings = ssgiBindings;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &slci, 0, &GN_Vk.ssgiDescriptorLayout) !=
@@ -260,7 +260,7 @@ bool createSsgiLayouts() {
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &slci, 0, &GN_Vk.ssgiDenoiseDescriptorLayout) !=
        VK_SUCCESS)
         return false;
-    VkPipelineLayoutCreateInfo pl = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo pl{}; pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pl.setLayoutCount = 1;
     pl.pSetLayouts = &GN_Vk.ssgiDescriptorLayout;
     if(vkCreatePipelineLayout(GN_Vk.device, &pl, 0, &GN_Vk.ssgiPipelineLayout) != VK_SUCCESS)
@@ -268,7 +268,7 @@ bool createSsgiLayouts() {
     pl.pSetLayouts = &GN_Vk.ssgiDenoiseDescriptorLayout;
     if(vkCreatePipelineLayout(GN_Vk.device, &pl, 0, &GN_Vk.ssgiDenoisePipelineLayout) != VK_SUCCESS)
         return false;
-    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &GN_Vk.ssgiDescriptorLayout;
@@ -280,7 +280,7 @@ bool createSsgiLayouts() {
 }
 
 bool createSsgiSamplerWithFilter(VkFilter filter, VkSampler *out) {
-    VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     sci.magFilter = filter;
     sci.minFilter = filter;
     sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
@@ -457,7 +457,7 @@ void recordSsgiPasses(VkCommandBuffer cb) {
     const VkClearValue clearValue = {{{0.0f, 0.0f, 0.0f, 0.0f}}};
     uint32_t width = 0, height = 0;
     halfExtent(&width, &height);
-    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass = GN_Vk.ssgiRenderPass;
     rpi.framebuffer = GN_Vk.ssgiFramebuffer;
     rpi.renderArea = {{0, 0}, {width, height}};

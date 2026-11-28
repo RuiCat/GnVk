@@ -27,7 +27,7 @@ static void disableGiByDefault() {
 static void writeGiUbo(VkDescriptorSet set, uint32_t binding) {
     if(set == VK_NULL_HANDLE || GN_Vk.giUBOBuffer == VK_NULL_HANDLE) return;
     VkDescriptorBufferInfo dbi = {GN_Vk.giUBOBuffer, 0, sizeof(GN3d::sGI_UBO)};
-    VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    VkWriteDescriptorSet w{}; w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     w.dstSet = set;
     w.dstBinding = binding;
     w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -43,8 +43,7 @@ static void writeGiEnvironment(VkDescriptorSet set, uint32_t cubeBinding, uint32
                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorImageInfo lut = {GN_Vk.brdfLutSampler, GN_Vk.brdfLutView,
                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet w[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                 {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet w[2]{}; w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     w[0].dstSet = set;
     w[0].dstBinding = cubeBinding;
     w[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;

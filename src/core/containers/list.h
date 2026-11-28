@@ -892,8 +892,8 @@ class sLIST_WHEEL //★列表轮 首尾相连的数据结构  !用固定的容�
 #define GN_LIST_WHEEL_SEARCH_BEGIN(T, T2) \
     {                                     \
         T *as[2][2], *p;                  \
-        T2 i = 0, n = GetArrays(as);      \
-        for(; i < n; ++i)                 \
+        T2 i = 0, n_arr = GetArrays(as);  \
+        for(; i < n_arr; ++i)             \
             for(p = as[i][0]; p < as[i][1]; ++p) {
 
     //快速历遍查找列表轮里的所有实存数据结束

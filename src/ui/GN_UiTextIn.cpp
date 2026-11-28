@@ -31,7 +31,7 @@ GNu::cTEXT_INPUT *GNu::cTEXT_INPUT::zCurIn = 0;
 uint8 GNu::cTEXT_INPUT::zBackAlpha = 0;
 unsigned short GNu::cTEXT_INPUT::aMaxCancelNum = 128;
 
-GNu::cTEXT_INPUT::cTEXT_INPUT() : zBuf(0), zShowView(&GNg::View), aDisableControl(false), aLock(false)
+GNu::cTEXT_INPUT::cTEXT_INPUT() : zBuf(0), zShowView(&GNg::View), aLock(false), aDisableControl(false)
 #ifndef GN_USING_ADDITIONAL_LIB //GN_ADD_CONTEN_PRIVATE
                                   ,
                                   aTabKeyHandle(true)
@@ -174,7 +174,8 @@ void GNu::cTEXT_INPUT::zSetBid(unsigned short buf_id, bool save_last_xy) {
             zIn_ = 50;
             break;
             //case eTX_IN_HEX: zIn_ = 50; break;
-    }
+            default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
     //检索文本输入点对应的显示焦点在那个可视字符里
     if(zTextOut.GetVisualStrCount() == zEid + 1) zVid = zBid;
     else {
@@ -210,7 +211,8 @@ void GNu::cTEXT_INPUT::SetPointer(unsigned short buf_id) {
 	case eTX_IN_HEX:
 		break;
 #endif
-    }
+            default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
     zSetBid(zBid);
     zBid2 = zBid;
 }

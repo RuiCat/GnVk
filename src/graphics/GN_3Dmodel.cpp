@@ -601,18 +601,18 @@ cMODEL *CreateCubeModel(float size, float r, float g, float b) {
                        float x2, float y2, float z2, float x3, float y3, float z3) {
         int base = fi * 44; // 4 vertices * 11 floats
         auto sv = [&](int vi, float px, float py, float pz, float u, float uv) {
-            int b = base + vi * 11;
-            v[b + 0] = px;
-            v[b + 1] = py;
-            v[b + 2] = pz;
-            v[b + 3] = nx;
-            v[b + 4] = ny;
-            v[b + 5] = nz;
-            v[b + 6] = 1;
-            v[b + 7] = 0;
-            v[b + 8] = 0;
-            v[b + 9] = u;
-            v[b + 10] = uv;
+            int b_ofs = base + vi * 11; // B9-3: 避免阴影参数 b
+            v[b_ofs + 0] = px;
+            v[b_ofs + 1] = py;
+            v[b_ofs + 2] = pz;
+            v[b_ofs + 3] = nx;
+            v[b_ofs + 4] = ny;
+            v[b_ofs + 5] = nz;
+            v[b_ofs + 6] = 1;
+            v[b_ofs + 7] = 0;
+            v[b_ofs + 8] = 0;
+            v[b_ofs + 9] = u;
+            v[b_ofs + 10] = uv;
         };
         sv(0, x0, y0, z0, 0, 0);
         sv(1, x1, y1, z1, 1, 0);
@@ -688,13 +688,13 @@ cMODEL *CreateSphereModel(float radius, int segments, float r, float g, float b)
     int ii = 0;
     for(int i = 0; i < stacks; i++) {
         for(int j = 0; j < slices; j++) {
-            int a = i * (slices + 1) + j, b = a + slices + 1;
+            int a = i * (slices + 1) + j, b2 = a + slices + 1; // B9-3: b2 避免阴影参数 b
             idx[ii++] = a;
-            idx[ii++] = b;
+            idx[ii++] = b2;
             idx[ii++] = a + 1; // CCW
             idx[ii++] = a + 1;
-            idx[ii++] = b;
-            idx[ii++] = b + 1;
+            idx[ii++] = b2;
+            idx[ii++] = b2 + 1;
         }
     }
 

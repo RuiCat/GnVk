@@ -87,10 +87,10 @@ GN_SYS_API char *strupr(char *pstr) {
 char GT_CurAppDir[256] = {0}, GT_CurAppDirW[256] = {0}; //保存当前运行程序文件所在目录如"C:/app/" 注意这里的目录后均包含目录分隔符号'/'
 unsigned char GT_CurAppDirLen = 0, GT_CurAppDirLenW = 0; //当前运行程序文件所在目录的字符串长度
 
-GN_SYS_API char *const GN_DocDir(const char *path_file) {
+GN_SYS_API char * GN_DocDir(const char *path_file) {
     strncpy(GT_CurAppDirW + GT_CurAppDirLenW, path_file, sizeof(GT_CurAppDirW) - GT_CurAppDirLenW - 1);
     GT_CurAppDirW[sizeof(GT_CurAppDirW) - 1] = 0;
-    return (char *const)GT_CurAppDirW;
+    return (char *)GT_CurAppDirW;
 }
 //返回GB2312编码字符串对应的UTF8字符串所占字节数(GB2312编码字符串)
 int GN_StrLenGB2312ToUTF8(const char *gb) {

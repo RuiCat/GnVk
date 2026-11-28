@@ -76,7 +76,7 @@ bool init3DDebugLines() {
         binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         binding.descriptorCount = 1;
         binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        VkDescriptorSetLayoutCreateInfo layoutInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        VkDescriptorSetLayoutCreateInfo layoutInfo{}; layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         layoutInfo.bindingCount = 1;
         layoutInfo.pBindings = &binding;
         if(vkCreateDescriptorSetLayout(GN_Vk.device, &layoutInfo, 0, &s_debugDescriptorLayout) != VK_SUCCESS) {
@@ -85,7 +85,7 @@ bool init3DDebugLines() {
         }
     }
     {
-        VkPipelineLayoutCreateInfo layoutInfo = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        VkPipelineLayoutCreateInfo layoutInfo{}; layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutInfo.setLayoutCount = 1;
         layoutInfo.pSetLayouts = &s_debugDescriptorLayout;
         if(vkCreatePipelineLayout(GN_Vk.device, &layoutInfo, 0, &s_debugPipelineLayout) != VK_SUCCESS) {
@@ -94,7 +94,7 @@ bool init3DDebugLines() {
         }
     }
     {
-        VkDescriptorSetAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo allocInfo{}; allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         allocInfo.descriptorPool = GN_Vk.descriptorPool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &s_debugDescriptorLayout;
@@ -103,7 +103,7 @@ bool init3DDebugLines() {
             return false;
         }
         VkDescriptorBufferInfo sceneInfo = {GN_Vk.uniformBuffer3D, 0, sizeof(VkSceneUBO)};
-        VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        VkWriteDescriptorSet write{}; write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write.dstSet = s_debugDescriptorSet;
         write.dstBinding = 0;
         write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;

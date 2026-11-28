@@ -96,7 +96,7 @@ struct GN_API sTBUF_MT : public sTBUF<unsigned int> //★局部临时高速处�
     sTBUF_MT(uint8 *loc_buf, unsigned int buf_size) : sTBUF<unsigned int>(loc_buf, buf_size), is_busy(0) {} //创建(指定一个局部缓冲 0为不指定那么之后所获取的空间总是在内存堆上的, 缓冲大小字节) 局部缓冲例如 uint8 loc_buf[100000]; !局部缓冲的大小您应该适当设为稍大于当前需要处理数据的评估最大临时空间, 如果实际使用大于这个设定大小 系统会自动new出适当的其它空间, 但使用到new出来的空间会比较慢
     ~sTBUF_MT() { this->Clear(); }
 
-    volatile long IsBusy(); //检测是否正在忙
+    long IsBusy(); //检测是否正在忙
     void Clear(); //清除一下额外增长多分配出来的内存空间
     void *GetSpace(unsigned int _size_); //获取指定大小的数据空间(大小字节) 返回数据空间指针
 };

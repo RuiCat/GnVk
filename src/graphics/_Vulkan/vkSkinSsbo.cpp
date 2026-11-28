@@ -95,8 +95,7 @@ bool createSkinSsboLayouts() {
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo layoutInfo{}; layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = 2;
     layoutInfo.pBindings = bindings;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &layoutInfo, nullptr, &s_ssboSetLayout) !=
@@ -109,7 +108,7 @@ bool createSkinSsboLayouts() {
     pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushRange.offset = 0;
     pushRange.size = sizeof(sSKIN_SSBO_PUSH);
-    VkPipelineLayoutCreateInfo pipelineInfo = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo pipelineInfo{}; pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineInfo.setLayoutCount = 1;
     pipelineInfo.pSetLayouts = &s_ssboSetLayout;
     pipelineInfo.pushConstantRangeCount = 1;
@@ -139,7 +138,7 @@ bool createSkinSsboPaletteSlot(uint32_t slot, VkDescriptorSetLayout setLayout,
     }
     memset(s_paletteMapped[slot], 0, (size_t)SKIN_SSBO_BYTES);
 
-    VkDescriptorSetAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo allocInfo{}; allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = GN_Vk.descriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &setLayout;
@@ -156,8 +155,7 @@ bool createSkinSsboPaletteSlot(uint32_t slot, VkDescriptorSetLayout setLayout,
     paletteInfo.buffer = s_paletteBuffers[slot];
     paletteInfo.offset = 0;
     paletteInfo.range = VK_WHOLE_SIZE;
-    VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet writes[2]{}; writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = s_paletteSets[slot];
     writes[0].dstBinding = 0;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;

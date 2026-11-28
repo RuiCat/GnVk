@@ -52,7 +52,7 @@ bool createOffscreenSwapchain(uint32_t w, uint32_t h, uint32_t count) {
         GN_Vk.swapchainMemories[i] = VK_NULL_HANDLE;
     }
     for(uint32_t i = 0; i < count; ++i) {
-        VkImageCreateInfo ci = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo ci{}; ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         ci.imageType = VK_IMAGE_TYPE_2D;
         ci.format = fmt;
         ci.extent = {w, h, 1};
@@ -71,7 +71,7 @@ bool createOffscreenSwapchain(uint32_t w, uint32_t h, uint32_t count) {
         }
         VkMemoryRequirements mr;
         vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.swapchainImages[i], &mr);
-        VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         ai.allocationSize = mr.size;
         ai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         res = vkAllocateMemory(GN_Vk.device, &ai, 0, &GN_Vk.swapchainMemories[i]);

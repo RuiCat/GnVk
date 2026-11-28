@@ -11,12 +11,12 @@ namespace GNg {
 
 VkCommandBuffer beginOnceCommand() {
     VkCommandBuffer cb = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    VkCommandBufferAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandPool = GN_Vk.commandPool;
     ai.commandBufferCount = 1;
     vkAllocateCommandBuffers(GN_Vk.device, &ai, &cb);
-    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cb, &bi);
     return cb;
@@ -25,11 +25,11 @@ VkCommandBuffer beginOnceCommand() {
 bool submitOnceCommand(VkCommandBuffer cb) {
     const VkResult endResult = vkEndCommandBuffer(cb);
     VkFence fence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFenceCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     const VkResult fenceResult = vkCreateFence(GN_Vk.device, &fci, 0, &fence);
     VkResult submitResult = VK_ERROR_UNKNOWN;
     if(fenceResult == VK_SUCCESS) {
-        VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         si.commandBufferCount = 1;
         si.pCommandBuffers = &cb;
         submitResult = vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, fence);

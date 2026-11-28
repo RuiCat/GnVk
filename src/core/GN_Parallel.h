@@ -331,7 +331,7 @@ class GN_API GN_cPARALLEL //★并行处理  提供高性能并行处理计算 �
         if(zDataSeg) {
             unsigned int i = 0, n = zTn_;
             for(; i < n; ++i)
-                while((volatile bool)zTaskListIsRuning(i));
+                while((bool)zTaskListIsRuning(i));
         }
     }
 
@@ -341,7 +341,7 @@ class GN_API GN_cPARALLEL //★并行处理  提供高性能并行处理计算 �
             zTaskHelp();
             unsigned int i = 0, n = zTn_;
             for(; i < n; ++i)
-                while((volatile bool)zTaskListIsRuning(i));
+                while((bool)zTaskListIsRuning(i));
         }
     }
 
@@ -351,7 +351,7 @@ class GN_API GN_cPARALLEL //★并行处理  提供高性能并行处理计算 �
             zTaskExit();
             unsigned int i = 0, n = zTn_;
             for(; i < n; ++i)
-                while((volatile bool)zTaskListIsRuning(i));
+                while((bool)zTaskListIsRuning(i));
         }
     }
 
@@ -403,7 +403,7 @@ class GN_API GN_cPARALLEL //★并行处理  提供高性能并行处理计算 �
     unsigned int ProcArrayStartPointsGetTry(unsigned int *sts_out, unsigned int st, unsigned int end);
 
     //获得上次调用 ProcArray 或 ProcArrayTry 后的各个数据段分割信息  !!如果系统不支持多线程返回0 返回值是一个数组, 数量为 GetProcThreadNum 可获得
-    inline GN_sDATA_SGM *const GetLastProcDataSegmentInfo() { return zDataSeg; }
+    inline GN_sDATA_SGM * GetLastProcDataSegmentInfo() { return zDataSeg; }
 
     //获得上次调用 ProcArray 或 ProcArrayTry 后的各个数据段数据总数
     inline unsigned int GetLastProcDataSegmentNum() {
@@ -477,7 +477,7 @@ class GN_API GN_cPARALLEL //★并行处理  提供高性能并行处理计算 �
     void ProcEndWait() {
         if(zDataSeg) {
             unsigned int i = 0, n = zTn_;
-            for(; i < n; ++i) { while((volatile bool)zProcIsRuning(i)); }
+            for(; i < n; ++i) { while((bool)zProcIsRuning(i)); }
         }
     }
 
@@ -497,7 +497,7 @@ class GN_API GN_cPARALLEL //★并行处理  提供高性能并行处理计算 �
         if(zDataSeg) {
             unsigned int i = 0, n = zTn_;
             for(; i < n; ++i) {
-                while((volatile bool)zThreadIsBusy(i));
+                while((bool)zThreadIsBusy(i));
                 zTaskLists[i].reset();
             }
         }

@@ -50,7 +50,7 @@ bool uploadPixels(VkImage image, const unsigned char *pixels, uint32_t width, ui
     std::memcpy(mapped, pixels, (size_t)byteSize);
     vkUnmapMemory(GN_Vk.device, stagingMemory);
 
-    VkCommandBufferAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    VkCommandBufferAllocateInfo allocInfo{}; allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.commandPool = GN_Vk.commandPool;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = 1;
@@ -61,11 +61,11 @@ bool uploadPixels(VkImage image, const unsigned char *pixels, uint32_t width, ui
         return false;
     }
 
-    VkCommandBufferBeginInfo beginInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkCommandBufferBeginInfo beginInfo{}; beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
-    VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    VkImageMemoryBarrier barrier{}; barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -91,7 +91,7 @@ bool uploadPixels(VkImage image, const unsigned char *pixels, uint32_t width, ui
                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &barrier);
     vkEndCommandBuffer(commandBuffer);
 
-    VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    VkSubmitInfo submitInfo{}; submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
     const bool submitted = vkQueueSubmit(GN_Vk.graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) ==
@@ -115,7 +115,7 @@ bool GN_VkCreateTextureRGBA8(const unsigned char *pixels, uint32_t width, uint32
     if(!GN_Vk.initialized || pixels == 0 || width == 0 || height == 0) return false;
     if(out.aImage != VK_NULL_HANDLE) return false; // 已占用：要求调用方先 Destroy
 
-    VkImageCreateInfo imageInfo = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo imageInfo{}; imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
     imageInfo.extent = {width, height, 1};
     imageInfo.mipLevels = 1;
@@ -133,7 +133,7 @@ bool GN_VkCreateTextureRGBA8(const unsigned char *pixels, uint32_t width, uint32
 
     VkMemoryRequirements requirements;
     vkGetImageMemoryRequirements(GN_Vk.device, out.aImage, &requirements);
-    VkMemoryAllocateInfo memoryInfo = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo memoryInfo{}; memoryInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     memoryInfo.allocationSize = requirements.size;
     memoryInfo.memoryTypeIndex = FindMemType(requirements.memoryTypeBits,
                                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -150,7 +150,7 @@ bool GN_VkCreateTextureRGBA8(const unsigned char *pixels, uint32_t width, uint32
         return false;
     }
 
-    VkImageViewCreateInfo viewInfo = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkImageViewCreateInfo viewInfo{}; viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = out.aImage;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
@@ -160,7 +160,7 @@ bool GN_VkCreateTextureRGBA8(const unsigned char *pixels, uint32_t width, uint32
         return false;
     }
 
-    VkSamplerCreateInfo samplerInfo = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    VkSamplerCreateInfo samplerInfo{}; samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = toFilter(sampler.aMagFilter);
     samplerInfo.minFilter = toFilter(sampler.aMinFilter);
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;

@@ -61,7 +61,7 @@ return wr;
 }
 static float GT_ImgLinePixMerge4(unsigned char *pdata, float i_, float i2_, float wr, float *c_add) {
 #define GT_TMP_IMG_LINE_PIX_MERGE(PROC, PROC1, PROC2)     \
-    unsigned char *pd;                                    \
+    unsigned char *pd; (void)pd;                          \
     unsigned int i = (unsigned int)i_; /*合并左端像素*/   \
     float i__ = i_ - (float)i, wei = 0.0f;                \
     if(i__ > 0.0f) {                                      \
@@ -586,7 +586,8 @@ case 2:
                     /*case CR_RGBA4444:        aid = 3; break;
 		case CR_RGBA5551:        aid = 3; break;*/
                 case CR_LUMINANCE_ALPHA: aid = 1; break;
-            }
+                            default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
 #define GT_TMP_IMG_RANGE_LOOP                \
     for(j = 0; j < h; ++j, _data += pitch) { \
         for(_data_sta = _data, _data_end = _data + row_size; _data_sta < _data_end; _data_sta += pb) {
@@ -603,7 +604,8 @@ case 2:
                 _data_sta[0] = (uint8)((unsigned int)_data_sta[0] * r_ >> 8);
                 _data_sta[1] = (uint8)((unsigned int)_data_sta[1] * r_ >> 8);
                 _data_sta[2] = (uint8)((unsigned int)_data_sta[2] * r_ >> 8);
-        }
+                    default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
     }
     break;
 case CR_RGB565: {

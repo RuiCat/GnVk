@@ -74,8 +74,7 @@ bool createClothDrawPipelines() {
     binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     binding.descriptorCount = 1;
     binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo layoutInfo{}; layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = 1;
     layoutInfo.pBindings = &binding;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &layoutInfo, nullptr, &s_clothDrawSetLayout) !=
@@ -88,7 +87,7 @@ bool createClothDrawPipelines() {
     pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushRange.offset = 0;
     pushRange.size = sizeof(sCLOTH_DRAW_PUSH);
-    VkPipelineLayoutCreateInfo pipelineInfo = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo pipelineInfo{}; pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineInfo.setLayoutCount = 1;
     pipelineInfo.pSetLayouts = &s_clothDrawSetLayout;
     pipelineInfo.pushConstantRangeCount = 1;
@@ -169,7 +168,7 @@ void releaseClothDrawIndexBuffer() {
 
 bool ensureClothDrawSet(VkBuffer buffer) {
     if(s_clothDrawSet == VK_NULL_HANDLE) {
-        VkDescriptorSetAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo allocInfo{}; allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         allocInfo.descriptorPool = GN_Vk.descriptorPool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &s_clothDrawSetLayout;
@@ -185,7 +184,7 @@ bool ensureClothDrawSet(VkBuffer buffer) {
     bufferInfo.buffer = buffer;
     bufferInfo.offset = 0;
     bufferInfo.range = VK_WHOLE_SIZE;
-    VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    VkWriteDescriptorSet write{}; write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     write.dstSet = s_clothDrawSet;
     write.dstBinding = 0;
     write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;

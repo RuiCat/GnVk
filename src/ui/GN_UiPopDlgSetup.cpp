@@ -59,35 +59,35 @@ void GNu::cSIM_DIALOG::zRelease_(bool all) {
     zBackDrawProc = 0;
     aValueLoop = 1;
 }
-GNu::cSIM_DIALOG::cSIM_DIALOG() : zBackDrawProc(0),
-                                  zValueChangeProc(0),
-                                  zValueChangeArg(0),
-                                  zFun1(0), zFun2(0), zFun3(0),
-                                  zButtonName(0),
-                                  zFileName(0),
-                                  zShowReady(0),
-                                  zState(0),
+GNu::cSIM_DIALOG::cSIM_DIALOG() : zEffect(0),
                                   zTargetMenu(0),
-                                  zEffect(0),
-                                  zFocusFlash(0),
-                                  zFocusMap(0),
-                                  zArrowMap(0),
-                                  zBackCaption(0),
-                                  zBackFrame(0),
-                                  zUsGenArrowMap(0),
-                                  aCaptextOfsY(0),
-                                  aValueLoop(1),
-                                  aSkipPos(0),
-                                  zIsDetailSet(0),
+                                  zShowReady(0),
+                                  zKeyOK(GK_RETURN),
                                   zKeyDOWN(GK_DOWN),
                                   zKeyUP(GK_UP),
                                   zKeyLEFT(0),
                                   zKeyRIGHT(1),
-                                  zKeyOK(GK_RETURN),
                                   zUsMouse(0),
+                                  zIsDetailSet(0),
+                                  zFocusMap(0),
+                                  zArrowMap(0),
+                                  zBackFrame(0),
+                                  zBackCaption(0),
+                                  zUsGenArrowMap(0),
+                                  zState(0),
+                                  zFocusFlash(0),
+                                  zButtonName(0),
+                                  zFileName(0),
 #ifdef _GN_SOUND_H_
-                                  zSouObj(0)
+                                  zSouObj(0),
 #endif
+                                  zBackDrawProc(0),
+                                  zValueChangeArg(0),
+                                  zValueChangeProc(0),
+                                  zFun1(0), zFun2(0), zFun3(0),
+                                  aCaptextOfsY(0),
+                                  aValueLoop(1),
+                                  aSkipPos(0)
 {
 }
 GNu::cSIM_DIALOG::~cSIM_DIALOG() {
@@ -123,7 +123,7 @@ void GNu::cSIM_DIALOG::BeginInitToData(const char *fname) {
 }
 void GNu::cSIM_DIALOG::EndInitToData() {
     if(!zFileName) { //没指定文件名就为它创建一个默认文件
-        char *def_file_name = "GameSetting.ygs";
+        char *def_file_name = (char *)"GameSetting.ygs";
         zFileName = new char[strlen(def_file_name) + 1];
         // 已核（B5f）：new char[strlen+1]，精确容量。
         strcpy(zFileName, def_file_name);
@@ -402,6 +402,7 @@ void GNu::cSIM_DIALOG::GetChildPos(int &_x, int &_y, int &_w, int &_h, short chd
         if(content > eCHILD_CONTENT_NAME) content = eCHILD_CONTENT_NAME;
     }
     switch(content) {
+        default: break; // B9-3: 未列举枚举值兜底（保行为）
         case eCHILD_CONTENT_ALL: //整个子选项范围
             _x = (dx - (ti >> 1));
             _w = (dw + ti);
@@ -606,7 +607,7 @@ void GNu::cSIM_DIALOG::zStatisticsDlgTextNum(const sSIM_MENU *menu, const char *
     //- 统计正文区内各项要显示的最大字数 -----------------------------------------------------------
     zIconNW = 0, zIconNH = 0, zTotalLenNum = 0, zSubMenuNum = 0, zNameNum = 0, zEnumNameNum = 0;
     zValueNum = 10; //变量值预留10位
-    short len, si, li;
+    short len, si;
     zChildNum = menu->zChild.size();
     GT_sSP_CHILD *_chd;
     for(si = 0; si < zChildNum; ++si) {

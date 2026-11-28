@@ -90,7 +90,8 @@
                 *format = (COLOR_FORMAT)GNf::GetExtNamePos(filename_mem, memsize);
                 data = FileImage->LoadData(filename_mem, format, w, h, false, memsize);
             } break;
-        }
+                    default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
         return data;
     }
     GN_API bool GNg::SaveImgFile(char *file_name, unsigned char *data, COLOR_FORMAT srcformat, int w, int h, bool col_turn, uint8 comps_lv) {
@@ -125,10 +126,10 @@
                 strncpy(ext_name2, ext_name, sizeof(ext_name2) - 1);
                 ext_name2[sizeof(ext_name2) - 1] = 0;
                 ext_name = ext_name2;
-                char ofs = 'a' - 'A';
+                char ofs_case = 'a' - 'A'; // B9-3: 避免阴影外层 ofs
                 int i = 0;
                 while(ext_name[i]) {
-                    ext_name[i] += ofs;
+                    ext_name[i] += ofs_case;
                     ++i;
                 } //大写名转小写再检测
                 goto GT_GOTO_CheckImgFmtSupport;

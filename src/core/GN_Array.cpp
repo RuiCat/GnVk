@@ -26,7 +26,7 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 #include "GN.h"
 #ifdef _GN_ARRAY_H_
 /*----------------------------------------------------------------------------------------------------------------*/
-volatile long GN::sTBUF_MT::IsBusy() {
+long GN::sTBUF_MT::IsBusy() {
     return is_busy;
 }
 

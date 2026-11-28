@@ -23,7 +23,7 @@ VkFence s_fence = VK_NULL_HANDLE;
 
 bool ensurePersistentObjects() {
     if (s_pool == VK_NULL_HANDLE) {
-        VkCommandPoolCreateInfo cpci = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        VkCommandPoolCreateInfo cpci{}; cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         cpci.queueFamilyIndex = GN_Vk.graphicsFamily;
         if (vkCreateCommandPool(GN_Vk.device, &cpci, nullptr, &s_pool) != VK_SUCCESS) {
@@ -32,7 +32,7 @@ bool ensurePersistentObjects() {
         }
     }
     if (s_cmd == VK_NULL_HANDLE) {
-        VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        VkCommandBufferAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         ai.commandPool = s_pool;
         ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         ai.commandBufferCount = 1;
@@ -42,7 +42,7 @@ bool ensurePersistentObjects() {
         }
     }
     if (s_fence == VK_NULL_HANDLE) {
-        VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VkFenceCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         if (vkCreateFence(GN_Vk.device, &fci, nullptr, &s_fence) != VK_SUCCESS) {
             s_fence = VK_NULL_HANDLE;
             return false;
@@ -94,11 +94,11 @@ bool EndImageUpload(VkImage image, uint32_t width, uint32_t height, int32_t offs
         return false;
     }
     if (vkResetCommandBuffer(s_cmd, 0) != VK_SUCCESS) return false;
-    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     if (vkBeginCommandBuffer(s_cmd, &bi) != VK_SUCCESS) return false;
 
-    VkImageMemoryBarrier toDst = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    VkImageMemoryBarrier toDst{}; toDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     toDst.oldLayout = fromUndefined ? VK_IMAGE_LAYOUT_UNDEFINED
                                     : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     toDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -123,7 +123,7 @@ bool EndImageUpload(VkImage image, uint32_t width, uint32_t height, int32_t offs
     vkCmdCopyBufferToImage(s_cmd, s_staging, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                            &region);
 
-    VkImageMemoryBarrier toShader = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    VkImageMemoryBarrier toShader{}; toShader.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     toShader.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     toShader.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     toShader.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -139,7 +139,7 @@ bool EndImageUpload(VkImage image, uint32_t width, uint32_t height, int32_t offs
                          &toShader);
     if (vkEndCommandBuffer(s_cmd) != VK_SUCCESS) return false;
 
-    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &s_cmd;
     if (vkResetFences(GN_Vk.device, 1, &s_fence) != VK_SUCCESS) return false;

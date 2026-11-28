@@ -76,7 +76,7 @@ bool GNu::cUI_SCENE::InitLoadToData(const char *file_name, float &progress) {
     this->Release(); //GN_Log("2\n");
     progress = 0.1f;
     uint8 *rpos = (uint8 *)fbuf + 3;
-    uint8 version = *rpos;
+    (void)*rpos; // B9-3: version 未使用
     ++rpos;
     unsigned int *data_pos = (unsigned int *)rpos;
     rpos += (18 << 2); //GN_Log("3\n");

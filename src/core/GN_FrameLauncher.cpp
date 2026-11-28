@@ -148,8 +148,8 @@ GNg::cFRAME_LAUNCHER_::cFRAME_LAUNCHER_() : zFrame(0),
                                             //zGen_once_num  = 1;
                                             //zMax_once_num  = zGen_once_num;
                                             zTransf_s(0),
-                                            zColor_s(0),
                                             zNowtime_s(0),
+                                            zColor_s(0),
                                             zRunUpdate(false) {}
 void GNg::cFRAME_LAUNCHER_::zCopyData(const cFRAME_LAUNCHER_ &src, bool cpy_state) {
     zFrame = src.zFrame;
@@ -530,9 +530,9 @@ void GNg::cFRAME_LAUNCHER_::ReSetPlaytime() {
     memset(zNowtime_s, 0xff, zMax_num << 2);
 }
 /************************************************* cFRAME_LAUNCHER ***************************************************/
-GNg::cFRAME_LAUNCHER::cFRAME_LAUNCHER() : aGenRngX(0.0f), aGenRngY(0.0f), aGenRngW(256.0f), aGenRngH(256.0f) {}
+GNg::cFRAME_LAUNCHER::cFRAME_LAUNCHER() : aGenRngW(256.0f), aGenRngH(256.0f), aGenRngX(0.0f), aGenRngY(0.0f) {}
 
-GNg::cFRAME_LAUNCHER::cFRAME_LAUNCHER(const cFRAME_LAUNCHER &src) : cFRAME_LAUNCHER_(src), aGenRngX(src.aGenRngX), aGenRngY(src.aGenRngY), aGenRngW(src.aGenRngW), aGenRngH(src.aGenRngH) {}
+GNg::cFRAME_LAUNCHER::cFRAME_LAUNCHER(const cFRAME_LAUNCHER &src) : cFRAME_LAUNCHER_(src), aGenRngW(src.aGenRngW), aGenRngH(src.aGenRngH), aGenRngX(src.aGenRngX), aGenRngY(src.aGenRngY) {}
 
 GNg::cFRAME_LAUNCHER &GNg::cFRAME_LAUNCHER::operator=(const cFRAME_LAUNCHER &src) {
     this->cFRAME_LAUNCHER_::operator=(src);
@@ -565,7 +565,7 @@ void GNg::cFRAME_LAUNCHER::GetRange(sRECT2 *range_out) {
 /************************************************* cFRAME_LAUNCHER2D ***************************************************/
 GNg::cFRAME_LAUNCHER2D::cFRAME_LAUNCHER2D() : zGenRngSclX(1.0f), zGenRngSclY(1.0f), zGenRngRot(0.0f), zGenRngAx(1.0f, 0.0f), zGenRngAy(0.0f, 1.0f) {}
 
-GNg::cFRAME_LAUNCHER2D::cFRAME_LAUNCHER2D(const cFRAME_LAUNCHER2D &src) {
+GNg::cFRAME_LAUNCHER2D::cFRAME_LAUNCHER2D(const cFRAME_LAUNCHER2D &src) : cFRAME_LAUNCHER() { // B9-3: 显式初始化基类（与原隐式默认初始化同行为）
     zCopyData2(src, false);
 }
 GNg::cFRAME_LAUNCHER2D &GNg::cFRAME_LAUNCHER2D::operator=(const cFRAME_LAUNCHER2D &src) {

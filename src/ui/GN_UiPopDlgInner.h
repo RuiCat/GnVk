@@ -28,7 +28,7 @@ sPopDlgContext &GN_UiPopDlgContext();
 static inline void GT_ChildTextValueSetShowStr(GT_sSP_CHILD *_chd) {
     GN_DeleteArray(_chd->enumIds);
     char *tbuf = (char *)(_chd->pointer);
-    int tlen = strlen(tbuf), vlen = (int)_chd->minValue, vi = 0;
+    int tlen = strlen(tbuf), vlen = (int)_chd->minValue;
     if(tlen > vlen) {
         _chd->enumIds = new short[vlen + 1];
         char *sbuf = (char *)_chd->enumIds, *_name = _chd->name;
@@ -54,33 +54,33 @@ static inline void GT_ChildTextValueSetShowStr(GT_sSP_CHILD *_chd) {
                 }
             }
         } else {
-            int vi = 0;
+            int vi2 = 0; // B9-3: 避免阴影外层 vi2
             vlen -= 3;
             sbuf[vlen] = '.';
             sbuf[vlen + 1] = '.';
             sbuf[vlen + 2] = '.'; //在结尾显示...
             if(_name[0] == '*') {
-                while(vi < vlen) {
-                    if(tbuf[vi] & 128) {
-                        sbuf[vi] = '*';
-                        ++vi;
-                        sbuf[vi] = '*';
-                        ++vi;
+                while(vi2 < vlen) {
+                    if(tbuf[vi2] & 128) {
+                        sbuf[vi2] = '*';
+                        ++vi2;
+                        sbuf[vi2] = '*';
+                        ++vi2;
                     } else {
-                        sbuf[vi] = '*';
-                        ++vi;
+                        sbuf[vi2] = '*';
+                        ++vi2;
                     }
                 }
             } else {
-                while(vi < vlen) { //这段类似上一段
-                    if(tbuf[vi] & 128) {
-                        sbuf[vi] = tbuf[vi];
-                        ++vi;
-                        sbuf[vi] = tbuf[vi];
-                        ++vi;
+                while(vi2 < vlen) { //这段类似上一段
+                    if(tbuf[vi2] & 128) {
+                        sbuf[vi2] = tbuf[vi2];
+                        ++vi2;
+                        sbuf[vi2] = tbuf[vi2];
+                        ++vi2;
                     } else {
-                        sbuf[vi] = tbuf[vi];
-                        ++vi;
+                        sbuf[vi2] = tbuf[vi2];
+                        ++vi2;
                     }
                 }
             }

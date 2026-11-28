@@ -51,7 +51,7 @@ void sIMAGE::CreateEmptyToData(int w, int h, unsigned short imgnum, int fmt,
 
     // Create image
     {
-        VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo ici{}; ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         ici.imageType = VK_IMAGE_TYPE_2D;
         ici.extent = {(uint32_t)w, (uint32_t)h, 1};
         ici.mipLevels = 1;
@@ -72,7 +72,7 @@ void sIMAGE::CreateEmptyToData(int w, int h, unsigned short imgnum, int fmt,
         }
         VkMemoryRequirements mr;
         vkGetImageMemoryRequirements(GN_Vk.device, vkImage, &mr);
-        VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         mai.allocationSize = mr.size;
         mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         {
@@ -96,7 +96,7 @@ void sIMAGE::CreateEmptyToData(int w, int h, unsigned short imgnum, int fmt,
 
     // Create sampler
     {
-        VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         sci.magFilter = VK_FILTER_LINEAR;
         sci.minFilter = VK_FILTER_LINEAR;
         sci.addressModeU = imageWrapMode(vkWrapU);
@@ -107,7 +107,7 @@ void sIMAGE::CreateEmptyToData(int w, int h, unsigned short imgnum, int fmt,
 
     // Allocate descriptor set
     {
-        VkDescriptorSetAllocateInfo dsai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo dsai{}; dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         dsai.descriptorPool = GN_Vk.descriptorPool;
         dsai.descriptorSetCount = 1;
         dsai.pSetLayouts = &GN_Vk.descriptorLayout;
@@ -115,7 +115,7 @@ void sIMAGE::CreateEmptyToData(int w, int h, unsigned short imgnum, int fmt,
         VkCheck(res, "vkAllocateDescriptorSets in CreateEmptyToData");
         VkDescriptorBufferInfo dbi = {GN_Vk.uniformBuffer, 0, sizeof(VkUBO)};
         VkDescriptorImageInfo dii = {vkSampler, vkImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet wds[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        VkWriteDescriptorSet wds[2]{}; wds[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; wds[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         wds[0].dstSet = vkDescriptorSet;
         wds[0].dstBinding = 0;
         wds[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -146,7 +146,7 @@ void sIMAGE::CreateEmptyToData(int w, int h, unsigned short imgnum, int fmt,
     {
         VkCommandBuffer cb;
         {
-            VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+            VkCommandBufferAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             ai.commandPool = GN_Vk.commandPool;
             ai.commandBufferCount = 1;
@@ -154,12 +154,12 @@ void sIMAGE::CreateEmptyToData(int w, int h, unsigned short imgnum, int fmt,
             VkCheck(res, "vkAllocateCommandBuffers in CreateEmptyToData");
         }
         {
-            VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+            VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
             vkBeginCommandBuffer(cb, &bi);
         }
         {
-            VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+            VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
             b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -175,7 +175,7 @@ void sIMAGE::CreateEmptyToData(int w, int h, unsigned short imgnum, int fmt,
         }
         vkEndCommandBuffer(cb);
         {
-            VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+            VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
             si.commandBufferCount = 1;
             si.pCommandBuffers = &cb;
             vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);
@@ -215,7 +215,6 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
             case CR_RGBA: srcBpp = 4; break;
             default: srcBpp = 4; break;
         }
-        VkDeviceSize srcSz = (VkDeviceSize)w * (VkDeviceSize)h * srcBpp;
         VkDeviceSize dstSz = (VkDeviceSize)w * (VkDeviceSize)h * 4;
         void *d = BeginImageUpload(dstSz);
         if(!d) return;
@@ -284,9 +283,9 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         case CR_RGBA: srcBpp = 4; break;
         case CR_RGB: srcBpp = 4; break; // stored as RGBA
         default: srcBpp = 4; break;
+    (void)srcBpp; // B9-3: 仅 expandToRGBA 分支用固定展开，srcBpp 保留作记录
     }
     VkFormat vkFmt = vkSrgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-    VkDeviceSize srcSz = (VkDeviceSize)w * (VkDeviceSize)h * srcBpp;
     VkDeviceSize dstSz = (VkDeviceSize)w * (VkDeviceSize)h * 4;
 
     // Release any previous Vulkan resources
@@ -344,7 +343,7 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
     }
     // Create destination image
     {
-        VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo ici{}; ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         ici.imageType = VK_IMAGE_TYPE_2D;
         ici.extent = {(uint32_t)w, (uint32_t)h, 1};
         ici.mipLevels = 1;
@@ -361,7 +360,7 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         }
         VkMemoryRequirements mr;
         vkGetImageMemoryRequirements(GN_Vk.device, vkImage, &mr);
-        VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         mai.allocationSize = mr.size;
         mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         {
@@ -383,7 +382,7 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
 
     // Create sampler
     {
-        VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         sci.magFilter = VK_FILTER_LINEAR;
         sci.minFilter = VK_FILTER_LINEAR;
         sci.addressModeU = imageWrapMode(vkWrapU);
@@ -394,7 +393,7 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
 
     // Allocate descriptor set
     {
-        VkDescriptorSetAllocateInfo dsai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo dsai{}; dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         dsai.descriptorPool = GN_Vk.descriptorPool;
         dsai.descriptorSetCount = 1;
         dsai.pSetLayouts = &GN_Vk.descriptorLayout;
@@ -402,7 +401,7 @@ void sIMAGE::DataFill(uint8 *data, int fmt, int w, int h, int sw, int sh, unsign
         VkCheck(res, "vkAllocateDescriptorSets in DataFill");
         VkDescriptorBufferInfo dbi = {GN_Vk.uniformBuffer, 0, sizeof(VkUBO)};
         VkDescriptorImageInfo dii = {vkSampler, vkImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet wds[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        VkWriteDescriptorSet wds[2]{}; wds[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; wds[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         wds[0].dstSet = vkDescriptorSet;
         wds[0].dstBinding = 0;
         wds[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;

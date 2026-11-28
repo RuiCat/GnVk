@@ -353,7 +353,7 @@ unsigned int GNu::cTREE_VIEW::UpdateRun(unsigned int updatatime, unsigned int dc
     if(zTextOffset > 0.0f) zTextOffset = (float)(((int)zTextOffset % line_h) - line_h);
     else {
         int zn = (int)((pfmt->erect_print ? _fframe->aGenRngW : _fframe->aGenRngH) - zTextOffset) / line_h + 1;
-        if(zn > zZoningNum) {
+        if(zn > (int)zZoningNum) {
             zZoningNum = zn + (zn >> 1);
             zReArrange = true;
         }
@@ -594,7 +594,7 @@ void GNu::cTREE_NODE__OPTR::MoveNodes(P_ pos, bool pos_back, GN::sLIST<P_> *node
         P_ *p_nodes = (P_ *)tbuf.GetSpace(sizeof(P_) * nodes->size());
         int pni = 0;
         P_ ppps_[64], _ppps_[64], tmp;
-        P_ *pst, *pend = SearchParentNodes(aRoot, pos, ppps_), *_pend;
+        P_ *pst, *pend = SearchParentNodes(aRoot, pos, ppps_);
         GN::sLIST<P_>::iterator in = nodes->begin(), en = nodes->end();
         for(; in != en; ++in, ++pni) {
             tmp = *in;

@@ -71,8 +71,7 @@ void writeClothDescriptorSet(uint32_t setIndex, VkBuffer src, VkBuffer dst) {
     dstInfo.buffer = dst;
     dstInfo.offset = 0;
     dstInfo.range = VK_WHOLE_SIZE;
-    VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet writes[2]{}; writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = s_clothSets[setIndex];
     writes[0].dstBinding = 0;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -87,8 +86,7 @@ void writeClothDescriptorSet(uint32_t setIndex, VkBuffer src, VkBuffer dst) {
 }
 
 void clothBarrier(VkCommandBuffer commandBuffer, VkAccessFlags srcAccess, VkAccessFlags dstAccess) {
-    VkBufferMemoryBarrier barriers[2] = {{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER},
-                                         {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER}};
+    VkBufferMemoryBarrier barriers[2]{}; barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER; barriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     for(int i = 0; i < 2; ++i) {
         barriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -112,8 +110,7 @@ bool createClothPipelines() {
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo layoutInfo{}; layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = 2;
     layoutInfo.pBindings = bindings;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &layoutInfo, nullptr, &s_clothSetLayout) !=
@@ -126,7 +123,7 @@ bool createClothPipelines() {
     pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     pushRange.offset = 0;
     pushRange.size = sizeof(sCLOTH_PUSH);
-    VkPipelineLayoutCreateInfo pipelineInfo = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo pipelineInfo{}; pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineInfo.setLayoutCount = 1;
     pipelineInfo.pSetLayouts = &s_clothSetLayout;
     pipelineInfo.pushConstantRangeCount = 1;
@@ -164,7 +161,7 @@ bool init3DCloth() {
         destroyCloth();
         return false;
     }
-    VkCommandBufferAllocateInfo cbai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    VkCommandBufferAllocateInfo cbai{}; cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cbai.commandPool = GN_Vk.commandPool;
     cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cbai.commandBufferCount = 1;
@@ -173,7 +170,7 @@ bool init3DCloth() {
         destroyCloth();
         return false;
     }
-    VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFenceCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     if(vkCreateFence(GN_Vk.device, &fci, 0, &s_clothFence) != VK_SUCCESS) {
         s_clothFence = VK_NULL_HANDLE;
         destroyCloth();
@@ -231,7 +228,7 @@ bool GN_VkClothCreate(const GN3d::sCLOTH_GPU_DESC &desc) {
     }
 
     VkDescriptorSetLayout clothLayouts[2] = {s_clothSetLayout, s_clothSetLayout};
-    VkDescriptorSetAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo allocInfo{}; allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = GN_Vk.descriptorPool;
     allocInfo.descriptorSetCount = 2;
     allocInfo.pSetLayouts = clothLayouts;
@@ -279,13 +276,12 @@ bool GN_VkClothSimulate(float dt) {
     push.aParams0[3] = (float)s_clothDesc.aHeight;
     push.aParams1[0] = 0.0f;
 
-    VkCommandBufferBeginInfo beginInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkCommandBufferBeginInfo beginInfo{}; beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     if(vkBeginCommandBuffer(s_clothCmd, &beginInfo) != VK_SUCCESS) return false;
 
     // 主机写入（Upload）→ compute 读取。
-    VkBufferMemoryBarrier hostBarrier[2] = {{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER},
-                                            {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER}};
+    VkBufferMemoryBarrier hostBarrier[2]{}; hostBarrier[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER; hostBarrier[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     for(int i = 0; i < 2; ++i) {
         hostBarrier[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         hostBarrier[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -323,7 +319,7 @@ bool GN_VkClothSimulate(float dt) {
     // 最终结果：积分写 B；每轮迭代翻转，迭代奇数次时结果在 A。
     const bool resultInA = (s_clothDesc.aIterations % 2u) == 1u;
     if(!resultInA) {
-        VkBufferMemoryBarrier copyBarrier = {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+        VkBufferMemoryBarrier copyBarrier{}; copyBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
         copyBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         copyBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         copyBarrier.buffer = s_clothBuffers[1];
@@ -345,7 +341,7 @@ bool GN_VkClothSimulate(float dt) {
                              VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT, 0,
                              0, nullptr, 1, &copyDst, 0, nullptr);
     } else {
-        VkBufferMemoryBarrier finalBarrier = {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+        VkBufferMemoryBarrier finalBarrier{}; finalBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
         finalBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         finalBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         finalBarrier.buffer = s_clothBuffers[0];
@@ -360,7 +356,7 @@ bool GN_VkClothSimulate(float dt) {
 
     if(vkEndCommandBuffer(s_clothCmd) != VK_SUCCESS) return false;
 
-    VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    VkSubmitInfo submitInfo{}; submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &s_clothCmd;
     vkResetFences(GN_Vk.device, 1, &s_clothFence);

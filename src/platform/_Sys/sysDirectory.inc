@@ -17,7 +17,7 @@ GN_SYS_API intptr_t _findfirst(const char *_Filename, _finddata_t *_fd, char *pr
     int len = strlen(_Filename);
     strncpy(filename, _Filename, len);
     filename[len--] = 0;
-    char *dirpath = "/", *_filename = 0;
+    char *dirpath = (char *)"/", *_filename = 0;
 
     while(len >= 0 && filename[len] != '/' && filename[len] != '\\') {
         if(filename[len] == '.') _filename = filename + len;
@@ -28,7 +28,7 @@ GN_SYS_API intptr_t _findfirst(const char *_Filename, _finddata_t *_fd, char *pr
             filename[len] = 0;
             dirpath = filename;
         }
-    } else dirpath = ".";
+    } else dirpath = (char *)".";
     ++len;
 
     DIR *dir;

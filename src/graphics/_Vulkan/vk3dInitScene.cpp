@@ -29,14 +29,14 @@ void init3DHdr() {
             dslb[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             dslb[2].descriptorCount = 1;
             dslb[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-            VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+            VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
             dslci.bindingCount = 3;
             dslci.pBindings = dslb;
             vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.compositeDescriptorLayout);
         }
         // 管线布局
         {
-            VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+            VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
             plci.setLayoutCount = 1;
             plci.pSetLayouts = &GN_Vk.compositeDescriptorLayout;
             vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &GN_Vk.compositePipelineLayout);
@@ -58,7 +58,7 @@ void init3DHdr() {
             csp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
             csp.colorAttachmentCount = 1;
             csp.pColorAttachments = &car;
-            VkRenderPassCreateInfo crpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+            VkRenderPassCreateInfo crpi{}; crpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
             crpi.attachmentCount = 1;
             crpi.pAttachments = &cad;
             crpi.subpassCount = 1;
@@ -72,7 +72,7 @@ void init3DHdr() {
 
         // 分配描述符集并绑定 HDR 纹理（resize 时用 writeCompositeHdrBinding 重写）
         {
-            VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+            VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
             dai.descriptorPool = GN_Vk.descriptorPool;
             dai.descriptorSetCount = 1;
             dai.pSetLayouts = &GN_Vk.compositeDescriptorLayout;
@@ -87,7 +87,7 @@ void create3DHdrImages() {
     const uint32_t sw = GN_Vk.swapchainExtent.width;
     const uint32_t sh = GN_Vk.swapchainExtent.height;
     {
-        VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         ii.imageType = VK_IMAGE_TYPE_2D;
         ii.extent = {sw, sh, 1};
         ii.mipLevels = 1;
@@ -101,14 +101,14 @@ void create3DHdrImages() {
         if(vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.hdrImage) != VK_SUCCESS) return;
         VkMemoryRequirements hmr;
         vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.hdrImage, &hmr);
-        VkMemoryAllocateInfo hmai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateInfo hmai{}; hmai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         hmai.allocationSize = hmr.size;
         hmai.memoryTypeIndex = FindMemType(hmr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if(vkAllocateMemory(GN_Vk.device, &hmai, 0, &GN_Vk.hdrMemory) != VK_SUCCESS) return;
         vkBindImageMemory(GN_Vk.device, GN_Vk.hdrImage, GN_Vk.hdrMemory, 0);
     }
     {
-        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vi.image = GN_Vk.hdrImage;
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
         vi.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -118,7 +118,7 @@ void create3DHdrImages() {
         vkCreateImageView(GN_Vk.device, &vi, 0, &GN_Vk.hdrView);
     }
     {
-        VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         sci.magFilter = VK_FILTER_LINEAR;
         sci.minFilter = VK_FILTER_LINEAR;
         sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -165,7 +165,7 @@ void writeCompositeHdrBinding() {
     if(GN_Vk.compositeDescriptorSet == VK_NULL_HANDLE || GN_Vk.hdrView == VK_NULL_HANDLE) return;
     VkDescriptorImageInfo hii = {GN_Vk.hdrSampler, GN_Vk.hdrView,
                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet wc = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    VkWriteDescriptorSet wc{}; wc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     wc.dstSet = GN_Vk.compositeDescriptorSet;
     wc.dstBinding = 1;
     wc.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -221,13 +221,11 @@ void recreate3DCompositeTargets() {
 
 // 天空盒：程序化 Cubemap（6 面）、IBL 描述符绑定与天空盒管线。
 void init3DSkybox() {
-    uint32_t sw = GN_Vk.swapchainExtent.width;
-    uint32_t sh = GN_Vk.swapchainExtent.height;
     {
         const int smSize = 256;
         // 创建 cubemap image
         {
-            VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+            VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
             ii.imageType = VK_IMAGE_TYPE_2D;
             ii.extent = {(uint32_t)smSize, (uint32_t)smSize, 1};
             ii.mipLevels = 1;
@@ -242,7 +240,7 @@ void init3DSkybox() {
             vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.skyboxImage);
             VkMemoryRequirements mr;
             vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.skyboxImage, &mr);
-            VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+            VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
             mai.allocationSize = mr.size;
             mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
             vkAllocateMemory(GN_Vk.device, &mai, 0, &GN_Vk.skyboxMemory);
@@ -250,7 +248,7 @@ void init3DSkybox() {
         }
         // Image view (cubemap)
         {
-            VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+            VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
             vi.image = GN_Vk.skyboxImage;
             vi.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
             vi.format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -261,7 +259,7 @@ void init3DSkybox() {
         }
         // Sampler (linear, clamp)
         {
-            VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+            VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
             sci.magFilter = VK_FILTER_LINEAR;
             sci.minFilter = VK_FILTER_LINEAR;
             sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -327,20 +325,20 @@ void init3DSkybox() {
 
             VkCommandBuffer cb;
             {
-                VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+                VkCommandBufferAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
                 ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
                 ai.commandPool = GN_Vk.commandPool;
                 ai.commandBufferCount = 1;
                 vkAllocateCommandBuffers(GN_Vk.device, &ai, &cb);
             }
             {
-                VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+                VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
                 bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
                 vkBeginCommandBuffer(cb, &bi);
             }
             // 过渡 UNDEFINED → TRANSFER_DST
             {
-                VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+                VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
                 b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
                 b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
                 b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -366,7 +364,7 @@ void init3DSkybox() {
             vkCmdCopyBufferToImage(cb, staging, GN_Vk.skyboxImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, regions);
             // 过渡 TRANSFER_DST → SHADER_READ_ONLY
             {
-                VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+                VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
                 b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
                 b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -381,7 +379,7 @@ void init3DSkybox() {
             }
             vkEndCommandBuffer(cb);
             {
-                VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+                VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
                 si.commandBufferCount = 1;
                 si.pCommandBuffers = &cb;
                 vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);
@@ -397,7 +395,7 @@ void init3DSkybox() {
     if(GN_Vk.skyboxView && GN_Vk.skyboxSampler && GN_Vk.descriptorSetPBR) {
         VkDescriptorImageInfo sii = {GN_Vk.skyboxSampler, GN_Vk.skyboxView,
                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet ws = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        VkWriteDescriptorSet ws{}; ws.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         ws.dstSet = GN_Vk.descriptorSetPBR;
         ws.dstBinding = 5;
         ws.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -428,12 +426,12 @@ void init3DSkybox() {
                 dslb[b].descriptorCount = 1;
                 dslb[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
             }
-            VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+            VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
             dslci.bindingCount = 4;
             dslci.pBindings = dslb;
             vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.skyboxDescriptorLayout);
 
-            VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+            VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
             plci.setLayoutCount = 1;
             plci.pSetLayouts = &GN_Vk.skyboxDescriptorLayout;
             vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &GN_Vk.skyboxPipelineLayout);
@@ -445,14 +443,14 @@ void init3DSkybox() {
 
             // Descriptor set
             {
-                VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+                VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
                 dai.descriptorPool = GN_Vk.descriptorPool;
                 dai.descriptorSetCount = 1;
                 dai.pSetLayouts = &GN_Vk.skyboxDescriptorLayout;
                 vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.skyboxDescriptorSet);
                 VkDescriptorBufferInfo dbi = {GN_Vk.skyboxUBOBuffer, 0, 144};
                 VkDescriptorImageInfo dii = {GN_Vk.skyboxSampler, GN_Vk.skyboxView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-                VkWriteDescriptorSet w[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+                VkWriteDescriptorSet w[2]{}; w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 w[0].dstSet = GN_Vk.skyboxDescriptorSet;
                 w[0].dstBinding = 0;
                 w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -513,7 +511,7 @@ static void createDeferredLightFramebuffers() {
     GN_Vk.deferredLightFramebuffers = new VkFramebuffer[GN_Vk.swapchainImageCount];
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
         GN_Vk.deferredLightFramebuffers[i] = VK_NULL_HANDLE;
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fci.renderPass = GN_Vk.deferredLightRenderPass;
         fci.attachmentCount = 1;
         fci.pAttachments = &GN_Vk.hdrView; // L1：延迟光照写入 HDR 目标，由合成阶段统一 tonemap
@@ -585,7 +583,7 @@ void create3DCompositeFramebuffers() {
     GN_Vk.compositeFramebuffers = new VkFramebuffer[GN_Vk.swapchainImageCount];
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
         GN_Vk.compositeFramebuffers[i] = VK_NULL_HANDLE;
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fci.renderPass = GN_Vk.compositeRenderPass;
         fci.attachmentCount = 1;
         fci.pAttachments = &GN_Vk.swapchainViews[i];
@@ -669,19 +667,19 @@ void init3DDeferredLight() {
         dlb[b].descriptorCount = 1;
         dlb[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
-    VkDescriptorSetLayoutCreateInfo dci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo dci{}; dci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     dci.bindingCount = 26;
     dci.pBindings = dlb;
     vkCreateDescriptorSetLayout(GN_Vk.device, &dci, 0, &GN_Vk.deferredLightDescriptorLayout);
     {
-        VkPipelineLayoutCreateInfo pl = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        VkPipelineLayoutCreateInfo pl{}; pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pl.setLayoutCount = 1;
         pl.pSetLayouts = &GN_Vk.deferredLightDescriptorLayout;
         vkCreatePipelineLayout(GN_Vk.device, &pl, 0, &GN_Vk.deferredLightPipelineLayout);
     }
     // Descriptor set：binding 1..4（G-Buffer）由 writeDeferredLightGBufferBindings 统一写入。
     {
-        VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         dai.descriptorPool = GN_Vk.descriptorPool;
         dai.descriptorSetCount = 1;
         dai.pSetLayouts = &GN_Vk.deferredLightDescriptorLayout;
@@ -737,7 +735,7 @@ void init3DDeferredLight() {
         sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         sp.colorAttachmentCount = 1;
         sp.pColorAttachments = &ar;
-        VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         rpi.attachmentCount = 1;
         rpi.pAttachments = &ad;
         rpi.subpassCount = 1;

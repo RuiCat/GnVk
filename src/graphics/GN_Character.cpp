@@ -90,8 +90,9 @@ cCHARACTER::sINTENT::sINTENT()
 cCHARACTER::cCHARACTER()
     : aPosition{0.0f, 0.0f, 0.0f}, aFootPosition{0.0f, 0.0f, 0.0f}, aVelocity{0.0f, 0.0f, 0.0f},
       aGravity{0.0f, -9.81f, 0.0f}, aInited(false), aPhysicsWorld(nullptr),
-      aPushStrength(1.0f), aLastPushedCount(0), aSweptSteps(true), aRootMotionEnabled(false),
-      aPendingRootMotion{0.0f, 0.0f, 0.0f}, aFacingYaw(0.0f), aGrounded(false), aStuck(false),
+      aSweptSteps(true), aRootMotionEnabled(false),
+      aPendingRootMotion{0.0f, 0.0f, 0.0f}, aFacingYaw(0.0f),
+      aPushStrength(1.0f), aLastPushedCount(0), aGrounded(false), aStuck(false),
       aGroundNormalY(0.0f), aSlopeDeg(0.0f) {
     aFootPosition.y = -aDesc.aHeight * 0.5f;
 }
@@ -748,8 +749,8 @@ sCHARACTER_STEP cCHARACTER::Move(const GNg::sVEC3 &wishDir, bool sprint, bool ju
         verticalPos.y += verticalStep - snapProbe;
         GNg::sVEC3 normal;
         float depth = 0.0f;
-        const bool blocked = deepestPenetration(verticalPos, normal, depth);
-        if (blocked) {
+        const bool blockedHere = deepestPenetration(verticalPos, normal, depth); // B9-3: 避免阴影外层 blocked
+        if (blockedHere) {
             if (verticalStep > 0.0f) {
                 result.aHitCeiling = true;
                 aVelocity.y = 0.0f; // 撞头：清掉上升速度

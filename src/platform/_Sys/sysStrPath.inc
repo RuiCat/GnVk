@@ -3,7 +3,7 @@
 // 由 GN_Sys.cpp 按原顺序包含（单编译单元，#ifdef 平台分支语义不变）；不是独立头文件。
 /*************************************************** Sys模块必须实现的东西 ************************************************************/
 
-GN_SYS_API char *const GN_StrGetModuleExtName(GN_eMODULE_TYPE type) {
+GN_SYS_API char * GN_StrGetModuleExtName(GN_eMODULE_TYPE type) {
 #if defined _WIN32_ || defined _WIN32_WCE
     static const char strEXE[] = ".exe";
     static const char strDLL[] = ".dll";
@@ -15,12 +15,12 @@ GN_SYS_API char *const GN_StrGetModuleExtName(GN_eMODULE_TYPE type) {
     static const char strDLL[] = ".so";
 #endif
     switch(type) {
-        case GN_eMODULE_EXE: return (char *const)strEXE;
-        case GN_eMODULE_DLL: return (char *const)strDLL;
-        default: return "\0";
+        case GN_eMODULE_EXE: return (char *)strEXE;
+        case GN_eMODULE_DLL: return (char *)strDLL;
+        default: return (char *)"\0";
     }
 }
-GN_SYS_API char *const GN_StrGetSysName() {
+GN_SYS_API char * GN_StrGetSysName() {
 #ifdef _WIN32_
 #ifdef __LP64__
     static const char sysName[] = "win64";
@@ -46,7 +46,7 @@ GN_SYS_API char *const GN_StrGetSysName() {
 #elif defined _LINUX_
     static const char sysName[] = "linux";
 #endif
-    return (char *const)sysName;
+    return (char *)sysName;
 }
 GN_SYS_API char *GN_StrToSysCode2(char *buf /*[384]*/, const char *in) {
 #if defined _WIN32_ || defined _WIN32_WCE
@@ -83,7 +83,6 @@ GN_SYS_API char *GN_StrToSysFilePath2(char *buf /*[384]*/, const char *src, cons
 #else
 #define PSTRBUF buf
 #endif
-    uint8 i2 = i;
     while(*src) {
         if(*src == '\\') PSTRBUF[i] = '/'; //非windows下还要把路径分割符转换一下
         else PSTRBUF[i] = *src;

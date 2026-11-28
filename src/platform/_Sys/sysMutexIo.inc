@@ -130,7 +130,7 @@ GN_SYS_API void GN_SysProc(unsigned int nTime) {
 #elif defined(_LINUX_)
 #include <sys/utsname.h>
 #endif
-GN_SYS_API char *const GN_GetInerfaceInfoSys() {
+GN_SYS_API char * GN_GetInerfaceInfoSys() {
 #ifdef _WIN32_WCE
     static const char sysInfo[] = "WinCE 6";
 #elif defined GT_USING_ANDROID_JNI || defined GT_USING_ANDROID
@@ -237,7 +237,7 @@ GN_SYS_API char *const GN_GetInerfaceInfoSys() {
         } else sprintf(sysInfo, "%s %s", uinfos.sysname, uinfos.release);
     }
 #endif
-    return (char *const)sysInfo;
+    return (char *)sysInfo;
 }
 #ifdef _WIN64
 #include <intrin.h>
@@ -342,15 +342,15 @@ GN_SYS_API void GN_GetDeviceInfoRam(char *info) {
             pstr = strstr(rbuf, "Mem");
             if(pstr) {
                 if(strstr(pstr + 3, "Total:")) {
-                    sscanf(pstr + 10, "%lld", &size);
+                    sscanf(pstr + 10, "%lu", &size);
                     tot_ram += size;
                     mk |= 1;
                 } else if(strstr(pstr + 3, "Free:")) {
-                    sscanf(pstr + 9, "%lld", &size);
+                    sscanf(pstr + 9, "%lu", &size);
                     tot_ram += size;
                     mk |= 2;
                 } else if(strstr(pstr + 3, "Available:")) {
-                    sscanf(pstr + 14, "%lld", &avl_ram);
+                    sscanf(pstr + 14, "%lu", &avl_ram);
                     mk |= 4;
                 }
                 if(mk == 7) break;
@@ -361,7 +361,7 @@ GN_SYS_API void GN_GetDeviceInfoRam(char *info) {
         avl_ram *= 1024;
     }
 #endif
-    double decimal_total = 0.0, decimal_avl = 0.0;
+    double decimal_total = 0.0;
     unsigned int long remain_total = tot_ram % GBYTES /*1G字节*/;
     unsigned int long total = tot_ram / GBYTES;
     //unsigned int  long avl = avl_ram / GBYTES;

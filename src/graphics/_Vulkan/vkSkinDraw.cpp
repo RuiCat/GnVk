@@ -98,7 +98,7 @@ bool createSkinLayouts() {
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo layoutInfo{}; layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = 2;
     layoutInfo.pBindings = bindings;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &layoutInfo, nullptr, &s_skinDescriptorLayout) != VK_SUCCESS) {
@@ -110,7 +110,7 @@ bool createSkinLayouts() {
     pushRange.offset = 0;
     pushRange.size = sizeof(sSKIN_PUSH_CONST);
 
-    VkPipelineLayoutCreateInfo pipelineInfo = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo pipelineInfo{}; pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineInfo.setLayoutCount = 1;
     pipelineInfo.pSetLayouts = &s_skinDescriptorLayout;
     pipelineInfo.pushConstantRangeCount = 1;
@@ -131,7 +131,7 @@ bool createSkinDescriptorSets() {
 
     std::vector<VkDescriptorSetLayout> layouts(slotCount, s_skinDescriptorLayout);
     std::vector<VkDescriptorSet> sets(slotCount, VK_NULL_HANDLE);
-    VkDescriptorSetAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo allocInfo{}; allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = GN_Vk.descriptorPool;
     allocInfo.descriptorSetCount = slotCount;
     allocInfo.pSetLayouts = layouts.data();
@@ -140,8 +140,7 @@ bool createSkinDescriptorSets() {
     for(uint32_t slot = 0; slot < slotCount; ++slot) {
         VkDescriptorBufferInfo sceneInfo = {GN_Vk.uniformBuffer3D, 0, sizeof(VkSceneUBO)};
         VkDescriptorBufferInfo paletteInfo = {skinPaletteSlotBuffer(slot), 0, skinPaletteSlotBytes()};
-        VkWriteDescriptorSet writes[2] = {
-            {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        VkWriteDescriptorSet writes[2]{}; writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = sets[slot];
         writes[0].dstBinding = 0;
         writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;

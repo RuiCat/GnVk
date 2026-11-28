@@ -202,7 +202,7 @@ GNu::sSIM_MENU *GNu::cSIM_DIALOG::UpdateRun(unsigned int updatatime) {
                                 value -= 1;
                                 short en_id = e_ids[value] + 1;
                                 zTextOut.SetText(e_name + en_id, (unsigned short)(e_ids[value + 1] - en_id), vvx, draw_y, zValueW, tj);
-                            } else zTextOut.SetText("-", 0, vvx, draw_y, zValueW, tj); //如没有选到东西项就显示为"-"
+                            } else zTextOut.SetText((char *)"-", 0, vvx, draw_y, zValueW, tj); //如没有选到东西项就显示为"-"
                         }
                         zTextOut.Show(text_color, aTextBlend); //显示列举变量值
                         e_name = 0;

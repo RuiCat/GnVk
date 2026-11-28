@@ -245,7 +245,7 @@ GN_NET_API int GetLocalMac(unsigned char mac[8][6]);
 }; //end namespace GNn
 
 //获得网络模块信息 如: "Winsock 2" , "Socket" , ...等
-GN_NET_API char *const GN_GetInterfaceInfoNetwork();
+GN_NET_API char * GN_GetInterfaceInfoNetwork();
 
 GN_NET_API bool GT_InitNetwork(); //初始化网络相关的内容()返回是否成功
 GN_NET_API void GT_UnInitNetwork(); //释放网络相关的内容

@@ -67,36 +67,35 @@ void GNg::sAM_EVENT::InitColor(unsigned int _start_time, unsigned int _end_time,
         ev_endtime = _ev->start_time + _ev->segment_time;                    \
         if(ev_endtime > FM zEndtime) FM zEndtime = ev_endtime;               \
     }
-GNg::cFRAME_RC::cFRAME_RC() : aFrame_ts(Ts2D), zFrame_ts(Ts2D),
-                              zPlay_obj(&Image),
+GNg::cFRAME_RC::cFRAME_RC() : zFrame_ts(Ts2D),
                               zRcLoc(0.0f, 0.0f, 128.0f, 128.0f),
                               //截图范围
-                              zRcS(0.0f, 0.0f, 1.0f, 1.0f), //默认截取完整图象
                               zRcS0(0.0f, 0.0f, 0.0f, 0.0f),
+                              zRcS(0.0f, 0.0f, 1.0f, 1.0f), //默认截取完整图象
                               zRcS_w_num(0),
                               zRcS_h_num(0),
                               //	aColor(0xffffffff),
                               //  zColor(0xffffffff),
-                              aBlendmode(1),
                               //	zTexID(0),
-
                               zFEvent(0),
                               zEventcount(0),
                               zSubFrame(0),
                               zSubCount(0),
-
                               zTexIndex(0),
                               zTexIndexCount(0),
                               zTexOnceTime(33),
+                              zPlay_obj(&Image),
 #ifdef _GN_SOUND_H_
                               zSouObj(&GNa::Sound),
-                              zSouEndTime(0),
                               zSouStartTime(0),
+                              zSouEndTime(0),
                               zTargetID(0),
 #endif
                               zFrameTsReItem(31),
+                              aLevel_ts(Ts2D),
                               aLevel_color(0xffffffff),
-                              aLevel_ts(Ts2D) {
+                              aFrame_ts(Ts2D),
+                              aBlendmode(1) {
     aLevel_range = zRcLoc;
 }
 GNg::cFRAME_RC &GNg::cFRAME_RC::operator=(const cFRAME_RC &src) {

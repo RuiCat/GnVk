@@ -276,8 +276,8 @@ struct P : public P_ //★★★安全指针  支持线程安全 预防内存涉
         int ci, new_num = (int)data_num + add_count;
         if(new_num > 0) {
             pd.New(new_num);
-            if(new_num >= data_num) {
-                for(ci = 0; ci < data_num; ++ci) ((T *)(pd.zData->pmem))[ci] = ((T *)(zData->pmem))[ci];
+            if(new_num >= (int)data_num) {
+                for(ci = 0; ci < (int)data_num; ++ci) ((T *)(pd.zData->pmem))[ci] = ((T *)(zData->pmem))[ci];
                 for(; ci < new_num; ++ci) ((T *)(pd.zData->pmem))[ci] = em_all;
             } else {
                 for(ci = 0; ci < new_num; ++ci) ((T *)(pd.zData->pmem))[ci] = ((T *)(zData->pmem))[ci];

@@ -433,12 +433,14 @@ GT_cVIDEO::GT_cVIDEO() :
 #ifdef US_FFMPEG4
                          zPacket(0), zPacket2(0),
 #endif
-                         zpAVFrameRGBBuffer(0),
-                         zpAVFrame(0),
-                         zpAVFrameRGB(0),
-                         zpContext(0),
                          zVideoIndex(-1),
                          zAudioIndex(-1),
+                         zpContext(0),
+                         zpSwScaleContext(0),
+                         zpAVFrame(0),
+                         zpAVFrameRGB(0),
+                         zpAVFrameRGBBuffer(0),
+                         zpFile(0),
                          zdwEndTime(0),
                          zdwNowTime(0),
                          zfFrameDelay(33.0f),
@@ -446,12 +448,10 @@ GT_cVIDEO::GT_cVIDEO() :
                          zSpeedRatio(1.0f),
                          zMaxAccumFrameN(13),
                          zEndOfFilm(0),
-                         zpSwScaleContext(0),
                          zMediaOpen(0),
                          zIsPlaying(0),
                          zIsPause(0),
-                         zBusy(0),
-                         zpFile(0) {
+                         zBusy(0) {
     zFileName[0] = 0; //memset(&zPacket.data,0,4); //zPacket.data = 0;
 }
 GT_cVIDEO::~GT_cVIDEO() {
@@ -733,7 +733,8 @@ bool GT_cVIDEO::InitToData(const char *filename, int loop, bool sync_time, bool 
 #endif
                             bit = 16;
                             break;
-                    }
+                                            default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
                     if(bit > 16) {
                         GN_Log("%s 使用了还未支持的音频格式! 采样率:%d\n", filename, codec_ctx->sample_rate);
                         avcodec_free_context(&codec_ctx);
@@ -923,7 +924,7 @@ void GT_cVIDEO::zRecvDecodeFrame() {
 void GT_cVIDEO::zGetFrame() {
     int w = zpCodecContext->width, h = zpCodecContext->height;
     //GN_RUNTSTART(1);
-    int ret = sws_scale(zpSwScaleContext, zpAVFrame->data, zpAVFrame->linesize, 0, h, zpAVFrameRGB->data, zpAVFrameRGB->linesize); //转换传输象素格式
+    int ret = sws_scale(zpSwScaleContext, zpAVFrame->data, zpAVFrame->linesize, 0, h, zpAVFrameRGB->data, zpAVFrameRGB->linesize); (void)ret; //转换传输象素格式
     //GN_RUNTEND;
     zImage->DataFill(zpAVFrameRGB->data[0], GNg::CR_RGB, w, h);
     //if(zPacket.data)av_free_packet( &zPacket );
@@ -1042,9 +1043,9 @@ unsigned int GT_cVIDEO::UpdataPlay(unsigned int updatatime, int x, int y, int w,
 // 包装层：cVIDEO 转发到 GT_cVIDEO。只在真有 FFmpeg 实现（或 WinCE 老路径）时编，
 // 否则 GT_cVIDEO 不存在（上面走的是空实现分支）。
 /****************************************************************************** cVIDEO ****************************************************************************/
-GNm_API char *const GNm_GetVersion() {
+GNm_API char * GNm_GetVersion() {
     static const char GNm_Version[] = GNm_VERSION;
-    return (char *const)GNm_Version;
+    return (char *)GNm_Version;
 }
 GNm::cVIDEO::cVIDEO() {
     z__attrb = (void *)new GT_cVIDEO;

@@ -37,7 +37,6 @@ GN_SYS_API void GT_GetAppFileName(char name_out[]) {
 #endif
 GN_SYS_API P<P<char>> GT_EnumSystemDirectory() {
     P<P<char>> dir_names;
-    char dir[256], *p_dir;
 #if defined _WIN32_WCE
 #elif defined _WIN32_
     char dir2[256];
@@ -198,7 +197,7 @@ struct GT_sTHREAD_ARG {
     P<GN_sTHREAD> tr;
 
     GT_sTHREAD_ARG() {}
-    GT_sTHREAD_ARG(P<GN_sTHREAD> &_tr, void *_arg, void *_arg2, void (*_fun)(P<GN_sTHREAD>, void *, void *)) : tr(_tr), arg(_arg), arg2(_arg2), fun(_fun) {}
+    GT_sTHREAD_ARG(P<GN_sTHREAD> &_tr, void *_arg, void *_arg2, void (*_fun)(P<GN_sTHREAD>, void *, void *)) : arg(_arg), arg2(_arg2), fun(_fun), tr(_tr) {}
 };
 // DA-M2 批 3：用户线程登记表收敛进文件内上下文。
 struct sUserThreadContext {
@@ -207,4 +206,3 @@ struct sUserThreadContext {
 static sUserThreadContext gUserThreadContext;
 
 GN_SYS_API bool GN_ThreadSupport = false;
-

@@ -27,7 +27,7 @@
     GNf::sFILE *fp = GNf::Open(filename_mem, "rb", memsize); \
     if(!fp) return 0;                                        \
     GT_sTGA_HEADER header;                                   \
-    uint8 bitn = GT_LoadTgaFileInfo(&header, format, w, h, fp);
+    uint8 bitn = GT_LoadTgaFileInfo(&header, format, w, h, fp); (void)bitn;
 
         GT_TMP_LOAD_TGA_FILE_INFO
         GNf::Close(fp);
@@ -61,7 +61,7 @@
             GNf::Read((char *)data1, 1, rsize, fp); //一次性读过来再解析
 
             int pn = (*w) * (*h), pi = 0;
-            uint8 chunk_flag, *_data1 = data1;
+            uint8 *_data1 = data1;
             if(bitn == 32) {
 #define GT_TMP_TGA_IMG_DATA_UNPAK(TYPE, N)                  \
     TYPE *pd = (TYPE *)data;                                \

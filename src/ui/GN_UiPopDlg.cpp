@@ -70,7 +70,7 @@ void GNu::cUI_SIM_DIALOG::UpdateRun(unsigned int updatetime, sUI_LEVEL *parent) 
     unsigned short blend_bk = aBackBlend;
     if(aBackBlurLv) {
         zBackDrawProc = GT_DrawBlurScreenImg;
-        aBackBlend = (aBackBlurLv << 10) | (((uint8)zBackFrameRepeat | 2) << 8) | (zBackFrame ? GNg::eBLEND_DST_ALPHA_MASK : aBackBlend);
+        aBackBlend = (aBackBlurLv << 10) | (((uint8)zBackFrameRepeat | 2) << 8) | (zBackFrame ? (unsigned int)GNg::eBLEND_DST_ALPHA_MASK : aBackBlend);
     }
     short last_keys[5];
     if(RecvInputUiObject != this) {

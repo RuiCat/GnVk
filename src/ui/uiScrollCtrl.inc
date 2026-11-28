@@ -2,7 +2,7 @@
 // 2026-11-26 自 GN_UiBase.cpp 第 29-191 行 move-only 拆出（REFACTOR_PLAN §13 B4）。
 // 由 GN_UiBase.cpp 按原顺序包含（单编译单元，static/宏语义不变）；不是独立头文件。
 /************************************************************** cSCROLL_RECT *********************************************************************/
-GNu::cSCROLL_CTRL::cSCROLL_CTRL() : zOffsetSheep(0.1f), zRepeatNum(0), zIsMouseFocus(false) {
+GNu::cSCROLL_CTRL::cSCROLL_CTRL() : zIsMouseFocus(false), zRepeatNum(0), zOffsetSheep(0.1f) {
     zFev.InitColor(0, 0, 0x50ffffff, 0xffffffff);
 }
 

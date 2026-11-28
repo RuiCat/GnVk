@@ -59,7 +59,7 @@ bool createParticlePipeline() {
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     dslci.bindingCount = 2;
     dslci.pBindings = bindings;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &s_particleSetLayout) != VK_SUCCESS) {
@@ -67,7 +67,7 @@ bool createParticlePipeline() {
         return false;
     }
 
-    VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     plci.setLayoutCount = 1;
     plci.pSetLayouts = &s_particleSetLayout;
     if(vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &s_particlePipelineLayout) != VK_SUCCESS) {
@@ -94,7 +94,7 @@ bool createParticlePipeline() {
 }
 
 bool createParticleCommandBuffer() {
-    VkCommandBufferAllocateInfo cbai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    VkCommandBufferAllocateInfo cbai{}; cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cbai.commandPool = GN_Vk.commandPool;
     cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cbai.commandBufferCount = 1;
@@ -102,7 +102,7 @@ bool createParticleCommandBuffer() {
         s_particleCmd = VK_NULL_HANDLE;
         return false;
     }
-    VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFenceCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     if(vkCreateFence(GN_Vk.device, &fci, 0, &s_particleFence) != VK_SUCCESS) {
         s_particleFence = VK_NULL_HANDLE;
         return false;
@@ -120,8 +120,7 @@ void writeSimDescriptorSet() {
     ssbo.buffer = s_particleBuffer;
     ssbo.offset = 0;
     ssbo.range = VK_WHOLE_SIZE;
-    VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet writes[2]{}; writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = s_simSet;
     writes[0].dstBinding = 0;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -235,7 +234,7 @@ bool GN_VkParticleCreate(uint32_t capacity, const GN3d::sPARTICLE_SIM_DESC &sim)
         return false;
     }
 
-    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &s_particleSetLayout;
@@ -287,12 +286,11 @@ bool GN_VkParticleSimulate(float dt) {
     ubo.aParams[2] = (float)count;
     ubo.aParams[3] = 0.0f;
 
-    VkCommandBufferBeginInfo cbbi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkCommandBufferBeginInfo cbbi{}; cbbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     cbbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     if(vkBeginCommandBuffer(s_particleCmd, &cbbi) != VK_SUCCESS) return false;
 
-    VkBufferMemoryBarrier barriers[2] = {{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER},
-                                         {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER}};
+    VkBufferMemoryBarrier barriers[2]{}; barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER; barriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barriers[0].buffer = s_particleBuffer;
@@ -326,7 +324,7 @@ bool GN_VkParticleSimulate(float dt) {
 
     if(vkEndCommandBuffer(s_particleCmd) != VK_SUCCESS) return false;
 
-    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &s_particleCmd;
     vkResetFences(GN_Vk.device, 1, &s_particleFence);

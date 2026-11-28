@@ -54,12 +54,12 @@ void buildFaceViewProj(int face, float outViewProj[16]) {
 // 一次性命令缓冲：录制完成后提交并等待 fence（不依赖队列空闲）。
 VkCommandBuffer beginOneTimeCommands() {
     VkCommandBuffer cb = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    VkCommandBufferAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandPool = GN_Vk.commandPool;
     ai.commandBufferCount = 1;
     vkAllocateCommandBuffers(GN_Vk.device, &ai, &cb);
-    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cb, &bi);
     return cb;
@@ -68,11 +68,11 @@ VkCommandBuffer beginOneTimeCommands() {
 bool endAndWaitCommands(VkCommandBuffer cb) {
     VkResult endResult = vkEndCommandBuffer(cb);
     VkFence fence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFenceCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     VkResult fenceResult = vkCreateFence(GN_Vk.device, &fci, 0, &fence);
     VkResult submitResult = VK_ERROR_UNKNOWN;
     if(fenceResult == VK_SUCCESS) {
-        VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         si.commandBufferCount = 1;
         si.pCommandBuffers = &cb;
         submitResult = vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, fence);
@@ -93,7 +93,7 @@ bool endAndWaitCommands(VkCommandBuffer cb) {
 // ── 烘焙目标：128²×6 RGBA16F cubemap、6 张 face 视图、专用 render pass + 6 个 framebuffer ──
 bool createEnvBakeTargets() {
     const uint32_t size = ENV_BAKE_SIZE;
-    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.extent = {size, size, 1};
     ii.mipLevels = 1;
@@ -109,13 +109,13 @@ bool createEnvBakeTargets() {
     if(vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.envBakeImage) != VK_SUCCESS) return false;
     VkMemoryRequirements mr;
     vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.envBakeImage, &mr);
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if(vkAllocateMemory(GN_Vk.device, &mai, 0, &GN_Vk.envBakeMemory) != VK_SUCCESS) return false;
     vkBindImageMemory(GN_Vk.device, GN_Vk.envBakeImage, GN_Vk.envBakeMemory, 0);
     for(int face = 0; face < ENV_FACE_COUNT; face++) {
-        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vi.image = GN_Vk.envBakeImage;
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
         vi.format = ENV_BAKE_FORMAT;
@@ -140,7 +140,7 @@ bool createEnvBakeTargets() {
     sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     sp.colorAttachmentCount = 1;
     sp.pColorAttachments = &ar;
-    VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rpi.attachmentCount = 1;
     rpi.pAttachments = &ad;
     rpi.subpassCount = 1;
@@ -150,7 +150,7 @@ bool createEnvBakeTargets() {
     }
     GN_Vk.envBakeFramebuffers = new VkFramebuffer[ENV_FACE_COUNT];
     for(int face = 0; face < ENV_FACE_COUNT; face++) {
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fci.renderPass = GN_Vk.envBakeRenderPass;
         fci.attachmentCount = 1;
         fci.pAttachments = &GN_Vk.envBakeFaceViews[face];
@@ -180,14 +180,14 @@ bool createEnvBakePipeline() {
         dslb[b].descriptorCount = 1;
         dslb[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
-    VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     dslci.bindingCount = 4;
     dslci.pBindings = dslb;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.envBakeDescriptorLayout) !=
        VK_SUCCESS) {
         return false;
     }
-    VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     plci.setLayoutCount = 1;
     plci.pSetLayouts = &GN_Vk.envBakeDescriptorLayout;
     if(vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &GN_Vk.envBakePipelineLayout) != VK_SUCCESS) {
@@ -197,7 +197,7 @@ bool createEnvBakePipeline() {
               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
               GN_Vk.envBakeUBOBuffer, GN_Vk.envBakeUBOMemory);
     if(GN_Vk.envBakeUBOBuffer == VK_NULL_HANDLE) return false;
-    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &GN_Vk.envBakeDescriptorLayout;
@@ -225,9 +225,7 @@ bool createEnvBakePipeline() {
         vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.envBakeDescriptorSets[face]);
         VkDescriptorBufferInfo dbi = {GN_Vk.envBakeUBOBuffer,
                                       (VkDeviceSize)(face * ENV_BAKE_UBO_STRIDE), 144};
-        VkWriteDescriptorSet w[3] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        VkWriteDescriptorSet w[3]{}; w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         w[0].dstSet = GN_Vk.envBakeDescriptorSets[face];
         w[0].dstBinding = 0;
         w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -312,7 +310,7 @@ bool bakeSkyCubemap(const VkSkyParams &skyParams, std::vector<float> &envFaces) 
     for(int face = 0; face < ENV_FACE_COUNT; face++) {
         VkClearValue cv;
         cv.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-        VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpi.renderPass = GN_Vk.envBakeRenderPass;
         rpi.framebuffer = GN_Vk.envBakeFramebuffers[face];
         rpi.renderArea = {{0, 0}, {size, size}};
@@ -327,7 +325,7 @@ bool bakeSkyCubemap(const VkSkyParams &skyParams, std::vector<float> &envFaces) 
     }
     // render pass 写 → transfer 读
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -354,7 +352,7 @@ bool bakeSkyCubemap(const VkSkyParams &skyParams, std::vector<float> &envFaces) 
                            ENV_FACE_COUNT, regions);
     // 采样布局留给 G3 重烘/调试使用
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -414,7 +412,7 @@ std::vector<unsigned short> toHalfWords(const float *values, size_t count) {
 bool createPrefilteredImage(VkImage *outImage, VkDeviceMemory *outMemory, VkImageView *outView) {
     const uint32_t size = ENV_BAKE_SIZE;
     const uint32_t mipCount = (uint32_t)ENV_MIP_COUNT;
-    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.extent = {size, size, 1};
     ii.mipLevels = mipCount;
@@ -429,12 +427,12 @@ bool createPrefilteredImage(VkImage *outImage, VkDeviceMemory *outMemory, VkImag
     if(vkCreateImage(GN_Vk.device, &ii, 0, outImage) != VK_SUCCESS) return false;
     VkMemoryRequirements mr;
     vkGetImageMemoryRequirements(GN_Vk.device, *outImage, &mr);
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if(vkAllocateMemory(GN_Vk.device, &mai, 0, outMemory) != VK_SUCCESS) return false;
     vkBindImageMemory(GN_Vk.device, *outImage, *outMemory, 0);
-    VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     vi.image = *outImage;
     vi.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
     vi.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -462,7 +460,7 @@ bool uploadPrefilteredData(VkImage image, const std::vector<float> &prefiltered)
     vkUnmapMemory(GN_Vk.device, stagingMem);
     VkCommandBuffer cb = beginOneTimeCommands();
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -495,7 +493,7 @@ bool uploadPrefilteredData(VkImage image, const std::vector<float> &prefiltered)
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, (uint32_t)regions.size(),
                            regions.data());
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -517,7 +515,7 @@ bool uploadPrefilteredData(VkImage image, const std::vector<float> &prefiltered)
 
 // 初始化路径：建预滤波 cubemap + 采样器并上传（G3 重烘走 createPrefilteredImage/uploadPrefilteredData）。
 bool uploadPrefilteredCubemap(const std::vector<float> &prefiltered) {
-    VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     sci.magFilter = VK_FILTER_LINEAR;
     sci.minFilter = VK_FILTER_LINEAR;
     sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
@@ -542,7 +540,7 @@ bool uploadBrdfLut() {
     const uint32_t size = (uint32_t)GN3d::BRDF_LUT_SIZE;
     std::vector<float> lut((size_t)size * size * 2);
     if(!GN3d::generateBrdfLut(lut.data(), (int)size, (int)size)) return false;
-    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.extent = {size, size, 1};
     ii.mipLevels = 1;
@@ -556,12 +554,12 @@ bool uploadBrdfLut() {
     if(vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.brdfLutImage) != VK_SUCCESS) return false;
     VkMemoryRequirements mr;
     vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.brdfLutImage, &mr);
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if(vkAllocateMemory(GN_Vk.device, &mai, 0, &GN_Vk.brdfLutMemory) != VK_SUCCESS) return false;
     vkBindImageMemory(GN_Vk.device, GN_Vk.brdfLutImage, GN_Vk.brdfLutMemory, 0);
-    VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     vi.image = GN_Vk.brdfLutImage;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = VK_FORMAT_R16G16_SFLOAT;
@@ -569,7 +567,7 @@ bool uploadBrdfLut() {
     vi.subresourceRange.levelCount = 1;
     vi.subresourceRange.layerCount = 1;
     if(vkCreateImageView(GN_Vk.device, &vi, 0, &GN_Vk.brdfLutView) != VK_SUCCESS) return false;
-    VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     sci.magFilter = VK_FILTER_LINEAR;
     sci.minFilter = VK_FILTER_LINEAR;
     sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -589,7 +587,7 @@ bool uploadBrdfLut() {
     vkUnmapMemory(GN_Vk.device, stagingMem);
     VkCommandBuffer cb = beginOneTimeCommands();
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -610,7 +608,7 @@ bool uploadBrdfLut() {
     vkCmdCopyBufferToImage(cb, staging, GN_Vk.brdfLutImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                            1, &region);
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -652,8 +650,7 @@ bool createGiUbo(const float sh[GN3d::SH9_FLOAT_COUNT]) {
 void updateEnvironmentDescriptors(VkImageView view) {
     VkDescriptorImageInfo info = {GN_Vk.envPrefilteredSampler, view,
                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet w[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                 {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet w[2]{}; w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     w[0].dstSet = GN_Vk.descriptorSetPBR;
     w[0].dstBinding = 8; // G1b：PBR 预滤波 cubemap
     w[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;

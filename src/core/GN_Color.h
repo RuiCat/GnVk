@@ -72,8 +72,6 @@ struct GN_API sCOLOR4F //浮点颜色类型
     inline operator const float *() const { return (const float *)&r; }
     inline operator sCOLOR4F *() { return this; }
     inline operator const sCOLOR4F *() const { return this; }
-    inline operator sCOLOR4F &() { return *this; }
-    inline operator const sCOLOR4F &() const { return *this; }
 
     //运算方法
     inline sCOLOR4F &operator+=(const sCOLOR4F &c) {

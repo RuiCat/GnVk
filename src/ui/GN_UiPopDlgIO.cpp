@@ -172,7 +172,6 @@ void GNu::cSIM_DIALOGEX::zRemoveValueRelatTsItems() {
     short ci, ce = zChild.size();
     if(ce && _items->size()) {
         void *_ptr;
-        GT_s_VALUE_TS *_vts;
         for(ci = 0; ci < ce; ++ci) {
             _ptr = zChild[ci].pointer;
             for(ititm = _items->begin(); ititm != etitm;) {

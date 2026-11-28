@@ -134,11 +134,11 @@ bool GN_VkBeginFrame() {
         if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) return false;
     }
     vkResetCommandBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame], 0);
-    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame], &bi);
     VkClearValue cv = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
-    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass = GN_Vk.renderPass;
     rpi.framebuffer = GN_Vk.framebuffers[GN_Vk.currentFrame];
     rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
@@ -208,13 +208,13 @@ void GN_VkEndFrame() {
     vkEndCommandBuffer(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
     if(GN_Vk.headless) {
         // 无窗口：不等待/不信号呈现信号量，也没有 present，提交后由 fence 负责同步
-        VkSubmitInfo hsi = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        VkSubmitInfo hsi{}; hsi.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         hsi.commandBufferCount = 1;
         hsi.pCommandBuffers = &GN_Vk.commandBuffers[GN_Vk.currentFrame];
         vkQueueSubmit(GN_Vk.graphicsQueue, 1, &hsi, GN_Vk.inFlightFence);
         return;
     }
-    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     VkPipelineStageFlags ws[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     si.waitSemaphoreCount = 1;
     si.pWaitSemaphores = &GN_Vk.imageAvailable;
@@ -224,7 +224,7 @@ void GN_VkEndFrame() {
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &GN_Vk.renderFinished;
     vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, GN_Vk.inFlightFence);
-    VkPresentInfoKHR pi = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    VkPresentInfoKHR pi{}; pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.waitSemaphoreCount = 1;
     pi.pWaitSemaphores = &GN_Vk.renderFinished;
     pi.swapchainCount = 1;
@@ -237,7 +237,7 @@ void GN_VkBegin2DPass() {
     if(!GN_Vk.initialized || GN_Vk.inRenderPass) return; // 已有活跃通道时不重复开
     if(GN_Vk.renderPass2DOverlay == VK_NULL_HANDLE || GN_Vk.framebuffers2DOverlay == nullptr) return;
     VkCommandBuffer commandBuffer = GN_Vk.commandBuffers[GN_Vk.currentFrame];
-    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass = GN_Vk.renderPass2DOverlay;
     rpi.framebuffer = GN_Vk.framebuffers2DOverlay[GN_Vk.currentFrame];
     rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};

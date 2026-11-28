@@ -29,7 +29,7 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 #include "GN_FontFT.h"
 #endif
 #ifdef _GN_FONT_H_
-GNg::sDRAW_ARRANGE::sDRAW_ARRANGE() : zParame(GNg::ArrangeFmt), zFontMapFormat(GNg::eFONT_NUMBER), zDrawRngData(0), zRowNum(0) {}
+GNg::sDRAW_ARRANGE::sDRAW_ARRANGE() : zParame(GNg::ArrangeFmt), zDrawRngData(0), zRowNum(0), zFontMapFormat(GNg::eFONT_NUMBER) {}
 
 GN_API GNg::eFONT_MAP_FORMAT GNg::QueryFontMapFormat(sIMAGE *fontmap) {
     float ratio = (float)(fontmap->width) / (float)(fontmap->height);
@@ -369,7 +369,8 @@ int GNg::cTEXT_ART::SetText(bool in_rect, GNu::eNEAR_TYPE near_type, char *text,
                 if(_x > x) x = _x;
                 else if(zParame.overturn_print) x -= zTotRngW - w;
                 break;
-        }
+                    default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
     } else { //在格筐外显示 ----------------------------------------------
         switch(near_type) {
             case GNu::eNEAR_LEFT:
@@ -388,7 +389,8 @@ int GNg::cTEXT_ART::SetText(bool in_rect, GNu::eNEAR_TYPE near_type, char *text,
                 y = y + h;
                 x = cx - (zTotRngW >> 1);
                 break;
-        }
+                    default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
     } //----------------------------------------------------------------------
     int ox = x - zDrawRngData->x, oy = y - zDrawRngData->y; //计算出位置差
     sDRAW_RANGE *_rng_data = zDrawRngData, *rng_end = zDrawRngData + zTextCount;

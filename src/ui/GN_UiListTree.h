@@ -22,7 +22,7 @@ class cTREE_NODE_OPTR //★树节点操作器  继承该接口类以便对自定
     virtual P<cTREE_NODE_OPTR> OnCloneOut() { return P<cTREE_NODE_OPTR>(1); } //复制出该对象的一个新副本
     virtual bool Search_exec(P_ g, bool unfold, bool (*proc)(P_ &node, void *us_arg), void *_us_arg) { return false; } //使指定节点里的所有子节点和它都执行指定函数(指定节点 传入空指针表示跟节点, 是否仅检索展开的节点, 返回是否要继续查找 执行函数(当前检索到的节点, 传回给你的参数), 传给执行函数用的参数) 返回查找中途是否有被中断
     virtual void MoveNodes(P_ pos, bool pos_back, GN::sLIST<P_> *nodes) {} //移动一组节点到指定节点旁边(指定节点, 是否放在指定节点之后 否则在前, 一组节点)
-    virtual char *GetNodeName(P_ &node) { return ""; } //获得指定节点名称
+    virtual char *GetNodeName(P_ &node) { return (char *)""; } //获得指定节点名称
     virtual P_ GetCurFristNode() { return P_(); } //获得当前首个检索节点
     virtual int GetVisualNodeNum() { return 0; } //获得当前展开的可显示节点总数
     virtual void *GetDrawNodeFunc() { return 0; } //获得节点信息绘制的方
@@ -38,8 +38,8 @@ class cTREE_NODE_OPTR //★树节点操作器  继承该接口类以便对自定
 class GN_API cTREE_VIEW : public cSELECT_LIST_TEXT //★滚动列表树 支持动态增长缩短双向链表树 和增删重排操作等功能
 {
 #ifndef _APPLE_
-    cSELECT_LIST_TEXT::InitStyleToData; //使基类的该函数不能用
-    cSCROLL_LIST::SetZoningCount;
+    using cSELECT_LIST_TEXT::InitStyleToData; //使基类的该函数不能用
+    using cSCROLL_LIST::SetZoningCount;
 #endif
   protected:
     P<cTREE_NODE_OPTR> zNodeOptr; //树节点操作器

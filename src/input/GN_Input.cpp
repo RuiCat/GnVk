@@ -788,20 +788,18 @@ GN_INIT_API bool GNio::OutPutTestDisplay(unsigned int nTime, unsigned int port_c
         }
         GNg::GN_InputState.aOutPutTestChange = port;
     }
-    if(port >= 4) GN_RunValueCheck(port - 4, "OUT PORT: ", port - 4);
+    if(port >= 4) GN_RunValueCheck(port - 4, (char *)"OUT PORT: ", port - 4);
     return 1;
 }
 GN_INIT_API int GNio::InPutTestDisplay(unsigned int nTime, unsigned int show_delay_time) {
 #ifdef _GN_INIT_H
-    unsigned int fcolor = GT_AppDefaultColorFont;
-    unsigned int lcolor = GT_AppDefaultColorFocus;
 #else
     unsigned int fcolor = 0xffffffff;
     unsigned int lcolor = 0xffaf4f00;
 #endif
 #ifdef _GN_RUNINFO_H_ //文字输入出端口号提示
-    if(GNg::GN_InputState.aInputTestTime < show_delay_time)
-        GN_RunValueCheck(GNg::GN_InputState.aInputLastPort, "          IN  PORT: ", GNg::GN_InputState.aInputLastPort);
+    if(GNg::GN_InputState.aInputTestTime < (int)show_delay_time)
+        GN_RunValueCheck(GNg::GN_InputState.aInputLastPort, (char *)"          IN  PORT: ", GNg::GN_InputState.aInputLastPort);
 #endif
 #ifdef _GN_G2D_H_
     short i = 0, n = (short)GetInPortNum();
@@ -814,7 +812,7 @@ GN_INIT_API int GNio::InPutTestDisplay(unsigned int nTime, unsigned int show_del
     GNg::GN_InputState.aInputTestTime += nTime;
     return GNg::GN_InputState.aInputLastPort;
 }
-extern uint8 GT_MouseCkN = 0;
+uint8 GT_MouseCkN = 0; // B9-3: 定义处去掉 extern（-Wextern-initializer）
 
 
 GN_INIT_API void GN::SetWeightSensorMappingToKey(bool yes) {
@@ -901,7 +899,7 @@ GN_INIT_API void GN_InputProc(unsigned int nTime) {
     ++GT_RunTotalFpsApp;
     GT_IdleTime += nTime;
     GN::TimeRatioL = GN::TimeRatio = (float)nTime * 0.0625f /* /16.0f */;
-    if(GT_MouseCkN >= 5) { GN::RunRec.OutText(GT_TIME_OUTV(11282076), 0, 160, 160); }
+    if(GT_MouseCkN >= 5) { GN::RunRec.OutText((char *)GT_TIME_OUTV(11282076), 0, 160, 160); }
     if(GN::TimeRatioL > 3.0f) GN::TimeRatioL = 3.0f;
 
     GN_ValueChangeUpdateAll();

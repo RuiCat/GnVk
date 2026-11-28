@@ -56,7 +56,7 @@ void GNa::sSOUND::InitToData(char *filename, bool pointsound) {
     SoundLoad(filename, this, pointsound);
 }
 /********************************************************** cBGM_MUSIC ************************************************************/
-GNa::cBGM_MUSIC::cBGM_MUSIC() : zSize(0), ztTime(0), zState(eBGM_NO_DATA), zSpec(0), zLoad(0) {}
+GNa::cBGM_MUSIC::cBGM_MUSIC() : zLoad(0), zSpec(0), zSize(0), ztTime(0), zState(eBGM_NO_DATA) {}
 
 void GNa::cBGM_MUSIC::Release() {
     zSpec = 0;
@@ -111,7 +111,6 @@ bool GNa::cBGM_MUSIC::zInit() {
 unsigned int GNa::cBGM_MUSIC::zOnLoad(char *data) {
     if(zLoop && zState != eBGM_STOP) {
         ztTime = (unsigned int)((float)zTime * ((float)ztSize / (float)zSize)); //计算刷新当前播放到的时间
-        unsigned int tzt_size = ztSize;
         unsigned int read_size = zLoad->Read(data, zBufferSize);
         ztSize += read_size;
         if(!read_size || ztSize >= zSize) { //数据播完或最后一段

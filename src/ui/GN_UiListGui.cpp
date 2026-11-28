@@ -28,7 +28,6 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 #ifdef _GN_UILISTGUI_H_
 /***************************************************** cSCROLL_LIST_GUI *************************************************************************/
 void GNu::cVALUE_EXTRACT_FILE::StatisticSize(cUI_GROUP *parent) {
-    cSCROLL_LIST_GUI *list_gui = (cSCROLL_LIST_GUI *)parent;
     //list_gui->aSubUiCallBack = SubUiUpdateSyncProc;
 }
 //以新区块ID来重加载图像(图像, 区块ID)
@@ -51,9 +50,9 @@ GN::sVALUE_LAYOUT2 *GT_SubUiUpdateSyncProc(GNu::eSUBUI_FUNC func, unsigned int z
     if(vdescs->stride > -1) {
         uint8 *tg_ptr;
         switch(func) {
+            default: break; // B9-3: 未列举枚举值兜底（保行为；置顶避免跨越 case 内初始化）
             case GNu::eSUBUI_LOAD:
                 tg_ptr = (uint8 *)_ui + vdescs->pos_tg;
-            GNf:
                 Seek(_vef->fp, (int)(_vef->data_pos + vdescs->pos) + (int)vdescs->stride * zid, GNf::eSEEK_START);
                 short str_size = (vdescs->size & GNu::eLAYOUT_TARGET_STR_SIZE_BIT) >> 8;
                 if(vdescs->size > 0) {
@@ -151,7 +150,7 @@ GN::sVALUE_LAYOUT2 *GT_SubUiUpdateSyncProc(GNu::eSUBUI_FUNC func, unsigned int z
                     }
                 }
                 break;
-        }
+}
     }
     ++vdescs;
     if(_ui->aType == GNg::eOBJ_GROUP) {

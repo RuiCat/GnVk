@@ -13,8 +13,7 @@ namespace {
 
 void writeLutPair(VkDescriptorSet set, uint32_t firstBinding, const VkDescriptorImageInfo *pair) {
     if(set == VK_NULL_HANDLE) return;
-    VkWriteDescriptorSet w[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                 {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet w[2]{}; w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     for(int i = 0; i < 2; ++i) {
         w[i].dstSet = set;
         w[i].dstBinding = firstBinding + (uint32_t)i;

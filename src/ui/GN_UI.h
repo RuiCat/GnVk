@@ -135,7 +135,7 @@ class GN_API cUI_GROUP : public iUI_OBJECT, public GNg::sDRAW_IN_AREA //★UI组
 
     GN::sLIST<P<iUI_OBJECT>> aSubs; //接入到它的所有子对象
 
-    cUI_GROUP() : gw(-1), lw(0), lh(0), aUsScissor(false) { aType = GNg::eOBJ_GROUP; }
+    cUI_GROUP() : lw(0), lh(0), gw(-1), aUsScissor(false) { aType = GNg::eOBJ_GROUP; }
     //	virtual ~cUI_GROUP();
     virtual P<iUI_OBJECT> Clone(); //复制出该UI组件的一个新副本
 
@@ -197,7 +197,7 @@ class GN_API cUI_BACK_FRAME : public sUI_IMAGE //★底筐
     uint8 aZoom; //可否拖拉边框缩放
     uint8 aDragBarH; //顶端拖动栏高 当该值非0时 筐顶可以拖动并影响到上级UI组和里面的内容
 
-    cUI_BACK_FRAME() : aBackBlurLv(0), aBackRepeat(false), aZoom(0), aDragBarH(0) { aType = eUI_BACK_FRAME; }
+    cUI_BACK_FRAME() : aBackRepeat(false), aBackBlurLv(0), aZoom(0), aDragBarH(0) { aType = eUI_BACK_FRAME; }
 
     virtual P<iUI_OBJECT> Clone(); //复制出该UI组件的一个新副本
     virtual void StatisticSize(cUI_GROUP *parent); //统计UI占位大小并调整父层组的宽高使能包含整个UI占位区(父层组)
@@ -347,7 +347,7 @@ class GN_API cUI_PTR //★★★ UI组件地址 用于控制组件的层级关�
 
     P<iUI_OBJECT> *aPtr; //指向它所在父层组链表里的地址
 
-    cUI_PTR() : aPtr(0), zParent(0) {}
+    cUI_PTR() : zParent(0), aPtr(0) {}
 
     void UnComment(P<iUI_OBJECT> *obj = 0); //解除UI组件与父层组的连接(如有指定 返回该UI组件) !解除后对象UI组件地址便会失效
     void InsertFront(P<iUI_OBJECT> obj, cUI_PTR *ptr_out = 0); //插入其它UI组件或UI组在它前面(其它UI组件或UI组, 如有指定返回插入后的组件地址) !组件包含的子对象 图片等资源也一并牵连进来 其它注意项同上

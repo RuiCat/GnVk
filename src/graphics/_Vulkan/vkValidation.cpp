@@ -66,7 +66,7 @@ void vkValidationCreateMessenger(VkInstance instance) {
         std::fprintf(stderr, "[VK-VALIDATION] 取不到 vkCreateDebugUtilsMessengerEXT，校验输出不可用\n");
         return;
     }
-    VkDebugUtilsMessengerCreateInfoEXT info = {VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
+    VkDebugUtilsMessengerCreateInfoEXT info{}; info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
                            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
     info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
@@ -95,7 +95,7 @@ void vkValidationBeginLabel(VkCommandBuffer cmd, const char *name) {
         s_labelFnsLoaded = true;
     }
     if(s_beginLabelFn == 0) return;
-    VkDebugUtilsLabelEXT label = {VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
+    VkDebugUtilsLabelEXT label{}; label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
     label.pLabelName = name;
     label.color[0] = 0.2f;
     label.color[1] = 0.8f;

@@ -132,8 +132,7 @@ bool createCloudCubeResources() {
     binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     binding.descriptorCount = 1;
     binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo layoutInfo{}; layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = 1;
     layoutInfo.pBindings = &binding;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &layoutInfo, nullptr, &s_cubeSetLayout) !=
@@ -141,7 +140,7 @@ bool createCloudCubeResources() {
         s_cubeSetLayout = VK_NULL_HANDLE;
         return false;
     }
-    VkPipelineLayoutCreateInfo pipelineInfo = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo pipelineInfo{}; pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineInfo.setLayoutCount = 1;
     pipelineInfo.pSetLayouts = &s_cubeSetLayout;
     if(vkCreatePipelineLayout(GN_Vk.device, &pipelineInfo, nullptr, &s_cubePipelineLayout) !=
@@ -167,7 +166,7 @@ bool createCloudCubeResources() {
         fprintf(stderr, "[GN_Vk] 立方体云着色器加载失败: gn3d_cloud_cube.vert/frag.spv\n");
         return false;
     }
-    VkDescriptorSetAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo allocInfo{}; allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = GN_Vk.descriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &s_cubeSetLayout;
@@ -179,7 +178,7 @@ bool createCloudCubeResources() {
     bufferInfo.buffer = s_cubeUboBuffer;
     bufferInfo.offset = 0;
     bufferInfo.range = (VkDeviceSize)sizeof(sCLOUD_CUBE_UBO);
-    VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    VkWriteDescriptorSet write{}; write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     write.dstSet = s_cubeSet;
     write.dstBinding = 0;
     write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;

@@ -3,7 +3,7 @@
 #ifdef _GN_FORMAT_H_
     GN_API void GNg::GenCylinderDataToMem(uint8 *p_memory, int w, int h, float value) {
         float cp = (float)w * 0.5f - 0.5f;
-        float r = (float)(w) * 0.5f, _r, _x, _y, _l;
+        float r = (float)(w) * 0.5f, _r, _l;
         int i, j, id = 0;
         //if(is_solid){
         _r = r * value;

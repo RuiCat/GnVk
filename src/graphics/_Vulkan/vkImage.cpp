@@ -174,7 +174,7 @@ uint8 *sIMAGE::DataGet(int *w, int *h, int *fmt) {
     // One-time command: transition → copy → transition back
     VkCommandBuffer cb;
     {
-        VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        VkCommandBufferAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         ai.commandPool = GN_Vk.commandPool;
         ai.commandBufferCount = 1;
@@ -182,13 +182,13 @@ uint8 *sIMAGE::DataGet(int *w, int *h, int *fmt) {
         VkCheck(res, "vkAllocateCommandBuffers in DataGet");
     }
     {
-        VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(cb, &bi);
     }
     // Transition image to TRANSFER_SRC
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -212,7 +212,7 @@ uint8 *sIMAGE::DataGet(int *w, int *h, int *fmt) {
     }
     // Transition back
     {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -228,10 +228,10 @@ uint8 *sIMAGE::DataGet(int *w, int *h, int *fmt) {
     }
     vkEndCommandBuffer(cb);
     {
-        VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VkFenceCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         VkFence f;
         vkCreateFence(GN_Vk.device, &fci, 0, &f);
-        VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         si.commandBufferCount = 1;
         si.pCommandBuffers = &cb;
         vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, f);

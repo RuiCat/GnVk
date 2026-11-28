@@ -199,10 +199,10 @@ enum GN_eMODULE_TYPE { //程序模块类型
     GN_eMODULE_DLL //动态连接库文件
 };
 //获得对应系统正确的程序模块扩展名 包含分格符'.'(程序模块类型) !因为各个系统使用的程序模块扩展名是有些不同
-GN_SYS_API char *const GN_StrGetModuleExtName(GN_eMODULE_TYPE type);
+GN_SYS_API char * GN_StrGetModuleExtName(GN_eMODULE_TYPE type);
 
 //获得对应系统的简名 如: "win32", "win64", "wince", "linux", "android", "mac", "ios"
-GN_SYS_API char *const GN_StrGetSysName();
+GN_SYS_API char * GN_StrGetSysName();
 
 //把指定的字符串转为文件系统所用的编码字符串(用来装输出字符串的数组指针, 字符串)
 GN_SYS_API void GN_StrToSysCode(char *out, const char *in);
@@ -266,7 +266,7 @@ GN_SYS_API P<P<char>> GT_EnumSystemDirectory();
 GN_SYS_API bool GN_SysShowFile(const char *filename);
 
 //得到一个用 用户存档目录续上指定路径文件名的路径文件名()返回路径文件名 这个便于用户写入存档定位用的 当返回路径里的文件或目录不能访问 这可能是还未获得终端用户授权 要授权后才能访问 该函数通常在引擎回调 读取用户资源函数如"AppInit"时才开始生效
-GN_SYS_API char *const GN_DocDir(const char *path_file);
+GN_SYS_API char * GN_DocDir(const char *path_file);
 /*************************************************************** 时间API ***********************************************************************/
 
 //使当前执行线程暂停挂起一定时间(指定时间 单位毫秒)
@@ -404,7 +404,7 @@ GN_SYS_API void GN_InitSys(); //初始化系统相关的内容 !如果你是开�
 GN_SYS_API void GN_UnInitSys(); //释放系统相关的内容   !如果你是开发接口的 需要一并移除引擎系统初始化状态变量 GT_SystemInited & (1<<5) 的位标记
 GN_SYS_API void GN_SysProc(unsigned int nTime); //挂起处理系统相关的一些杂务(帧间隔时间) 该函数用于在帧循环里不断调用的
 
-GN_SYS_API char *const GN_GetInerfaceInfoSys(); //获得系统模块信息 如: "Windows 7" , "Mac OS X 10.5" , "Linux" , "WinCE 6" , "Android 2.3" , "IOS 4" , ...等
+GN_SYS_API char * GN_GetInerfaceInfoSys(); //获得系统模块信息 如: "Windows 7" , "Mac OS X 10.5" , "Linux" , "WinCE 6" , "Android 2.3" , "IOS 4" , ...等
 GN_SYS_API void GN_GetDeviceInfoCpu(char *info /*[64]*/); //获得硬件CPU厂商型号主频信息(信息输出缓冲 需先分配好空间)
 GN_SYS_API void GN_GetDeviceInfoCpu_s(char *info, int cap); //带容量上限版本
 GN_SYS_API void GN_GetDeviceInfoRam(char *info /*[64]*/); //获得硬件内存大小信息(信息输出缓冲 需先分配好空间)

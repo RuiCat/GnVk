@@ -172,7 +172,6 @@ bool cFREETYPE_FONT::PackIntoAtlas(int w, int h, const unsigned char *bitmap,
         return PackIntoAtlas(w, h, bitmap, out);
     }
     // 写入图集
-    int atlasW = m_atlasSize;
     // 读取当前图集行数据，修改后写回（用 DataFill 子区域更新）
     unsigned char *row = new unsigned char[pw * ph * 4];
     for(int r = 0; r < h; r++) {

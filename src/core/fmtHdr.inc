@@ -88,7 +88,7 @@
     static int GT_ReadImgPixelsRGBE(GNf::sFILE *fp, float *data, int w, int h, bool col_turn) {
         uint8 rgbe[4];
         if(col_turn) {
-            int w3 = w * 3, i;
+            int w3 = w * 3;
             float *_data, *_end;
             while(h-- > 0) {
                 _data = data + w3 * h;

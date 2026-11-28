@@ -46,7 +46,8 @@ GN_API bool GNg::ImgFmtHasAlpha(COLOR_FORMAT format) {
         case GNg::CR_ALPHA:
         case GNg::CR_RGBA16:
             return true;
-    }
+            default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
     return false;
 }
 GN_API bool GNg::ImgFmtIsLuminance(COLOR_FORMAT format) {
@@ -488,7 +489,8 @@ GN_API GNg::PFUNC_PIX_CV GNg::PixRGBturnFuncChoose(COLOR_FORMAT format) {
         case CR_RED: return PixFmtRtoBGR;
         case CR_GREEN: return PixFmtGtoBGR;
         case CR_BLUE: return PixFmtBtoBGR;
-    }
+            default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
     return 0;
 }
 GN_API void GNg::ImgFmtMergeRGBandRGBtoRGBA(unsigned char *pdesc_data, const unsigned char *psrc_data, const unsigned char *psrc_data2, int img_w, bool inv_a) {

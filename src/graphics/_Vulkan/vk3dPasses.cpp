@@ -58,7 +58,7 @@ void GN_VkShadowPassBegin(const sMAT44 *lightViewProj, uint32_t cascadeIndex) {
 
     VkClearValue cv;
     cv.depthStencil = {1.0f, 0};
-    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass = GN_Vk.shadowRenderPass;
     // L3c：framebuffer 选择对应级联层（view 已绑定 layer，renderArea 仍是单层尺寸）。
     rpi.framebuffer = shadowFramebufferForCascade(cascadeIndex);
@@ -181,7 +181,7 @@ void GN_VkCubeShadowFaceBegin(const sVEC3 &lightPos, uint32_t face, float nearZ,
 
     VkClearValue cv;
     cv.depthStencil = {1.0f, 0};
-    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass = GN_Vk.cubeShadowRenderPass;
     rpi.framebuffer = GN_Vk.cubeShadowFramebuffer[slot];
     rpi.renderArea = {{0, 0}, {GN_Vk.cubeShadowSize, GN_Vk.cubeShadowSize}};
@@ -299,7 +299,7 @@ void GN_VkCompositeToSwapchain() {
     hii.sampler = GN_Vk.hdrSampler;
     hii.imageView = GN_Vk.hdrView;
     hii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkWriteDescriptorSet wc = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    VkWriteDescriptorSet wc{}; wc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     wc.dstSet = GN_Vk.compositeDescriptorSet;
     wc.dstBinding = 1;
     wc.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -313,7 +313,7 @@ void GN_VkCompositeToSwapchain() {
     // 开始合成 pass → swapchain
     VkClearValue cv;
     cv.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass = GN_Vk.compositeRenderPass;
     rpi.framebuffer = GN_Vk.compositeFramebuffers[GN_Vk.currentFrame];
     rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
@@ -437,7 +437,7 @@ void GN_VkBegin3DPassPBR(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         cvs[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
         cvs[1].depthStencil = {1.0f, 0};
         cvs[2].color = {{0.0f, 0.0f, 0.0f, 1.0f}}; // resolve clear
-        VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpi.renderPass = GN_Vk.renderPass3D;
         rpi.framebuffer = GN_Vk.framebuffers3D[GN_Vk.currentFrame];
         rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
@@ -516,7 +516,7 @@ void GN_VkBegin3DPassDeferred(const sMAT44 *viewProj, const sVEC3 *cameraPos,
         cvs[3].depthStencil = {1, 0};
         // L4：sky-view LUT 重建（G-Buffer pass 之前，render pass 之外）
         recordAtmosphereLutUpdate(GN_Vk.commandBuffers[GN_Vk.currentFrame]);
-        VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpi.renderPass = GN_Vk.gBufferRenderPass;
         rpi.framebuffer = GN_Vk.gBufferFramebuffers[0];
         rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};
@@ -589,7 +589,7 @@ void syncGBufferTextureSet(const sGBUFFER_TEXTURE_SET &entry) {
     // 只拷 binding 0（SceneUBO）。binding 1/3 在本函数末尾直接写成本环集的纹理，
     // 没必要先从规范集拷过来再覆盖。binding 2 在 G-Buffer 布局里**不存在**
     // （槽位 2 是光照 UBO，G-Buffer pass 不读光源），所以不能一次 copy 0..3。
-    VkCopyDescriptorSet copy = {VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET};
+    VkCopyDescriptorSet copy{}; copy.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
     copy.srcSet = GN_Vk.gBufferDescriptorSet;
     copy.srcBinding = 0;
     copy.dstSet = entry.aSet;
@@ -605,8 +605,7 @@ void syncGBufferTextureSet(const sGBUFFER_TEXTURE_SET &entry) {
     normalInfo.sampler = entry.aNormalSampler ? entry.aNormalSampler : GN_Vk.defaultSampler;
     normalInfo.imageView = entry.aNormal ? entry.aNormal : GN_Vk.defaultImageView;
     normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet writes[2]{}; writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = entry.aSet;
     writes[0].dstBinding = 1;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -635,7 +634,7 @@ VkDescriptorSet findOrCreateGBufferSet(VkImageView albedo, VkSampler albedoSampl
     if(s_gbufferTextureSets.size() >= kTextureSetCacheCap) {
         return GN_Vk.gBufferDescriptorSet; // 录制中不释放、不改写规范集
     }
-    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &GN_Vk.gBufferDescriptorLayout;
@@ -789,7 +788,7 @@ void GN_VkDeferredLighting(const sMAT44 *viewProj, const sVEC3 *cameraPos,
     {
         VkClearValue cv;
         cv.color = {{0, 0, 0, 1}};
-        VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpi.renderPass = GN_Vk.deferredLightRenderPass;
         rpi.framebuffer = GN_Vk.deferredLightFramebuffers[GN_Vk.currentFrame];
         rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};

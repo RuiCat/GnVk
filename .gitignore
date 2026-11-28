@@ -14,3 +14,4 @@ tests/うさうさ
 headless.png
 # 交叉编译检查的中间产物
 build/cross-*
+build-asan-dbg/

@@ -24,7 +24,7 @@ namespace GNg {
 GN_API uint8 *ImageLoadFileToData(const char *filename, int id, COLOR_FORMAT *format_out, int *w_out, int *h_out);
 
 //获取最近读取图像没指定文件扩展名时内部帮您加载到的图片文件扩展名() !返回的字符串可能还含有一连串扩展名 如:"png,bmp,tga" 若要做比较拿前3个比较即可
-GN_API char *const ImageLoadLastTypeNameGet();
+GN_API char * ImageLoadLastTypeNameGet();
 
 enum eBLEND_MODE //混合模式
 {

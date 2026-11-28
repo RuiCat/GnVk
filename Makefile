@@ -87,8 +87,8 @@ smoke:
 
 # ── 门禁 ─────────────────────────────────────────────────
 .PHONY: ci parity lint lint-strict
-ci: check smoke doc-check spv-check lint-strict
-	@echo "$(GREEN)✅ ci 通过: CMake 构建 + 单测 + 物理/角色场景 + 无窗口渲染 + 示例冒烟 + 文档 + SPIR-V$(RESET)"
+ci: check smoke doc-check spv-check lint-strict warnings
+	@echo "$(GREEN)✅ ci 通过: CMake 构建 + 单测 + 物理/角色场景 + 无窗口渲染 + 示例冒烟 + 文档 + SPIR-V + 告警预算$(RESET)"
 
 # B8 完成后默认构建即 CMake：parity 与 ci 同源（保留目标名兼容旧脚本/文档）。
 parity: ci
@@ -106,6 +106,11 @@ lint-strict:
 	@bash tests/lint/output.sh
 	@bash tests/lint/context_groups.sh
 	@bash tests/lint/input.sh
+
+.PHONY: warnings
+warnings:
+	@echo "$(YELLOW)🚨 告警预算门禁（B9，扩展警告口径 <500）...$(RESET)"
+	@bash tests/tools/warnings.sh
 
 .PHONY: stats doc-check
 stats:

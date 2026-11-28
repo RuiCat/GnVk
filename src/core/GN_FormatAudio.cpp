@@ -10,9 +10,9 @@
         return false;
     }
     // B7-3：扩展名缓存（原 static GT_SupportExtNamesAudio[128]）已并入 GNg::GN_Core.aAudioExtNames。
-    GN_API char *const GNa::GetSupportAudioFmtFileExtName(bool upper) {
+    GN_API char * GNa::GetSupportAudioFmtFileExtName(bool upper) {
         if(!GNg::GN_Core.aAudioExtNames[0]) FileAudio->GetSupportFmtFileExtName(GNg::GN_Core.aAudioExtNames, upper);
-        return (char *const)GNg::GN_Core.aAudioExtNames;
+        return (char *)GNg::GN_Core.aAudioExtNames;
     }
     GN_API unsigned int GNa::LoadWavFileInfo(char *filename_mem, unsigned short *format, unsigned short *channels, unsigned short *bit, unsigned int *freq, unsigned int *size, int memsize) {
 #define GT_TMP_SET_WAV_INFO                              \

@@ -2,6 +2,41 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-28 — B9-3：告警大扫除 19385→7 + make warnings 门禁
+
+**扩展警告口径**（GCC 13.3，-Wall -Wextra -Wshadow -Wduplicated-cond -Wduplicated-branches -Wlogical-op
+-Wuse-after-free=2 -Woverloaded-virtual -Wno-unused-parameter，190 cpp 全量 -fsyntax-only，只计 src/ 主位置）：
+**19385（2026-11-26 台账）→ 7**。余 7 处均为已登记刻意保留：delete-non-virtual-dtor×5（DEFECT_ANALYSIS §5.2
+按精确类型删除）、cast-function-type×2（DA-1126-15 往返转型）。
+
+**逐类处置**（全部保行为，脚本定点 + 人工复核）：
+- -Wreorder ~176 站点：构造初始化列表按成员声明序重排（运行时初始化顺序本就按声明序，零行为变化）；
+  含 #ifdef 块的列表（cFRAME_RC/cSIM_DIALOG/GT_cVIDEO）整块随成员移动；
+- -Wmissing-field-initializers 350 站点：Vulkan `{sType}`+赋值惯用法改 `VkFoo x{}; x.sType=...;`（等价零初始化，不引 pragma 抑制）；
+- -Wignored-qualifiers 69 站点：按值返回/转换的顶层 const/volatile 去除（含 spin-wait 的无效 volatile cast）；
+- -Wdeprecated 9：access declaration → using-declaration；-Wclass-conversion 2：sCOLOR4F 同类引用转换运算符冗余删除；
+- -Wwrite-strings 20：字面量→char* 契约显式 cast（保签名）；-Wsign-compare 8：显式 cast（含 1<<31 UB 改 1u<<31）；
+- -Wswitch 14：无 default 的枚举 switch 补 default: break;（GN_UiListGui 置顶避免跨越 case 内初始化）；
+- -Wshadow 14：局部/参数重命名；-Wunused-variable/label ~50：纯声明删除、有副作用调用保留+(void)、未用标签删除；
+- -Wnarrowing 2 站点：int→float/uint32 显式 cast；-Wchar-subscripts 7：base64 解码表索引转 unsigned char（防负索引越界，加固）；
+- -Wint-to-pointer-cast 6：整型句柄经 uintptr_t 中转（GN_Sound/GN_Parallel 既有设计）；
+- -Wextra 4：枚举/非枚举条件表达式 cast + cFRAME_LAUNCHER2D 拷贝构造显式初始化基类（与原隐式默认初始化同行为）；
+- -Wformat= 6：**真实格式缺陷修复**——GT_cRUN_REC::ValueCheck long/unsigned long/void* 重载的 %d/%X 改 %ld/%lX/%p；
+  sysMutexIo /proc/meminfo sscanf %lld 改 %lu（unsigned long）；
+- -Wdeprecated-copy 1：cOBJ2D 显式 `= default` 拷贝构造（与隐式同行为）；extern-initializer 1；friend operator* 定义入命名空间。
+
+**门禁**：新增 `tests/tools/warnings.sh` + `make warnings`（并入 ci），预算 <500，口径如上（-Wno-unused-parameter
+与台账一致：兼容桩层保留参数名作 API 文档）。spv 占位头（gn2d_*_spv.h）加 [[maybe_unused]]。
+
+**过程回归与修复**：多行数组转换脚本在已变动的文件上沿用旧行号，吞掉 `vkAtmosphereLut.cpp`
+`writes[0].dstSet = s_descriptorSet;` 一行 → GPU 冒烟 11 项段错误（cube shadow 初始化后首帧前）；
+ASan 定位（createSkyViewComputeResources → vkUpdateDescriptorSets 空 dstSet），恢复该行，
+并对全部 _Vulkan 改动文件按 (元素,字段) 与 HEAD 逐条复核赋值语句，确认无其它丢失（vkInit 的
+ai→ai2/cbi、w→wds 为改名，逐项核对齐全）。教训：多遍定点脚本必须每遍重扫行号；语法扫描之外
+必须跑真实 TU 的冒烟。
+
+验证：`make warnings` 0 error / 7 warning；`make ci` 全绿（单测 955/0、smoke 13/0、gpuCheck 126/0）。
+
 ## 2026-11-28 — B9-2：升级 C++17（全仓切换）
 
 `CMAKE_CXX_STANDARD 11→17`（Linux-only，D3；全仓 190 cpp 在 C++17 无 -fpermissive 下 0 error，

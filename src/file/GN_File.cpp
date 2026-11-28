@@ -42,8 +42,8 @@ GNf::sFILE GNf::File;
 
 GNf::sFILE::sFILE() : handle_buf(0),
                       buf_size(0),
-                      special_mark(0),
                       offset(0),
+                      special_mark(0),
                       type(eFILE_STD) {}
 GNf::sFILE::~sFILE() {
     switch(type) {
@@ -252,7 +252,6 @@ GN_API int GNf::Scanf(sFILE *handle, const char *format, ...) {
         case eFILE_SAFE:
         case eFILE_STD:
             int len;
-            char **args;
             va_list va;
             va_start(va, format);
 #if defined _WIN32_ || defined _WIN32_WCE
@@ -608,7 +607,6 @@ GN_API char *GNf::FileFullLoadToMemoryText(char *filename, int *len_out, int usT
     return mem;
 }
 GN_API GNf::sFILE *GNf::OpenCreate(char *filename, const char *mode, void *ph) {
-    char *_filename;
     GNf::sFILE *fp = GNf::Open(filename, mode, GNf::eFILE_STD, ph);
     if(!fp && !strchr(mode, 'r')) {
         char dir_[GN_MAXFILEPATH];
@@ -769,7 +767,7 @@ GN_API int GN_StrRemoveFlieSegment(char *filename, char split_key, const char *i
     if(ret) {
         GNf::sFILE *fp = GNf::Open(filename, "w", GNf::eFILE_STD);
         if(fp) {
-            GNf::Printf(fp, "%s", buf);
+            GNf::Printf(fp, (char *)"%s", buf);
             GNf::Close(fp);
         } else ret = -2;
     }
@@ -859,7 +857,7 @@ GN_API char *GN_StrGetInAppDirPath(const char *str) {
     } else return (char *)str;
 }
 /********************************************************************************************************************************/
-GN_API char *GN_Words_No_Yes[2] = {"否", "是"};
+GN_API char *GN_Words_No_Yes[2] = {(char *)"否", (char *)"是"};
 GN_API P<P<char>> GN_Words;
 
 GN_API bool GN_InitWords() {
@@ -929,7 +927,7 @@ GN_API void GN_Log(const char *fmt, ...) {
         GNg::GN_FileState.aRunLogOpenMode[0] = 'a';
     }
 }
-GN_API char *GN_RunErrorFileName = "RunLog.txt";
+GN_API char *GN_RunErrorFileName = (char *)"RunLog.txt";
 
 // 同时写 RunLog.txt 与 stderr：前者供事后排查，后者让用户/CI 当场看得到。
 // 实现上直接复用 GN_Log（不重复那段写文件的逻辑），再补一次 stderr 输出；
@@ -984,7 +982,7 @@ GN_API int GN_PluginsLoad_(const char *class_name, void (*add_plugin_func)(int *
     GN::sLIST<P<GNf::sFILE_INFO>> files, dirs;
     if(GNf::FindFileDirInfoData(GNg::GN_FileState.aPluginsDir, false, &files, &dirs, 0) || dirs.empty()) return 0;
     int *mod, mod_num = 0;
-    char *v__, *version = GN_INTERFACE_VERSION, *version1, *del_plugin_str = " 如您不想要该插件 可以前往该插件目录把它删除即可!";
+    char *v__, *version = (char *)GN_INTERFACE_VERSION, *version1, *del_plugin_str = (char *)" 如您不想要该插件 可以前往该插件目录把它删除即可!";
     char *const (*vfunc)();
     GT_PFUNC_VOID pfunc;
     GNf::sFILE_INFO *_dir;
@@ -1035,7 +1033,7 @@ extern GN::sLIST<int *> GT_UIObjectPlugins;
 #ifdef _GN_2DSCENE_H_
 extern GN::sLIST<int *> GT_2DObjectPlugins;
 #endif
-GN_API GN::sLIST<int *> *const GN_PluginsClassifyGet(uint8 obj_class) {
+GN_API GN::sLIST<int *> * GN_PluginsClassifyGet(uint8 obj_class) {
     switch(obj_class) {
 #ifdef _GN_UI_H_
         case 0: return GT_UIObjectPlugins.empty() ? 0 : &GT_UIObjectPlugins;

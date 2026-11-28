@@ -414,11 +414,11 @@ GN_API bool GN_StrHasName(const char *name,const char *str,char split_key){
         ++pstr; 
 	}
 }
-GN_API char *const GN_StrHasPathDisableSymbol(const char *str){
+GN_API char * GN_StrHasPathDisableSymbol(const char *str){
 	static const char *pathDisableStr = "\\ / : * ? \" < > |";
 	char *pstr = (char*)str;
 	while(*pstr){
-		if(*pstr == '\\' || *pstr == '/' || *pstr == ':' || *pstr == '*' || *pstr == '?' || *pstr == '\"' || *pstr == '<' || *pstr == '>' || *pstr == '|')return (char *const)pathDisableStr;
+		if(*pstr == '\\' || *pstr == '/' || *pstr == ':' || *pstr == '*' || *pstr == '?' || *pstr == '\"' || *pstr == '<' || *pstr == '>' || *pstr == '|')return (char *)pathDisableStr;
 	    ++pstr;
 	}
     return 0;
@@ -603,18 +603,24 @@ GN_API int GN_StrRemoveSegment(char *str_in_out,char split_key,const char *inc_s
 				}
 			    pstr += len;
 				++dn;
-				while(*pstr && *pstr != split_key)++pstr; if(!(*pstr)){ *pos0 = 0; break; }
-			    while(*pstr && *pstr == split_key)++pstr; if(!(*pstr)){ *pos0 = 0; break; }
+				while(*pstr && *pstr != split_key)++pstr;
+				if(!(*pstr)){ *pos0 = 0; break; }
+			    while(*pstr && *pstr == split_key)++pstr;
+			    if(!(*pstr)){ *pos0 = 0; break; }
 			// 已核（B5f）：pos0/pstr 同缓冲区且 dest≤src，memmove 长度=尾部长度+1，不越界。
 			if(dn >= sn){ memmove(pos0, pstr, strlen(pstr) + 1u); break; }
 
 		}else if(pos0){ //找到非尾段的一段要删除
                 if(!pos1)pos1 = pstr;
-				while(*pstr && *pstr != split_key)++pstr; if(!(*pstr)){ memmove(pos0, pos1, strlen(pos1) + 1u); break; }
-				while(*pstr && *pstr == split_key)++pstr; if(!(*pstr)){ memmove(pos0, pos1, strlen(pos1) + 1u); break; }
+				while(*pstr && *pstr != split_key)++pstr;
+				if(!(*pstr)){ memmove(pos0, pos1, strlen(pos1) + 1u); break; }
+				while(*pstr && *pstr == split_key)++pstr;
+				if(!(*pstr)){ memmove(pos0, pos1, strlen(pos1) + 1u); break; }
 			}else{
-			    while(*pstr && *pstr != split_key)++pstr; if(!(*pstr))break;
-			    while(*pstr && *pstr == split_key)++pstr; if(!(*pstr))break;
+			    while(*pstr && *pstr != split_key)++pstr;
+			    if(!(*pstr))break;
+			    while(*pstr && *pstr == split_key)++pstr;
+			    if(!(*pstr))break;
 			}
 		}
 	}else{
@@ -633,8 +639,10 @@ GN_API int GN_StrRemoveSegment(char *str_in_out,char split_key,const char *inc_s
 				}
 			    pstr += len;
 				++dn;
-				while(*pstr && *pstr != split_key)++pstr; if(!(*pstr)){ *pos0 = 0; break; }
-			    while(*pstr && *pstr == split_key)++pstr; if(!(*pstr)){ *pos0 = 0; break; }
+				while(*pstr && *pstr != split_key)++pstr;
+				if(!(*pstr)){ *pos0 = 0; break; }
+			    while(*pstr && *pstr == split_key)++pstr;
+			    if(!(*pstr)){ *pos0 = 0; break; }
 				// 已核（B5f）：pos0/pstr 同缓冲区且 dest≤src，memmove 长度=尾部长度+1，不越界。
 			if(dn >= sn){ memmove(pos0, pstr, strlen(pstr) + 1u); break; }
                 pos1 = pstr;
@@ -741,14 +749,14 @@ GN_API unsigned int GN_StrB4I64ConvertUn(uint8 *data_out, /*const*/ char *cnt, u
 		uint8 *p_data = data_out, *_v3 = (uint8*)&v3;
 		char  *cnt_end = cnt + size;
 		for(; cnt < cnt_end; cnt += 4, p_data += 3){
-		    v3 = (((unsigned int)crv[cnt[0]]) << 18) + (((unsigned int)crv[cnt[1]]) << 12) + (((unsigned int)crv[cnt[2]]) << 6) + (unsigned int)crv[cnt[3]];
+		    v3 = (((unsigned int)crv[(unsigned char)cnt[0]]) << 18) + (((unsigned int)crv[(unsigned char)cnt[1]]) << 12) + (((unsigned int)crv[(unsigned char)cnt[2]]) << 6) + (unsigned int)crv[(unsigned char)cnt[3]];
 		    p_data[0] = _v3[2], p_data[1] = _v3[1], p_data[2] = _v3[0];
 		}
 		if(size < cnt_len){
-            v3 = ((unsigned int)crv[cnt[0]]) << 18;
+            v3 = ((unsigned int)crv[(unsigned char)cnt[0]]) << 18;
 			size = cnt_len - size;
-			if(size > 1)v3 += ((unsigned int)crv[cnt[1]]) << 12;
-            if(size > 2)v3 += ((unsigned int)crv[cnt[2]]) << 6;
+			if(size > 1)v3 += ((unsigned int)crv[(unsigned char)cnt[1]]) << 12;
+			if(size > 2)v3 += ((unsigned int)crv[(unsigned char)cnt[2]]) << 6;
 			p_data[0] = _v3[2], p_data[1] = _v3[1], p_data[2] = _v3[0];
 		}
 	}

@@ -14,7 +14,7 @@ GNg::cFRAME *GNu::cSCROLL_LIST::CheckInitDefaultFrameAct() {
     zDefaultFrameAct->Init(0, 1, fev GT_TMP_DEF_FRAME_INIT_ARGS_ONCE_KEEP);
     return zDefaultFrameAct;
 }
-GNu::cSCROLL_LIST::cSCROLL_LIST() : aShowBG(false), aShowInFrame(true), zDrawCall(0), zDrawCallHasUsArg(false), zIsErectArrange(true), zUsArg(0) {
+GNu::cSCROLL_LIST::cSCROLL_LIST() : zIsErectArrange(true), zUsArg(0), zDrawCall(0), zDrawCallHasUsArg(false), aShowBG(false), aShowInFrame(true) {
     aType = GNu::eUI_SCROLL_LIST;
     c = 0xffffffff /*该类忽略该值*/;
     ++zCreateTotalNum; /*创建增加计数*/
@@ -214,7 +214,6 @@ else {
 }
 if(aShowInFrame) GNg::ViewCur->ScissorRectRemove();
 }
-unsigned int focus_color = zArrowAm.aLevel_color;
 
 // 处理滚屏 ---------------------------------------------------------------------------------------------------------
 const unsigned int add_row = ((zw >= pfmt->i_compartment) ? ((zZoningNum % (zw / pfmt->i_compartment)) ? 1 : 0) : 0);

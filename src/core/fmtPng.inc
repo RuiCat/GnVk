@@ -154,7 +154,8 @@
                     break;
                     //case CR_RGBA4444: break;
                     //case CR_RGBA5551: break;
-            }
+                            default: break; // B9-3: 未列举枚举值兜底（保行为）
+}
             row_byte = w * ImgFmtGetByteNum(srcformat);
         }
         uint8 loc_buf[65536]; //64K
@@ -185,8 +186,7 @@
         }
         //结束并释放写缓冲
         png_write_end(png_ptr, info_ptr);
-    GT_GOTO_ENDwritePNG:
-        png_destroy_write_struct(&png_ptr, &info_ptr);
+            png_destroy_write_struct(&png_ptr, &info_ptr);
 
         //清除缓存数据
         if(tmp_data) delete[] tmp_data;

@@ -30,14 +30,14 @@ void GN_VkUpload3DMesh(VkBuffer *outVB, VkDeviceMemory *outVM,
 
         VkCommandBuffer cb;
         {
-            VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+            VkCommandBufferAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             ai.commandPool = GN_Vk.commandPool;
             ai.commandBufferCount = 1;
             vkAllocateCommandBuffers(GN_Vk.device, &ai, &cb);
         }
         {
-            VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+            VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
             vkBeginCommandBuffer(cb, &bi);
         }
@@ -48,7 +48,7 @@ void GN_VkUpload3DMesh(VkBuffer *outVB, VkDeviceMemory *outVM,
         }
         vkEndCommandBuffer(cb);
         {
-            VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+            VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
             si.commandBufferCount = 1;
             si.pCommandBuffers = &cb;
             vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);
@@ -76,14 +76,14 @@ void GN_VkUpload3DMesh(VkBuffer *outVB, VkDeviceMemory *outVM,
 
         VkCommandBuffer cb;
         {
-            VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+            VkCommandBufferAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             ai.commandPool = GN_Vk.commandPool;
             ai.commandBufferCount = 1;
             vkAllocateCommandBuffers(GN_Vk.device, &ai, &cb);
         }
         {
-            VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+            VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
             vkBeginCommandBuffer(cb, &bi);
         }
@@ -94,7 +94,7 @@ void GN_VkUpload3DMesh(VkBuffer *outVB, VkDeviceMemory *outVM,
         }
         vkEndCommandBuffer(cb);
         {
-            VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+            VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
             si.commandBufferCount = 1;
             si.pCommandBuffers = &cb;
             vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);

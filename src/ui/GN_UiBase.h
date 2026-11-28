@@ -197,9 +197,9 @@ class GN_API cSCROLL_LIST : public cUI_NEAR_OBJECT, public cSCROLL_CTRL //★滚
         else return 0;
     } //获得最大可见区域分块个数
     inline unsigned int GetZoningCount() { return zZoningNum; } //获得总区域分块个数
-    inline void GetZoningSize(short &w, short &h) {
-        w = zFFrames->zParame.width;
-        h = zFFrames->zParame.height;
+    inline void GetZoningSize(short &ow, short &oh) { // B9-3: 参数避免阴影成员 w/h
+        ow = zFFrames->zParame.width;
+        oh = zFFrames->zParame.height;
     } //获得区域分块的显示宽度与高度(返回宽度, 返回高度)
     inline short GetZoningWidth() { return zFFrames->zParame.width; } //获得区域分块的显示宽度
     inline short GetZoningHeight() { return zFFrames->zParame.height; } //获得区域分块的显示高度
@@ -228,7 +228,7 @@ class GN_API cSELECT_LIST_ICON : public cSCROLL_LIST //★选择图标列表 式
     cSCROLL_LIST::InitStyleToData;
 #endif
 #ifndef _APPLE_
-    cSCROLL_LIST::SetZoningDrawCall; //使基类该函数不能用
+    using cSCROLL_LIST::SetZoningDrawCall; //使基类该函数不能用
 #endif
   protected:
     void zReSelectState(); //重置选择状态
@@ -339,7 +339,7 @@ class GN_API cSELECT_LIST_TEXT : public cSELECT_LIST_ICON //★选择文本列�
     //获得选择文本列表内容
     inline P<P<char>> /*const*/ GetLables() { return zLabels; }
     //获得文本输出式样
-    inline GNg::cTEXT_ART *const GetTextStyle() { return zTextOut; }
+    inline GNg::cTEXT_ART * GetTextStyle() { return zTextOut; }
 
     virtual P<iUI_OBJECT> Clone(); //复制出该UI组件的一个新副本
 
@@ -374,8 +374,8 @@ class GN_API cSELECT_CALL //选项回调处理
 class GN_API cPAGE_BAR : public cSELECT_CALL //分页栏
 {
 #ifndef _APPLE_
-    cSELECT_CALL::Init;
-    cSELECT_CALL::UpdateRun;
+    using cSELECT_CALL::Init;
+    using cSELECT_CALL::UpdateRun;
 #endif
   public:
     P<P<char>> zNames; //各个分页栏名
@@ -392,7 +392,7 @@ class GN_API cPAGE_BAR : public cSELECT_CALL //分页栏
     inline P<P<char>> &GetNames() { return zNames; }
 
     //获得文本式样
-    inline GNg::cTEXT_ART *const GetTextStyle() { return zTextOut; }
+    inline GNg::cTEXT_ART * GetTextStyle() { return zTextOut; }
 
     //获得单个页宽度和高度(返回宽度, 返回高度)
     void GetOnecWH(short &w, short &h);
@@ -407,8 +407,8 @@ class GN_API cPAGE_BAR : public cSELECT_CALL //分页栏
 class GN_API cSELECT_BUTTON : public cSELECT_CALL //选择按钮联 !这个暂不支持多选
 {
 #ifndef _APPLE_
-    cSELECT_CALL::Init;
-    cSELECT_CALL::UpdateRun;
+    using cSELECT_CALL::Init;
+    using cSELECT_CALL::UpdateRun;
 #endif
   public:
     P<GNg::sIMAGE> zImg; //按钮图序
@@ -730,7 +730,7 @@ class GN_API cBUTTON_T // 触屏虚拟按钮  !!该类不支持编辑器编辑
     unsigned int aColor; //颜色
     P<GNg::sIMAGE> aIcon; //按钮图标
 
-    cBUTTON_T() : zTid(255), aTouchZ(0), aMappingKey(0), aColor(0xffffffff), aBlend(1) {}
+    cBUTTON_T() : zTid(255), aTouchZ(0), aMappingKey(0), aBlend(1), aColor(0xffffffff) {}
 
     //初始化(按钮放置范围左, 上, 右, 下)
     inline void Init(short left, short top, short right, short bottom) {

@@ -267,7 +267,7 @@ inline bool GN_NumIs2n(T num) {
 }
 //判断指定数是否为2的N次方数
 inline bool GN_NumIs2nL(unsigned int num) {
-    if(num > (1 << 31)) return false;
+    if(num > (1u << 31)) return false; // B9-3: 1<<31 为 UB 且符号比较
     return GN_NumIs2n(num);
 }
 //判断指定数是否为2的N次方数

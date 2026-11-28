@@ -28,7 +28,7 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 GN::sLIST<GT_sVALUE_CHANGE_BASE *> GT_sVALUE_CHANGE_BASE::valueProcList;
 
 GT_sVALUE_CHANGE_CR::GT_sVALUE_CHANGE_CR(unsigned int *change_value, unsigned int target_value, float cross_range, float linear_sheep, void (*end_porc)(void *), void *us_parame)
-    : endPorc(end_porc), usParame(us_parame), crossRange(cross_range), linearSheep(linear_sheep), pValue(change_value), tgValue(target_value) {
+    : endPorc(end_porc), usParame(us_parame), pValue(change_value), tgValue(target_value), linearSheep(linear_sheep), crossRange(cross_range) {
     tgValueA = (float)((target_value & 0xff000000) >> 24);
     tgValueR = (float)((target_value & 0x00ff0000) >> 16);
     tgValueG = (float)((target_value & 0x0000ff00) >> 8);

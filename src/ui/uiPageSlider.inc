@@ -234,7 +234,7 @@ P<GNu::iUI_OBJECT> GNu::cUI_SELECT_BUTTON::Clone() {
     return ui_sb;
 }
 /***************************************************** cSELECT_RECT *************************************************************************/
-GNu::cSELECT_RECT::cSELECT_RECT() : zP2(0, 0, 0, 0), zRect(0, 0, 0, 0), zHideSleep(1), zHideTime(0) {}
+GNu::cSELECT_RECT::cSELECT_RECT() : zHideTime(0), zHideSleep(1), zP2(0, 0, 0, 0), zRect(0, 0, 0, 0) {}
 
 void GNu::cSELECT_RECT::Init(P<GNg::sIMAGE> bg_img, int hide_sleep) {
     zBg = bg_img;

@@ -77,7 +77,7 @@ void ImageDraw(sIMAGE *img, int x, int y, int w, int h, unsigned int color, unsi
     float dw = w ? w : (img ? (float)img->width : 1.0f), dh = h ? h : (img ? (float)img->height : 1.0f);
     float r = ((color >> 16) & 0xff) / 255.0f, g = ((color >> 8) & 0xff) / 255.0f, b = (color & 0xff) / 255.0f, a = ((color >> 24) & 0xff) / 255.0f;
     float x2 = x + dw, y2 = y + dh;
-    VkVertex vv[6] = {{x, y, u0, v0, r, g, b, a}, {x2, y, ue, v0, r, g, b, a}, {x2, y2, ue, ve, r, g, b, a}, {x, y, u0, v0, r, g, b, a}, {x2, y2, ue, ve, r, g, b, a}, {x, y2, u0, ve, r, g, b, a}};
+    VkVertex vv[6] = {{(float)x, (float)y, u0, v0, r, g, b, a}, {x2, (float)y, ue, v0, r, g, b, a}, {x2, y2, ue, ve, r, g, b, a}, {(float)x, (float)y, u0, v0, r, g, b, a}, {x2, y2, ue, ve, r, g, b, a}, {(float)x, y2, u0, ve, r, g, b, a}};
     GrowVBufIfNeeded(6);
     memcpy(GN_Vk.vbuf + GN_Vk.vcnt, vv, sizeof(vv));
     GN_Vk.vcnt += 6;
@@ -86,7 +86,6 @@ void ImageDraw(sIMAGE *img, int x, int y, int w, int h, unsigned int color, unsi
 void LineFrame2dDraw(int x, int y, int w, int h, int lw, unsigned int color, unsigned short blend) {
     if(!GN_Vk.initialized) return;
     FlushBatchIfScissorDirty();
-    float r = ((color >> 16) & 0xff) / 255.0f, g = ((color >> 8) & 0xff) / 255.0f, b = (color & 0xff) / 255.0f, a = ((color >> 24) & 0xff) / 255.0f;
     // Simplified: draw 4 thin rects
     ImageDraw(0, x, y, w, lw, color, 0, 0, 0, 0, 0, 0);
     ImageDraw(0, x, y + h - lw, w, lw, color, 0, 0, 0, 0, 0, 0);

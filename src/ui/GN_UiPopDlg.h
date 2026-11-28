@@ -22,7 +22,7 @@ struct GT_sSP_CHILD //修改值子项
     unsigned char type; //类型
     P<GNg::sIMAGE> icon; //图标
 
-    inline GT_sSP_CHILD() : pointer(0), name(0), enumName(0), enumIds(0), enumIdnum(0) {}
+    inline GT_sSP_CHILD() : name(0), pointer(0), enumName(0), enumIds(0), enumIdnum(0) {}
     inline ~GT_sSP_CHILD() { /*this->Release();*/ }
 
     void Release(); //释放数据
@@ -57,7 +57,7 @@ struct GT_sVALUE_SET_TOOL //变量设置工具集
     //检测指定点是否在修改范围内(点坐标X, 坐标Y)返回是否
     inline bool HitTest(short px, short py) { return px >= fx && px <= fx + fw && py >= fy && py <= fy + fh; }
 
-    inline GT_sVALUE_SET_TOOL() : text_in(1), text_select(1), palette(1), /*file_browser(1),*/ ts_transpose(true), fb_open_did(0xff) {}
+    inline GT_sVALUE_SET_TOOL() : ts_transpose(true), palette(1), text_in(1), /*file_browser(1),*/ text_select(1), fb_open_did(0xff) {}
 };
 /******************************************************************************************************************************************************/
 namespace GNu {
@@ -146,7 +146,7 @@ struct GN_API sSIM_MENU //★★简单选单
     inline unsigned int GetInitedChildNum() { return zChild.size(); }
 
     //获得特定子项(第几个子项) 返回子项指针
-    inline GT_sSP_CHILD *const GetChild(unsigned int id) { return &zChild[id]; }
+    inline GT_sSP_CHILD * GetChild(unsigned int id) { return &zChild[id]; }
 
     //设置特定子项名称(第几个子项, 新名称)
     void SetChildName(unsigned int id, const char *name);
@@ -415,9 +415,9 @@ class GN_API cSIM_DIALOG : public sSIM_MENU //★★★简单对话筐
     inline sSIM_MENU *GetCurProcMenu() { return zTargetMenu; } //获得当前正在处理的子选单()返回子选单指针
 
     inline GT_PFUNC_PVOID GetValueChangeProc() { return zValueChangeProc; } //获得值被修改后的处理函数回调
-    inline GNg::cFRAME_RC *const GetEffect() { return zEffect; } //获得弹出动画效果筐
-    inline GNg::sIMAGE *const GetFocusStyle() { return zFocusMap; } //获得选择焦点式样图
-    inline GNg::cTEXT_ART *const GetTextStyle() { return &zTextOut; } //获得文本输出式样
+    inline GNg::cFRAME_RC * GetEffect() { return zEffect; } //获得弹出动画效果筐
+    inline GNg::sIMAGE * GetFocusStyle() { return zFocusMap; } //获得选择焦点式样图
+    inline GNg::cTEXT_ART * GetTextStyle() { return &zTextOut; } //获得文本输出式样
     unsigned int GetEffectLevelColor(); //获得当前动画效果层影响后的最终颜色 如果无设置动画效果返回 0xffffffff
     void GetDlgPos(int &_x, int &_y, int &_w, int &_h); //获得对话筐的显示位置范围(返回位置X, 返回位置Y, 宽度, 高度) 这个的大小只有调用了Pop()弹出以后才有正确大小返回
     void GetDlgRect(GNg::sRECT *rect_out); //获得对话筐的显示范围矩型(矩型输出) 这个的大小只有调用了Pop()弹出以后才有正确大小返回

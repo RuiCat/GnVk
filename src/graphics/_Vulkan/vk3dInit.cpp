@@ -70,7 +70,7 @@ void init3DTargets() {
     sp.pResolveAttachments = &rr; // ★ MSAA resolve
     sp.pDepthStencilAttachment = &dr;
 
-    VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rpi.attachmentCount = 3;
     rpi.pAttachments = ads;
     rpi.subpassCount = 1;
@@ -122,7 +122,7 @@ bool create3DMsaaTargets() {
     const uint32_t sw = GN_Vk.swapchainExtent.width;
     const uint32_t sh = GN_Vk.swapchainExtent.height;
     {
-        VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         ii.imageType = VK_IMAGE_TYPE_2D;
         ii.extent = {sw, sh, 1};
         ii.mipLevels = 1;
@@ -136,14 +136,14 @@ bool create3DMsaaTargets() {
         if(vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.msaaColorImage) != VK_SUCCESS) return false;
         VkMemoryRequirements mr;
         vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.msaaColorImage, &mr);
-        VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         mai.allocationSize = mr.size;
         mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if(vkAllocateMemory(GN_Vk.device, &mai, 0, &GN_Vk.msaaColorMemory) != VK_SUCCESS) return false;
         vkBindImageMemory(GN_Vk.device, GN_Vk.msaaColorImage, GN_Vk.msaaColorMemory, 0);
     }
     {
-        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vi.image = GN_Vk.msaaColorImage;
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
         vi.format = VK_FORMAT_R16G16B16A16_SFLOAT; // L1：与 MSAA 颜色附件格式一致
@@ -153,7 +153,7 @@ bool create3DMsaaTargets() {
         if(vkCreateImageView(GN_Vk.device, &vi, 0, &GN_Vk.msaaColorView) != VK_SUCCESS) return false;
     }
     {
-        VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         ii.imageType = VK_IMAGE_TYPE_2D;
         ii.extent = {sw, sh, 1};
         ii.mipLevels = 1;
@@ -167,14 +167,14 @@ bool create3DMsaaTargets() {
         if(vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.depthImage) != VK_SUCCESS) return false;
         VkMemoryRequirements dmr;
         vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.depthImage, &dmr);
-        VkMemoryAllocateInfo dmai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateInfo dmai{}; dmai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         dmai.allocationSize = dmr.size;
         dmai.memoryTypeIndex = FindMemType(dmr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if(vkAllocateMemory(GN_Vk.device, &dmai, 0, &GN_Vk.depthMemory) != VK_SUCCESS) return false;
         vkBindImageMemory(GN_Vk.device, GN_Vk.depthImage, GN_Vk.depthMemory, 0);
     }
     {
-        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vi.image = GN_Vk.depthImage;
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
         vi.format = GN_Vk.depthFormat;
@@ -192,7 +192,7 @@ void create3DForwardFramebuffers() {
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
         GN_Vk.framebuffers3D[i] = VK_NULL_HANDLE;
         VkImageView atts[3] = {GN_Vk.msaaColorView, GN_Vk.depthView, GN_Vk.hdrView};
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fci.renderPass = GN_Vk.renderPass3D;
         fci.attachmentCount = 3;
         fci.pAttachments = atts;
@@ -386,7 +386,7 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
         dslb[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         dslb[4].descriptorCount = 1;
         dslb[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         dslci.bindingCount = 5;
         dslci.pBindings = dslb;
         vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.descriptorLayout3D);
@@ -398,7 +398,7 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
         pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pcr.offset = 0;
         pcr.size = sizeof(VkModelPushConstBP);
-        VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         plci.setLayoutCount = 1;
         plci.pSetLayouts = &GN_Vk.descriptorLayout3D;
         plci.pushConstantRangeCount = 1;
@@ -422,7 +422,7 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
 
     // ── 默认 3D 描述符集 ─────────────────────────────
     {
-        VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         dai.descriptorPool = GN_Vk.descriptorPool;
         dai.descriptorSetCount = 1;
         dai.pSetLayouts = &GN_Vk.descriptorLayout3D;
@@ -432,10 +432,7 @@ void init3DForward(const std::vector<uint32_t> &vertSpv,
         VkDescriptorBufferInfo fbi = {atmosphereFogBuffer(), 0, atmosphereFogRange()};
         VkDescriptorImageInfo dii = {GN_Vk.defaultSampler, GN_Vk.defaultImageView,
                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet w[4] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        VkWriteDescriptorSet w[4]{}; w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         w[0].dstSet = GN_Vk.descriptorSet3D;
         w[0].dstBinding = 0;
         w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -524,7 +521,7 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
         dslb[12].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         dslb[12].descriptorCount = 1;
         dslb[12].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         dslci.bindingCount = 13;
         dslci.pBindings = dslb;
         vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.descriptorLayoutPBR);
@@ -536,7 +533,7 @@ void init3DPbr(const std::vector<uint32_t> &pbrVert,
         pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pcr.offset = 0;
         pcr.size = sizeof(VkModelPushConstPBR);
-        VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         plci.setLayoutCount = 1;
         plci.pSetLayouts = &GN_Vk.descriptorLayoutPBR;
         plci.pushConstantRangeCount = 1;
@@ -638,7 +635,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
     uint32_t smSize = GN_Vk.shadowMapSize;
     // 创建 Shadow Map 图像（L3c：4 层数组，每级一层）
     {
-        VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         ii.imageType = VK_IMAGE_TYPE_2D;
         ii.extent = {smSize, smSize, 1};
         ii.mipLevels = 1;
@@ -653,7 +650,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.shadowImage);
         VkMemoryRequirements mr;
         vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.shadowImage, &mr);
-        VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         mai.allocationSize = mr.size;
         mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         vkAllocateMemory(GN_Vk.device, &mai, 0, &GN_Vk.shadowMemory);
@@ -661,7 +658,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
     }
 
     {
-        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vi.image = GN_Vk.shadowImage;
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
         vi.format = VK_FORMAT_D32_SFLOAT;
@@ -674,7 +671,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
     // Shadow sampler — L3b：PCSS 需要原始深度（阻塞物搜索），因此关闭 compare、用 NEAREST；
     // 比较在着色器里手动做（textureLod(...).r）。border=白 保证图外按“无遮挡”。
     {
-        VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         sci.magFilter = VK_FILTER_NEAREST;
         sci.minFilter = VK_FILTER_NEAREST;
         sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
@@ -699,7 +696,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         VkSubpassDescription sp = {};
         sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         sp.pDepthStencilAttachment = &dr;
-        VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         rpi.attachmentCount = 1;
         rpi.pAttachments = &ad;
         rpi.subpassCount = 1;
@@ -710,7 +707,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
     // L3c：每级一个 2D 层视图 + framebuffer（render pass 的层通过视图选择，不用 multiview）。
     destroy3DShadowCascades();
     for(uint32_t c = 0; c < kShadowCascadeCount; ++c) {
-        VkImageViewCreateInfo lvi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo lvi{}; lvi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         lvi.image = GN_Vk.shadowImage;
         lvi.viewType = VK_IMAGE_VIEW_TYPE_2D;
         lvi.format = VK_FORMAT_D32_SFLOAT;
@@ -720,7 +717,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         lvi.subresourceRange.layerCount = 1;
         if(vkCreateImageView(GN_Vk.device, &lvi, 0, &s_shadowCascadeViews[c]) != VK_SUCCESS) continue;
 
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fci.renderPass = GN_Vk.shadowRenderPass;
         fci.attachmentCount = 1;
         fci.pAttachments = &s_shadowCascadeViews[c];
@@ -741,7 +738,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         dslb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         dslb[0].descriptorCount = 1;
         dslb[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         dslci.bindingCount = 1;
         dslci.pBindings = dslb;
         vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.shadowDescriptorLayout);
@@ -752,7 +749,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         pcr.offset = 0;
         pcr.size = 64; // just model mat4
-        VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         plci.setLayoutCount = 1;
         plci.pSetLayouts = &GN_Vk.shadowDescriptorLayout;
         plci.pushConstantRangeCount = 1;
@@ -783,7 +780,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         for(uint32_t c = 0; c < kShadowCascadeCount; ++c) {
             layouts[c] = GN_Vk.shadowDescriptorLayout;
         }
-        VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         dai.descriptorPool = GN_Vk.descriptorPool;
         dai.descriptorSetCount = kShadowCascadeCount;
         dai.pSetLayouts = layouts;
@@ -798,7 +795,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
             for(uint32_t c = 0; c < kShadowCascadeCount; ++c) {
                 VkDescriptorBufferInfo dbi = {GN_Vk.shadowUBOBuffer, (VkDeviceSize)c * kShadowUBOSlotStride,
                                               kShadowUBOSlotSize};
-                VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                VkWriteDescriptorSet w{}; w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 w.dstSet = s_shadowCascadeSets[c];
                 w.dstBinding = 0;
                 w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -819,7 +816,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
         VkDescriptorSetLayout layouts[GN_CUBE_SHADOW_TOTAL_LAYERS];
         for(uint32_t f = 0; f < GN_CUBE_SHADOW_TOTAL_LAYERS; ++f)
             layouts[f] = GN_Vk.shadowDescriptorLayout;
-        VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         dai.descriptorPool = GN_Vk.descriptorPool;
         dai.descriptorSetCount = GN_CUBE_SHADOW_TOTAL_LAYERS;
         dai.pSetLayouts = layouts;
@@ -834,7 +831,7 @@ void init3DShadow(const std::vector<uint32_t> &shadowVertSpv) {
                     GN_Vk.shadowUBOBuffer,
                     (VkDeviceSize)(kCubeShadowSlotBase + f) * kShadowUBOSlotStride,
                     kShadowUBOSlotSize};
-                VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                VkWriteDescriptorSet w{}; w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 w.dstSet = s_cubeShadowFaceSets[f];
                 w.dstBinding = 0;
                 w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -948,7 +945,7 @@ void init3DCubeShadow(uint32_t size) {
     if(size > 2048u) size = 2048u;
     if(GN_Vk.device == VK_NULL_HANDLE) return;
 
-    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.extent = {size, size, 1};
     ii.mipLevels = 1;
@@ -971,7 +968,7 @@ void init3DCubeShadow(uint32_t size) {
     }
     VkMemoryRequirements mr;
     vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.cubeShadowImage, &mr);
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if(vkAllocateMemory(GN_Vk.device, &mai, 0, &GN_Vk.cubeShadowMemory) != VK_SUCCESS) {
@@ -984,7 +981,7 @@ void init3DCubeShadow(uint32_t size) {
     // CUBE_ARRAY 视图（采样）。layerCount 必须是**整个** 6*N：
     // CUBE_ARRAY 的每个"层"是一个完整立方图，索引就是灯号。
     {
-        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vi.image = GN_Vk.cubeShadowImage;
         vi.viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
         vi.format = VK_FORMAT_D32_SFLOAT;
@@ -997,7 +994,7 @@ void init3DCubeShadow(uint32_t size) {
     // 注意：渲染到 cubearray 的某一层**必须**经 2D(1 层) 视图，
     // 不能直接用 CUBE_ARRAY 视图当 attachment（那样 layerCount 对不上）。
     for(uint32_t i = 0; i < GN_CUBE_SHADOW_TOTAL_LAYERS; ++i) {
-        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vi.image = GN_Vk.cubeShadowImage;
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
         vi.format = VK_FORMAT_D32_SFLOAT;
@@ -1010,7 +1007,7 @@ void init3DCubeShadow(uint32_t size) {
 
     // 采样器：手动比较（与 CSM 一致，PCSS 需要原始深度），border=白 = 图外算"无遮挡"
     {
-        VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         sci.magFilter = VK_FILTER_LINEAR;
         sci.minFilter = VK_FILTER_LINEAR;
         sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
@@ -1036,7 +1033,7 @@ void init3DCubeShadow(uint32_t size) {
         VkSubpassDescription sp = {};
         sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         sp.pDepthStencilAttachment = &dr;
-        VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         rpi.attachmentCount = 1;
         rpi.pAttachments = &ad;
         rpi.subpassCount = 1;
@@ -1046,7 +1043,7 @@ void init3DCubeShadow(uint32_t size) {
 
     // 每"灯-面"一个 framebuffer（共 6*N）
     for(uint32_t i = 0; i < GN_CUBE_SHADOW_TOTAL_LAYERS; ++i) {
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fci.renderPass = GN_Vk.cubeShadowRenderPass;
         fci.attachmentCount = 1;
         fci.pAttachments = &GN_Vk.cubeShadowFaceView[i];
@@ -1164,7 +1161,7 @@ void GN_VkInit3D() {
 
     // ── 创建 PBR 描述符集 (必须在 Shadow Map 创建之后) ──
     {
-        VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         dai.descriptorPool = GN_Vk.descriptorPool;
         dai.descriptorSetCount = 1;
         dai.pSetLayouts = &GN_Vk.descriptorLayoutPBR;
@@ -1182,13 +1179,7 @@ void GN_VkInit3D() {
         // B2：binding 12 = cube shadow（点光/聚光）
         VkDescriptorImageInfo diiCubeShadow = {GN_Vk.cubeShadowSampler, GN_Vk.cubeShadowView,
                                                VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet w[7] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                     {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        VkWriteDescriptorSet w[7]{}; w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         w[0].dstSet = GN_Vk.descriptorSetPBR;
         w[0].dstBinding = 0;
         w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;

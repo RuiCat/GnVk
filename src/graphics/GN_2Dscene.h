@@ -65,6 +65,7 @@ class GN_API cOBJ2D //★★★2D对象
     P<iOBJ2D_EXT> aUsExt; //用户扩展属性 绑定该属性来扩展对象功能 调用:cOBJ2D::BindExt(...) 来绑定
 
     cOBJ2D(int8 obj_type = -1, void *_obj = 0) : aOBJtype(obj_type), aObj(_obj), aUsExt(1) {}
+    cOBJ2D(const cOBJ2D &src) = default; // B9-3: 显式化隐式拷贝构造（-Wdeprecated-copy）
     ~cOBJ2D() { this->Delete(); }
     cOBJ2D &operator=(const cOBJ2D &src);
 
@@ -120,7 +121,7 @@ class GN_API cOBJPTR //★★★ 2D对象地址 用于控制对象的层级关�
 
     cOBJ2D *aPtr; //指向它所在父层组链表里的地址
 
-    cOBJPTR() : aPtr(0), zParent(0) {}
+    cOBJPTR() : zParent(0), aPtr(0) {}
 
     void UnComment(cOBJ2D *obj = 0); //解除对象与父层组的连接(如有指定 返回该对象) !解除后对象地址便会失效
     void InsertFront(cOBJ2D &obj, cOBJPTR *ptr_out = 0); //插入其它对象或群组在它前面(其它对象或群组, 如有指定返回插入后的对象地址) !对象包含的子对象 图片等资源也一并牵连进来 其它注意项同上

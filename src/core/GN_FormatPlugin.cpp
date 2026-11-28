@@ -9,9 +9,9 @@
         return false;
     }
     // B7-3：扩展名缓存（原 static GT_SupportExtNamesImage[160]）已并入 GNg::GN_Core.aImageExtNames。
-    GN_API char *const GNg::GetSupportImgFmtFileExtName(bool upper) {
+    GN_API char * GNg::GetSupportImgFmtFileExtName(bool upper) {
         if(!GNg::GN_Core.aImageExtNames[0]) FileImage->GetSupportFmtFileExtName(GNg::GN_Core.aImageExtNames, upper);
-        return (char *const)GNg::GN_Core.aImageExtNames;
+        return (char *)GNg::GN_Core.aImageExtNames;
     }
     GN_API const char *GNg::ImgFileTypeNames[] = {"bmp", "png", "tga", "gim", "hdr"};
 
@@ -47,7 +47,7 @@
     }                                                                                      \
     yes = GNf::IsTypeFile(filename_mem, ext_pos, "hdr", "#?", 2, memsize);                 \
     if(yes) {                                                                              \
-        float ins = -8.0f; /*亮度提高*/                                                    \
+        float ins = -8.0f; (void)ins; /*亮度提高*/                                         \
         data = ADDPROC;                                                                    \
         if(data || yes == 1) return data;                                                  \
     }                                                                                      \

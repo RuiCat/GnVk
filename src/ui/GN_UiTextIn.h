@@ -187,7 +187,7 @@ class GN_API cTEXT_INPUT // ★★文本输入筐
         *oy = zOffsety;
     }
 
-    inline GNg::cTEXT_ART *const GetTextStyle() { return &zTextOut; } //获得文本输出式样
+    inline GNg::cTEXT_ART * GetTextStyle() { return &zTextOut; } //获得文本输出式样
     inline GNg::sARRANGE_FMT const *GetFontFormat() { return &(zTextOut.zParame); } //获得文本显示的排列格式信息
     inline unsigned char GetFontMapFormat() { return zTextOut.zFontMapFormat; } //获得文本显示用的字库图格式
     inline eTX_IN_TYPE GetInputType() { return zInType; } //获得文本输入类型

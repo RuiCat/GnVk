@@ -76,7 +76,7 @@ struct GN_API sAM_CTRL //动画时间控制
     uint8 *zDataSave(uint8 *wpos); //保存该对象的2进制数据(当前写入位置)返回最后的写完位置
     uint8 *zDataLoad(uint8 *rpos); //读取该对象的2进制数据(当前读取位置)返回最后的读完位置
 
-    inline sAM_CTRL() : zRuntime(0), zEndtime(0), zStarttime(0), zNowtime(0), zAm_mode(0), zAm_s_e(false), zPlaying(true), zHasTRS(false) {}
+    inline sAM_CTRL() : zRuntime(0), zNowtime(0), zEndtime(0), zStarttime(0), zAm_mode(0), zAm_s_e(false), zHasTRS(false), zPlaying(true) {}
 
     //动画时间处理控制(更新多少时间) 返回值 0:正在播放 1:从新循环一次到开始 2:正在倒播 3:正在播放消失 4:正在播放到停住
     unsigned short zAmTimeProce(unsigned int updatetime);

@@ -77,7 +77,7 @@ GN_VK_INTERNAL uint32_t FindMemType(uint32_t f, VkMemoryPropertyFlags p,
 
 GN_VK_INTERNAL void CreateBuf(VkDeviceSize sz, VkBufferUsageFlags u, VkMemoryPropertyFlags p, VkBuffer &b, VkDeviceMemory &m,
                               bool preferCached) {
-    VkBufferCreateInfo ci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    VkBufferCreateInfo ci{}; ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     ci.size = sz;
     ci.usage = u;
     ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -86,7 +86,7 @@ GN_VK_INTERNAL void CreateBuf(VkDeviceSize sz, VkBufferUsageFlags u, VkMemoryPro
     if(res != VK_SUCCESS) return;
     VkMemoryRequirements r;
     vkGetBufferMemoryRequirements(GN_Vk.device, b, &r);
-    VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     ai.allocationSize = r.size;
     ai.memoryTypeIndex = FindMemType(r.memoryTypeBits, p, preferCached);
     res = vkAllocateMemory(GN_Vk.device, &ai, 0, &m);
@@ -97,7 +97,7 @@ GN_VK_INTERNAL void CreateBuf(VkDeviceSize sz, VkBufferUsageFlags u, VkMemoryPro
 }
 
 GN_VK_INTERNAL VkImageView MakeImageView(VkImage img, VkFormat fmt) {
-    VkImageViewCreateInfo ci = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkImageViewCreateInfo ci{}; ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     ci.image = img;
     ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
     ci.format = fmt;

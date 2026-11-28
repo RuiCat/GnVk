@@ -29,13 +29,13 @@ GN_API GT_sMEMORY_TABLE GT_UsMemTable; //这内存表一定要放在最头定义
 
 GN_API unsigned int GT_SystemInited = 0;
 
-GN_API char *const GN_GetInterfaceVersion() {
+GN_API char * GN_GetInterfaceVersion() {
     static const char GN_interface_Version[] = GN_INTERFACE_VERSION;
-    return (char *const)GN_interface_Version;
+    return (char *)GN_interface_Version;
 }
-GN_API char *const GN_GetVersion() {
+GN_API char * GN_GetVersion() {
     static const char GN_Version[] = GN_VERSION;
-    return (char *const)GN_Version;
+    return (char *)GN_Version;
 }
 GN_API unsigned int GN_GetModuleConstitute() {
     return 0

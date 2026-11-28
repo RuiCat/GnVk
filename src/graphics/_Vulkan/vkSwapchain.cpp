@@ -56,7 +56,7 @@ void createOverlayFramebuffers() {
     GN_Vk.framebuffers2DOverlay = new VkFramebuffer[GN_Vk.swapchainImageCount];
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
         GN_Vk.framebuffers2DOverlay[i] = VK_NULL_HANDLE;
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fci.renderPass = GN_Vk.renderPass2DOverlay;
         fci.attachmentCount = 1;
         fci.pAttachments = &GN_Vk.swapchainViews[i];
@@ -178,7 +178,7 @@ void GN_VkResize(int w, int h) {
     delete[] fmts;
     fprintf(stderr, "[GN_Vk] swapchain format=%d (%s)\n", (int)GN_Vk.swapchainFormat,
             isSrgbSwapchainFormat(GN_Vk.swapchainFormat) ? "sRGB" : "non-sRGB");
-    VkSwapchainCreateInfoKHR sci = {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+    VkSwapchainCreateInfoKHR sci{}; sci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     sci.surface = GN_Vk.surface;
     // 校验层报过 minImageCount(2) < surface caps 的最小值（本机 4）；按 caps 取，避免交换链违规。
     sci.minImageCount = caps.minImageCount > 2u ? caps.minImageCount : 2u;
@@ -203,7 +203,7 @@ void GN_VkResize(int w, int h) {
     // 重建 framebuffers
     GN_Vk.framebuffers = new VkFramebuffer[GN_Vk.swapchainImageCount];
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fci.renderPass = GN_Vk.renderPass;
         fci.attachmentCount = 1;
         fci.pAttachments = &GN_Vk.swapchainViews[i];

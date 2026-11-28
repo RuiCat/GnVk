@@ -73,7 +73,7 @@ bool loadAsFns(sAsFns *fns) {
 
 bool createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props,
                   sAsBuffer *out) {
-    VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    VkBufferCreateInfo bci{}; bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bci.size = size;
     bci.usage = usage;
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -81,7 +81,7 @@ bool createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyF
     VkMemoryRequirements req;
     vkGetBufferMemoryRequirements(GN_Vk.device, out->aBuffer, &req);
     const uint32_t type = FindMemType(req.memoryTypeBits, props);
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = req.size;
     mai.memoryTypeIndex = type;
     if (vkAllocateMemory(GN_Vk.device, &mai, nullptr, &out->aMemory) != VK_SUCCESS) return false;
@@ -95,7 +95,7 @@ void destroyBuffer(sAsBuffer *b) {
 }
 
 VkDeviceAddress bufferAddress(const sAsFns &fns, VkBuffer buffer) {
-    VkBufferDeviceAddressInfo info = {VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    VkBufferDeviceAddressInfo info{}; info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     info.buffer = buffer;
     return fns.getBufferAddress(GN_Vk.device, &info);
 }
@@ -189,24 +189,23 @@ bool GN_VkRayQueryEndScene() {
     }
 
     // 一次性命令池：建 BLAS → 屏障 → 建 TLAS → 提交等待
-    VkCommandPoolCreateInfo pci = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+    VkCommandPoolCreateInfo pci{}; pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     pci.queueFamilyIndex = GN_Vk.graphicsFamily;
     VkCommandPool pool = VK_NULL_HANDLE;
     if (vkCreateCommandPool(GN_Vk.device, &pci, nullptr, &pool) != VK_SUCCESS) return false;
-    VkCommandBufferAllocateInfo cai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    VkCommandBufferAllocateInfo cai{}; cai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cai.commandPool = pool;
     cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cai.commandBufferCount = 1;
     VkCommandBuffer cb = VK_NULL_HANDLE;
     vkAllocateCommandBuffers(GN_Vk.device, &cai, &cb);
-    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cb, &bi);
 
     // BLAS
-    VkAccelerationStructureGeometryKHR geometry = {
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+    VkAccelerationStructureGeometryKHR geometry{}; geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
     geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
     geometry.geometry.triangles.sType =
@@ -219,15 +218,13 @@ bool GN_VkRayQueryEndScene() {
     geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
     geometry.geometry.triangles.indexData.deviceAddress =
         bufferAddress(fns, s_scene.aIndexBuffer.aBuffer);
-    VkAccelerationStructureBuildGeometryInfoKHR build = {
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+    VkAccelerationStructureBuildGeometryInfoKHR build{}; build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
     build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     build.geometryCount = 1;
     build.pGeometries = &geometry;
-    VkAccelerationStructureBuildSizesInfoKHR sizes = {
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+    VkAccelerationStructureBuildSizesInfoKHR sizes{}; sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
     fns.getSizes(GN_Vk.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build,
                  &triangleCount, &sizes);
     if (!createBuffer(sizes.accelerationStructureSize,
@@ -236,8 +233,7 @@ bool GN_VkRayQueryEndScene() {
                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &s_scene.aBlasBuffer)) {
         return false;
     }
-    VkAccelerationStructureCreateInfoKHR ci = {
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+    VkAccelerationStructureCreateInfoKHR ci{}; ci.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
     ci.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     ci.size = sizes.accelerationStructureSize;
     ci.buffer = s_scene.aBlasBuffer.aBuffer;
@@ -254,7 +250,7 @@ bool GN_VkRayQueryEndScene() {
     VkAccelerationStructureBuildRangeInfoKHR range = {triangleCount, 0, 0, 0};
     const VkAccelerationStructureBuildRangeInfoKHR *ranges = &range;
     fns.cmdBuild(cb, 1, &build, &ranges);
-    VkMemoryBarrier toBuild = {VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    VkMemoryBarrier toBuild{}; toBuild.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     toBuild.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
     toBuild.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
@@ -275,8 +271,7 @@ bool GN_VkRayQueryEndScene() {
         for (int c = 0; c < 4; ++c) instance.transform.matrix[r][c] = (r == c) ? 1.0f : 0.0f;
     }
     instance.mask = 0xFF;
-    VkAccelerationStructureDeviceAddressInfoKHR ai = {
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+    VkAccelerationStructureDeviceAddressInfoKHR ai{}; ai.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     ai.accelerationStructure = s_scene.aBlas;
     instance.accelerationStructureReference = fns.getAsAddress(GN_Vk.device, &ai);
     {
@@ -285,24 +280,21 @@ bool GN_VkRayQueryEndScene() {
         std::memcpy(mapped, &instance, sizeof(instance));
         vkUnmapMemory(GN_Vk.device, instances.aMemory);
     }
-    VkAccelerationStructureGeometryKHR instGeom = {
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+    VkAccelerationStructureGeometryKHR instGeom{}; instGeom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     instGeom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
     instGeom.geometry.instances.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
     instGeom.geometry.instances.arrayOfPointers = VK_FALSE;
     instGeom.geometry.instances.data.deviceAddress =
         bufferAddress(fns, instances.aBuffer);
-    VkAccelerationStructureBuildGeometryInfoKHR tbuild = {
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+    VkAccelerationStructureBuildGeometryInfoKHR tbuild{}; tbuild.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     tbuild.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
     tbuild.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
     tbuild.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     tbuild.geometryCount = 1;
     tbuild.pGeometries = &instGeom;
     uint32_t instanceCount = 1;
-    VkAccelerationStructureBuildSizesInfoKHR tsizes = {
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+    VkAccelerationStructureBuildSizesInfoKHR tsizes{}; tsizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
     fns.getSizes(GN_Vk.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tbuild,
                  &instanceCount, &tsizes);
     if (!createBuffer(tsizes.accelerationStructureSize,
@@ -311,8 +303,7 @@ bool GN_VkRayQueryEndScene() {
                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &s_scene.aTlasBuffer)) {
         return false;
     }
-    VkAccelerationStructureCreateInfoKHR tci = {
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+    VkAccelerationStructureCreateInfoKHR tci{}; tci.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
     tci.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
     tci.size = tsizes.accelerationStructureSize;
     tci.buffer = s_scene.aTlasBuffer.aBuffer;
@@ -329,7 +320,7 @@ bool GN_VkRayQueryEndScene() {
     VkAccelerationStructureBuildRangeInfoKHR trange = {instanceCount, 0, 0, 0};
     const VkAccelerationStructureBuildRangeInfoKHR *tranges = &trange;
     fns.cmdBuild(cb, 1, &tbuild, &tranges);
-    VkMemoryBarrier toShader = {VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    VkMemoryBarrier toShader{}; toShader.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     toShader.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
     toShader.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
@@ -338,10 +329,10 @@ bool GN_VkRayQueryEndScene() {
                          0, 1, &toShader, 0, nullptr, 0, nullptr);
     vkEndCommandBuffer(cb);
 
-    VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFenceCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     VkFence fence = VK_NULL_HANDLE;
     vkCreateFence(GN_Vk.device, &fci, nullptr, &fence);
-    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cb;
     const bool ok = vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, fence) == VK_SUCCESS &&

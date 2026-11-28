@@ -28,9 +28,11 @@ Copyright (c) 2018-2025 gncreate Technologies Inc.
 /*********************************************************** 2D向量 ****************************************************************/
 GN_API GNg::sVEC2 GNg::Vector2D(0.0f, 0.0f);
 
-GN_API GNg::sVEC2 GNg::operator*(float f, const struct sVEC2 &v) {
-    GNg::sVEC2 tmp(f * v.x, f * v.y);
+namespace GNg { // B9-3: 命名空间内定义，与类内 friend 声明匹配
+GN_API sVEC2 operator*(float f, const sVEC2 &v) {
+    sVEC2 tmp(f * v.x, f * v.y);
     return tmp;
+}
 }
 #define GT_TMP_VECTOR2D_CMP_FUNC_DEF(NAME, CMP)               \
     float GNg::sVEC2::NAME(uint8 *id_out) {                   \
@@ -214,7 +216,6 @@ float GNg::sTRI_SPACE2D::NearRelation(const sTRI2D *tri, const sVEC2 *vex, float
     uint8 far_eid = dv[0] < dv[1] ? 0 : 1; //离最远的边序号
     if(dv[2] < dv[far_eid]) far_eid = 2;
     float max_d = dv[near_eid];
-    float min_d = dv[far_eid];
     uint8 vid = GN_TriAbcLast(far_eid);
     float l = GNg::Vec2Dot((&(tri->a)) + (unsigned int)vid, (&na) + (unsigned int)far_eid) - (&da)[far_eid];
     if(!united) l /= GNg::Vec2Length((&na) + (unsigned int)far_eid);

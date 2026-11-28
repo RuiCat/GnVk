@@ -293,7 +293,7 @@ void GNu::cUI_BACK_FRAME::UpdateRun(unsigned int updatetime, sUI_LEVEL *rng) {
     short dx, dy, dw, dh;
     GT_TMP_GET_BACK_FRAME_AREA(dx, dy, dw, dh, unsigned int fc, rng->node)
     GNg::sIMAGE *_img = img;
-    if(aBackBlurLv) GT_DrawBlurScreenImg(dx, dy, dw, dh, fc, (aBackBlurLv << 10) | (((uint8)aBackRepeat | 2) << 8) | (_img ? GNg::eBLEND_DST_ALPHA_MASK : bmode), _img);
+    if(aBackBlurLv) GT_DrawBlurScreenImg(dx, dy, dw, dh, fc, (aBackBlurLv << 10) | (((uint8)aBackRepeat | 2) << 8) | (_img ? (unsigned int)GNg::eBLEND_DST_ALPHA_MASK : bmode), _img);
     else GNg::ImageDraw9Square(_img, dx, dy, dw, dh, fc, bmode, aBackRepeat);
     if(RecvInputUiObject != this) return;
 

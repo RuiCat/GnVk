@@ -149,7 +149,7 @@ void GN_cPARALLEL::StartUp() {
 
     for(i = 0; i < n; ++i) {
         zTaskLists[i].New(GT_TASK_LIST_MAX_SIZE);
-        _Trs[i] = GN_ThreadStart(GT_ParallelWaitProc, this, (void *)i);
+        _Trs[i] = GN_ThreadStart(GT_ParallelWaitProc, this, (void *)(uintptr_t)i);
         zTrs_[i] = _Trs[i];
         zDataSeg[i].pid = i;
     }
@@ -184,7 +184,7 @@ int GN_cPARALLEL::AddProcThread(int tn) {
             } else {
                 ti = last_tn - 1;
                 for(; ti < tn; ++ti) {
-                    zTrs[ti] = GN_ThreadStart(GT_ParallelWaitProc, this, (void *)ti);
+                    zTrs[ti] = GN_ThreadStart(GT_ParallelWaitProc, this, (void *)(uintptr_t)ti);
                     zTrs_[ti] = zTrs[ti];
                 }
                 zTn_ = tn;
@@ -382,7 +382,7 @@ void GN_cPARALLEL::ProcArray(void (*proc)(void *user_arg, const GN_sDATA_SGM *ds
 
 #define GT_TMP_PARALLEL_WAIT_PROC_END \
     for(i = 0; i < n; ++i)            \
-        while((volatile uint8)(zTrs_[i]->us_state & GT_e_CWPC_PROC));
+        while((uint8)(zTrs_[i]->us_state & GT_e_CWPC_PROC));
         if(wait) { GT_TMP_PARALLEL_WAIT_PROC_END }
     } else {
         GN_sDATA_SGM dsg0(st, end, 0);
@@ -460,8 +460,7 @@ void GN_cPARALLEL::Proc(void (*proc)(void *user_arg, GN_sDATA_SGM *ds), void *_u
         } /*else if(!_cur_seg->end)goto GT_GOTO_WaitProcEnd3;*/                                                          \
         ADD_PROC                                                                                                         \
     }
-                GT_GOTO_FindLongProc:
-                    GT_TMP_PARALLEL_FIND_LONG_PROC()
+                                    GT_TMP_PARALLEL_FIND_LONG_PROC()
 
 #define GT_TMP_PARALLEL_SPLIT_NUM_CPT(GT)   \
     if(_m_n > 3) { /*还可分割*/             \
@@ -511,8 +510,7 @@ void GN_cPARALLEL::Proc(void (*proc)(void *user_arg, GN_sDATA_SGM *ds), void *_u
         GT_TMP_PARALLEL_PROC_INTV
         fn = 0;
     } else {
-    GT_GOTO_FindLongProc1:
-        _m_n2 = 0xffffffff;
+            _m_n2 = 0xffffffff;
         GT_TMP_PARALLEL_FIND_LONG_PROC(if(m_n < _m_n2) _m_n2 = m_n;)
         GT_TMP_PARALLEL_SPLIT_NUM_CPT(GT_GOTO_WaitProcEnd1)
         _m_n2 = _m_n2 < 2 ? 1 : _m_n2 / fr + (fr > 1 ? 1 : 0);
@@ -529,7 +527,7 @@ else goto GT_GOTO_WaitProcEnd1; //处理分发结束
 GT_GOTO_WaitProcEnd : //GN_Log("-\n");
                       if(fn){
                           GT_TMP_PARALLEL_PROC_INTV} GT_GOTO_WaitProcEnd1 : for(i = 0; i < n; ++i) {
-    while((volatile uint8)(zTrs_[i]->us_state & GT_e_CWPC_PROC));
+    while((uint8)(zTrs_[i]->us_state & GT_e_CWPC_PROC));
     if(_data_seg[i].st < wpids[i]) {
         end_seg->st = wpids[i]; //GT_TMP_PARALLEL_PROC_INTV
         end_seg->end = wpids[i];

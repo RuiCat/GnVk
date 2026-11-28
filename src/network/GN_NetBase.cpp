@@ -104,7 +104,7 @@ NET_API P<char> GNn_UrlAnalysis(const char *url, char **src_out, char **filename
     P<char> host, host2;
     port_out = 80;
     unsigned int h_len = 0;
-    char *p_str = (char *)url, *p_str2, *fname, port_str[16];
+    char *p_str = (char *)url, *p_str2, *fname;
     if(!strncmp(url, "http://", 7)) p_str += 7;
 
     fname = GN_StrToKey(p_str, '/');

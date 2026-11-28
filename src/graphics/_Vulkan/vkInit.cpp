@@ -29,14 +29,14 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     GN_Vk.viewHeight = h;
 
     // Instance
-    VkApplicationInfo ai = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
+    VkApplicationInfo ai{}; ai.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     ai.pApplicationName = "GN_mini";
     ai.apiVersion = VK_API_VERSION_1_1; // 1.1: 硬件光追(AS/ray_query)与 Features2 需要
     // 无窗口模式：实例不需要任何 surface 扩展（GLFW 在没有窗口时也不会给出）
     uint32_t extCount = 0;
     const char **exts = headless ? 0 : glfwGetRequiredInstanceExtensions(&extCount);
     if(headless) extCount = 0;
-    VkInstanceCreateInfo ici = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+    VkInstanceCreateInfo ici{}; ici.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     ici.pApplicationInfo = &ai;
     // 可选：GN_VK_VALIDATION=1 时追加校验层与 VK_EXT_debug_utils（未装层则不加）。
     static std::vector<const char *> s_layerNames;
@@ -125,7 +125,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
 
     // Device
     float qp = 1.0f;
-    VkDeviceQueueCreateInfo qci = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+    VkDeviceQueueCreateInfo qci{}; qci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     qci.queueFamilyIndex = GN_Vk.graphicsFamily;
     qci.queueCount = 1;
     qci.pQueuePriorities = &qp;
@@ -134,12 +134,9 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     std::vector<const char *> dexts;
     if(!headless) dexts.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME); // 离屏渲染不需要交换链扩展
     bool rayQuery = false;
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeat = {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
-    VkPhysicalDeviceRayQueryFeaturesKHR rqFeat = {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
-    VkPhysicalDeviceBufferDeviceAddressFeatures bdaFeat = {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeat{}; asFeat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    VkPhysicalDeviceRayQueryFeaturesKHR rqFeat{}; rqFeat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    VkPhysicalDeviceBufferDeviceAddressFeatures bdaFeat{}; bdaFeat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
     {
         uint32_t ec = 0;
         vkEnumerateDeviceExtensionProperties(GN_Vk.physicalDevice, nullptr, &ec, nullptr);
@@ -162,7 +159,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
         // 否则 vkCreateDevice 报 VUID-VkDeviceCreateInfo-pProperties-04451。
         if (hasPortabilitySubset) dexts.push_back("VK_KHR_portability_subset");
         if (hasAs && hasRq) {
-            VkPhysicalDeviceFeatures2 f2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+            VkPhysicalDeviceFeatures2 f2{}; f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
             asFeat.pNext = &rqFeat;
             rqFeat.pNext = &bdaFeat;
             f2.pNext = &asFeat;
@@ -185,7 +182,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
         }
     }
 
-    VkDeviceCreateInfo dci = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    VkDeviceCreateInfo dci{}; dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
     dci.enabledExtensionCount = static_cast<uint32_t>(dexts.size());
@@ -228,7 +225,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     delete[] fmts;
     fprintf(stderr, "[GN_Vk] swapchain format=%d (%s)\n", (int)GN_Vk.swapchainFormat,
             isSrgbSwapchainFormat(GN_Vk.swapchainFormat) ? "sRGB" : "non-sRGB");
-    VkSwapchainCreateInfoKHR sci = {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+    VkSwapchainCreateInfoKHR sci{}; sci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     sci.surface = GN_Vk.surface;
     // 校验层报过 minImageCount(2) < surface caps 的最小值（本机 4）；按 caps 取，避免交换链违规。
     sci.minImageCount = caps.minImageCount > 2u ? caps.minImageCount : 2u;
@@ -265,7 +262,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     sp.colorAttachmentCount = 1;
     sp.pColorAttachments = &ar;
-    VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rpi.attachmentCount = 1;
     rpi.pAttachments = &ad;
     rpi.subpassCount = 1;
@@ -297,11 +294,11 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     dslb[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     dslb[1].descriptorCount = 1;
     dslb[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutCreateInfo dslci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo dslci{}; dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     dslci.bindingCount = 2;
     dslci.pBindings = dslb;
     VkCheck(vkCreateDescriptorSetLayout(GN_Vk.device, &dslci, 0, &GN_Vk.descriptorLayout), "vkCreateDescriptorSetLayout");
-    VkPipelineLayoutCreateInfo plci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo plci{}; plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     plci.setLayoutCount = 1;
     plci.pSetLayouts = &GN_Vk.descriptorLayout;
     VkCheck(vkCreatePipelineLayout(GN_Vk.device, &plci, 0, &GN_Vk.pipelineLayout), "vkCreatePipelineLayout");
@@ -365,7 +362,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     // Framebuffers
     GN_Vk.framebuffers = new VkFramebuffer[GN_Vk.swapchainImageCount];
     for(uint32_t i = 0; i < GN_Vk.swapchainImageCount; i++) {
-        VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fci.renderPass = GN_Vk.renderPass;
         fci.attachmentCount = 1;
         fci.pAttachments = &GN_Vk.swapchainViews[i];
@@ -391,7 +388,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
         spOverlay.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         spOverlay.colorAttachmentCount = 1;
         spOverlay.pColorAttachments = &arOverlay;
-        VkRenderPassCreateInfo rpiOverlay = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        VkRenderPassCreateInfo rpiOverlay{}; rpiOverlay.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         rpiOverlay.attachmentCount = 1;
         rpiOverlay.pAttachments = &adOverlay;
         rpiOverlay.subpassCount = 1;
@@ -401,12 +398,12 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     }
 
     // Command pool
-    VkCommandPoolCreateInfo cpci = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+    VkCommandPoolCreateInfo cpci{}; cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cpci.queueFamilyIndex = GN_Vk.graphicsFamily;
     cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; // 每帧 vkResetCommandBuffer 需要
     VkCheck(vkCreateCommandPool(GN_Vk.device, &cpci, 0, &GN_Vk.commandPool), "vkCreateCommandPool");
     GN_Vk.commandBuffers = new VkCommandBuffer[GN_Vk.swapchainImageCount];
-    VkCommandBufferAllocateInfo cbai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    VkCommandBufferAllocateInfo cbai{}; cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cbai.commandPool = GN_Vk.commandPool;
     cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cbai.commandBufferCount = GN_Vk.swapchainImageCount;
@@ -420,7 +417,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     CreateBuf(GN_Vk.vertexCapacity * sizeof(VkVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, GN_Vk.vertexBuffer, GN_Vk.vertexMemory);
 
     // Sampler (必须在默认纹理之前创建)
-    VkSamplerCreateInfo sci2 = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    VkSamplerCreateInfo sci2{}; sci2.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     sci2.magFilter = VK_FILTER_LINEAR;
     sci2.minFilter = VK_FILTER_LINEAR;
     sci2.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -434,7 +431,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     VkDescriptorPoolSize dps[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4096},
                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8192},
                                    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 512}};
-    VkDescriptorPoolCreateInfo dpci = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    VkDescriptorPoolCreateInfo dpci{}; dpci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     // P1c：允许材质实例单独归还描述符集（GN_VkMaterialDestroy），否则创建/销毁循环会耗尽池。
     dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     dpci.maxSets = 2048;
@@ -446,7 +443,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
     // 注意: 必须在 UBO / sampler / descriptorPool 创建之后，因为它们被 descriptor set 引用
     {
         // 使用 host-visible 内存直接写入，避免复杂的 staging
-        VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         ii.imageType = VK_IMAGE_TYPE_2D;
         ii.extent = {1, 1, 1};
         ii.mipLevels = 1;
@@ -463,11 +460,11 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
             GN_Vk.defaultImage = dimg; // 存储用于 shutdown 清理
             VkMemoryRequirements mr;
             vkGetImageMemoryRequirements(GN_Vk.device, dimg, &mr);
-            VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-            ai.allocationSize = mr.size;
-            ai.memoryTypeIndex = FindMemType(mr.memoryTypeBits,
+            VkMemoryAllocateInfo ai2{}; ai2.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; // B9-3: ai2 避免阴影外层 ai
+            ai2.allocationSize = mr.size;
+            ai2.memoryTypeIndex = FindMemType(mr.memoryTypeBits,
                                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-            if(vkAllocateMemory(GN_Vk.device, &ai, 0, &dmem) == VK_SUCCESS) {
+            if(vkAllocateMemory(GN_Vk.device, &ai2, 0, &dmem) == VK_SUCCESS) {
                 GN_Vk.defaultImageMemory = dmem; // 存储用于 shutdown 清理
                 vkBindImageMemory(GN_Vk.device, dimg, dmem, 0);
                 // 直接写入白色像素
@@ -482,19 +479,19 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
                 // 转换为 shader-readable layout
                 VkCommandBuffer cb;
                 {
-                    VkCommandBufferAllocateInfo ai2 = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-                    ai2.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-                    ai2.commandPool = GN_Vk.commandPool;
-                    ai2.commandBufferCount = 1;
-                    vkAllocateCommandBuffers(GN_Vk.device, &ai2, &cb);
+                    VkCommandBufferAllocateInfo cbi{}; cbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO; // B9-3: cbi 避免阴影外层 ai2
+                    cbi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                    cbi.commandPool = GN_Vk.commandPool;
+                    cbi.commandBufferCount = 1;
+                    vkAllocateCommandBuffers(GN_Vk.device, &cbi, &cb);
                 }
                 {
-                    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+                    VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
                     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
                     vkBeginCommandBuffer(cb, &bi);
                 }
                 {
-                    VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+                    VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
                     b.oldLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
                     b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                     b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -509,7 +506,7 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
                 }
                 vkEndCommandBuffer(cb);
                 {
-                    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+                    VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
                     si.commandBufferCount = 1;
                     si.pCommandBuffers = &cb;
                     vkQueueSubmit(GN_Vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);
@@ -519,34 +516,34 @@ void GN_VkInit(GLFWwindow *window, int w, int h) {
                 // 创建 image view 和 descriptor set
                 VkImageView div = MakeImageView(dimg, VK_FORMAT_R8G8B8A8_UNORM);
                 GN_Vk.defaultImageView = div; // 存储供 3D 无纹理绘制降级
-                VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+                VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
                 dai.descriptorPool = GN_Vk.descriptorPool;
                 dai.descriptorSetCount = 1;
                 dai.pSetLayouts = &GN_Vk.descriptorLayout;
                 vkAllocateDescriptorSets(GN_Vk.device, &dai, &GN_Vk.defaultDS);
                 VkDescriptorBufferInfo dbi = {GN_Vk.uniformBuffer, 0, sizeof(VkUBO)};
                 VkDescriptorImageInfo dii = {GN_Vk.defaultSampler, div, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-                VkWriteDescriptorSet w[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
-                w[0].dstSet = GN_Vk.defaultDS;
-                w[0].dstBinding = 0;
-                w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                w[0].descriptorCount = 1;
-                w[0].pBufferInfo = &dbi;
-                w[1].dstSet = GN_Vk.defaultDS;
-                w[1].dstBinding = 1;
-                w[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                w[1].descriptorCount = 1;
-                w[1].pImageInfo = &dii;
-                vkUpdateDescriptorSets(GN_Vk.device, 2, w, 0, 0);
+                VkWriteDescriptorSet wds[2]{}; wds[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; wds[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; // B9-3: wds 避免阴影参数 w
+                wds[0].dstSet = GN_Vk.defaultDS;
+                wds[0].dstBinding = 0;
+                wds[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                wds[0].descriptorCount = 1;
+                wds[0].pBufferInfo = &dbi;
+                wds[1].dstSet = GN_Vk.defaultDS;
+                wds[1].dstBinding = 1;
+                wds[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                wds[1].descriptorCount = 1;
+                wds[1].pImageInfo = &dii;
+                vkUpdateDescriptorSets(GN_Vk.device, 2, wds, 0, 0);
             }
         }
     }
 
     // Sync
-    VkSemaphoreCreateInfo sci3 = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VkSemaphoreCreateInfo sci3{}; sci3.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     vkCreateSemaphore(GN_Vk.device, &sci3, 0, &GN_Vk.imageAvailable);
     vkCreateSemaphore(GN_Vk.device, &sci3, 0, &GN_Vk.renderFinished);
-    VkFenceCreateInfo fci2 = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFenceCreateInfo fci2{}; fci2.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fci2.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     vkCreateFence(GN_Vk.device, &fci2, 0, &GN_Vk.inFlightFence);
 

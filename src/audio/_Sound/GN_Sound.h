@@ -138,6 +138,6 @@ GN_SOUND_API bool GT_InitSound(); //初始化声音模块相关的东西() 返�
 GN_SOUND_API bool GT_UnInitSound(); //释放声音模块相关的东西()   返回是否成功
 
 GN_SOUND_API bool GN_HasSoundAccelerate(); //获得声音播放是否有支持硬件加速()
-GN_SOUND_API char *const GN_GetInterfaceInfoSound(); //获得声音播放模块信息 如: "OpenAL 1" "DirectSound" "MMSystem"
+GN_SOUND_API char * GN_GetInterfaceInfoSound(); //获得声音播放模块信息 如: "OpenAL 1" "DirectSound" "MMSystem"
 
 #endif //endif _GN_SOUND_H_

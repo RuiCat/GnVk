@@ -171,9 +171,9 @@ const uint32_t cPHYSICS_WORLD::INVALID_HANDLE;
 // ═══════════════════════════════════════════════════════════
 
 cPHYSICS_WORLD::cPHYSICS_WORLD()
-    : aContinuousCollision(false), aGravity{0.0f, -9.81f, 0.0f}, aFixedStep(1.0f / 60.0f),
-      aAccumulator(0.0f), aMaxSubSteps(4), aBodyCount(0), aJointCount(0), aLastContactCount(0),
-      aLastSubSteps(0) {
+    : aContinuousCollision(false), aJointCount(0),
+      aGravity{0.0f, -9.81f, 0.0f}, aFixedStep(1.0f / 60.0f),
+      aAccumulator(0.0f), aMaxSubSteps(4), aBodyCount(0), aLastContactCount(0), aLastSubSteps(0) {
     resetMesh();
 }
 

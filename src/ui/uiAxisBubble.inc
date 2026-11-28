@@ -5,7 +5,7 @@
 P<GNg::sIMAGE> GNu::sCTRL_AXIS::zCtrlAxisImg;
 unsigned short GNu::sCTRL_AXIS::zCreateTotalNum = 0;
 
-GNu::sCTRL_AXIS::sCTRL_AXIS() : zHideMove(false), zHideRot(false), zHideScl(false), aIsVisual(true), aDisableControl(false), aShowSize(128), zPos(0.0f, 0.0f), zIsLocalMode(false), aUnitCtrlMov(0.0f), aUnitCtrlRot(0.0f), aUnitCtrlScl(0.0f) {
+GNu::sCTRL_AXIS::sCTRL_AXIS() : zPos(0.0f, 0.0f), zHideMove(false), zHideRot(false), zHideScl(false), zIsLocalMode(false), aUnitCtrlMov(0.0f), aUnitCtrlRot(0.0f), aUnitCtrlScl(0.0f), aDisableControl(false), aIsVisual(true), aShowSize(128) {
     ++zCreateTotalNum;
     if(zCreateTotalNum == 1) {
         GNf_LoadFileStatePush2(0, GNf::eFILE_STD); //首次创建该对象就读入2D轴图片文件

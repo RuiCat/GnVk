@@ -64,7 +64,7 @@ bool s_warnedInRenderPass = false;
 
 bool createLutImage(uint32_t width, uint32_t height, VkImageUsageFlags extraUsage,
                     VkImage &image, VkDeviceMemory &memory, VkImageView &view) {
-    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.extent = {width, height, 1};
     ii.mipLevels = 1;
@@ -78,13 +78,13 @@ bool createLutImage(uint32_t width, uint32_t height, VkImageUsageFlags extraUsag
     if(vkCreateImage(GN_Vk.device, &ii, 0, &image) != VK_SUCCESS) return false;
     VkMemoryRequirements mr;
     vkGetImageMemoryRequirements(GN_Vk.device, image, &mr);
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if(vkAllocateMemory(GN_Vk.device, &mai, 0, &memory) != VK_SUCCESS) return false;
     vkBindImageMemory(GN_Vk.device, image, memory, 0);
 
-    VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     vi.image = image;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -97,7 +97,7 @@ bool createLutImage(uint32_t width, uint32_t height, VkImageUsageFlags extraUsag
 // wrapU：sky-view LUT 的 u 是方位角（0..1 周期），必须 REPEAT 才能跨 u=0/1 正确插值；
 // 透射率 LUT 的 u = mu*0.5+0.5 是非周期量，必须 CLAMP（REPEAT 会把两个物理端点接起来）。
 VkSampler createLutSampler(bool wrapU) {
-    VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     sci.magFilter = VK_FILTER_LINEAR;
     sci.minFilter = VK_FILTER_LINEAR;
     sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
@@ -198,8 +198,7 @@ bool createSkyViewComputeResources() {
     bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[2].descriptorCount = 1;
     bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo layoutInfo{}; layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = 3;
     layoutInfo.pBindings = bindings;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &layoutInfo, 0, &s_setLayout) != VK_SUCCESS) {
@@ -207,7 +206,7 @@ bool createSkyViewComputeResources() {
         return false;
     }
 
-    VkPipelineLayoutCreateInfo pipelineInfo = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo pipelineInfo{}; pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineInfo.setLayoutCount = 1;
     pipelineInfo.pSetLayouts = &s_setLayout;
     if(vkCreatePipelineLayout(GN_Vk.device, &pipelineInfo, 0, &s_pipelineLayout) != VK_SUCCESS) {
@@ -237,7 +236,7 @@ bool createSkyViewComputeResources() {
     VkDescriptorPoolSize sizes[3] = {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
                                      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
                                      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
-    VkDescriptorPoolCreateInfo poolInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    VkDescriptorPoolCreateInfo poolInfo{}; poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.maxSets = 1;
     poolInfo.poolSizeCount = 3;
     poolInfo.pPoolSizes = sizes;
@@ -245,7 +244,7 @@ bool createSkyViewComputeResources() {
         s_descriptorPool = VK_NULL_HANDLE;
         return false;
     }
-    VkDescriptorSetAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo allocInfo{}; allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = s_descriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &s_setLayout;
@@ -272,9 +271,7 @@ bool createSkyViewComputeResources() {
     skyInfo.imageView = s_skyView;
     skyInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL; // dispatch 前 barrier 到 GENERAL 写入
     VkDescriptorBufferInfo uboInfo = {s_uboBuffer, 0, sizeof(AtmosphereLutUbo)};
-    VkWriteDescriptorSet writes[3] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
-                                      {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    VkWriteDescriptorSet writes[3]{}; writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = s_descriptorSet;
     writes[0].dstBinding = 0;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -298,7 +295,7 @@ bool createSkyViewComputeResources() {
 void recordSkyViewImageBarrier(VkCommandBuffer cb, VkImageLayout oldLayout, VkImageLayout newLayout,
                                VkAccessFlags srcAccess, VkAccessFlags dstAccess,
                                VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage) {
-    VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    VkImageMemoryBarrier barrier{}; barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = oldLayout;
     barrier.newLayout = newLayout;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -384,7 +381,7 @@ bool init3DAtmosphereLut() {
     const VkExtent3D extents[2] = {{(uint32_t)tw, (uint32_t)th, 1}, {(uint32_t)sw, (uint32_t)sh, 1}};
     const VkDeviceSize offsets[2] = {0, transBytes};
     for(int k = 0; k < 2; ++k) {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;

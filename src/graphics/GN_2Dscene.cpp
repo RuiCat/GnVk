@@ -972,7 +972,7 @@ bool GNg::cSCENE2D::InitLoadToData(const char *file_name, float &progress){
 	GN_DeleteArray(zObjNameBuf);
 	progress = 0.1f;
 	uint8 *rpos = (uint8*)fbuf + 3;
-	uint8 version = *rpos;  ++rpos;
+	(void)*rpos;  ++rpos; // B9-3: version 未使用，保留读进位
 	unsigned int *data_pos = (unsigned int*)rpos;  rpos += (10<<2);
 	rpos = GT_Scene2DLoadObjNameTable(rpos, &zObjNameBuf, zObjNameTable);
 	progress = 0.11f;

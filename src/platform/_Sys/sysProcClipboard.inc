@@ -180,7 +180,7 @@ GN_SYS_API void GN_StrSetPasteText(const char *text) {
         XSetSelectionOwner(GT_X11Clip.disp, GT_X11Clip.clip, GT_X11Clip.win, CurrentTime);
         XEvent ev;
         while(XCheckTypedWindowEvent(GT_X11Clip.disp, GT_X11Clip.win, SelectionRequest, &ev)) {
-            XSelectionEvent sev = {0};
+            XSelectionEvent sev{};
             sev.type = SelectionNotify;
             sev.display = ev.xselectionrequest.display;
             sev.requestor = ev.xselectionrequest.requestor;

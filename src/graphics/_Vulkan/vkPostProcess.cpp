@@ -32,7 +32,7 @@ void writePostUbo() {
 void bindPostDescriptor() {
     if(GN_Vk.compositeDescriptorSet == VK_NULL_HANDLE || s_postBuffer == VK_NULL_HANDLE) return;
     VkDescriptorBufferInfo dbi = {s_postBuffer, 0, sizeof(s_postUbo)};
-    VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    VkWriteDescriptorSet w{}; w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     w.dstSet = GN_Vk.compositeDescriptorSet;
     w.dstBinding = 2;
     w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;

@@ -65,7 +65,7 @@ GN_MAIN_API void GN_SetAppKey(long key);
 extern GN_MAIN_API void (*GN_GameBreakLoopProc)(void);
 GN_MAIN_API void RenderFinish(bool only3d = false);
 GN_MAIN_API bool GN_Has3DAccelerate();
-GN_MAIN_API char *const GN_GetInterfaceInfoRender();
+GN_MAIN_API char * GN_GetInterfaceInfoRender();
 GN_MAIN_API void GN_SetFullScreen(bool fs);
 GN_MAIN_API bool GN_GetFullScreen();
 GN_MAIN_API void GT_InitAllAndRun(int *hwnd, short vw, short vh, short cb,

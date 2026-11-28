@@ -168,7 +168,7 @@ GN_API eIMG_FILE_TYPE GetImgFmtTypeFromFileName(const char *filename);
 GN_API bool CheckImgFmtSupportFromFileName(const char *filename);
 
 //获得能够被引擎支持的图象文件扩展名(是否追加返回大写的名)  返回各个不同的扩展名之间用,隔开 如 "gim,png,bmp,tga"
-GN_API char *const GetSupportImgFmtFileExtName(bool upper = GN_AddUpperFmtName);
+GN_API char * GetSupportImgFmtFileExtName(bool upper = GN_AddUpperFmtName);
 
 //生成圆数据到内存只有单色通道(目标内存地址, 宽高, 边界大小, 硬度0.0f - 1.0f, 是否实圆)
 GN_API void GenSphereDataToMem(uint8 *p_memory, int wh, int b = 0, float value = 0.0f, bool is_solid = false);
@@ -216,7 +216,7 @@ GN_API uint8 *LoadMp3FileData(char *filename_mem, unsigned short *format, unsign
 //按文件扩展名检测音频格式是否被引擎支持( 路径文件名 ) 返回是否
 GN_API bool CheckAudioFmtSupportFromFileName(const char *filename);
 //获得能够被引擎支持的音频文件扩展名(是否追加返回大写的名) 返回各个不同的扩展名之间用,隔开 如 "wav,mp3,ogg"
-GN_API char *const GetSupportAudioFmtFileExtName(bool upper = GN_AddUpperFmtName);
+GN_API char * GetSupportAudioFmtFileExtName(bool upper = GN_AddUpperFmtName);
 }; // namespace GNa
 namespace GNf {
 
@@ -420,7 +420,7 @@ uint8 *ObjectRefIdSave(uint8 *wpos, P<T> &objs, sLIST<T> &collect) {
 template <class T>
 //读取对象组的引用ID数据 并设置它引用到的对象(当前读取位置, 对象组, 对象引用源)返回最后的读完位置
 uint8 *ObjectRefIdLoad(uint8 *rpos, P<T> &objs, P<T> &objs_ref) {
-    unsigned int id, obi = 0, obn = *((unsigned int *)rpos);
+    unsigned int obi = 0, obn = *((unsigned int *)rpos);
     rpos += 4;
     objs.New(obn);
     T *_objs = objs;

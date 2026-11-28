@@ -70,7 +70,7 @@ struct GT_sVALUE_CHANGE : public GT_sVALUE_CHANGE_BASE //其它类型插值结�
 
     GT_sVALUE_CHANGE() {}
     GT_sVALUE_CHANGE(T *change_value, T target_value, float cross_range, float linear_sheep, void (*end_porc)(void *), void *us_parame)
-        : endPorc(end_porc), usParame(us_parame), pValue(change_value), tgValue((float)target_value), lsValue((float)(*change_value)), crossRange(cross_range), linearSheep(linear_sheep) {
+        : endPorc(end_porc), usParame(us_parame), pValue(change_value), tgValue((float)target_value), lsValue((float)(*change_value)), linearSheep(linear_sheep), crossRange(cross_range) {
         if(!endPorc && usParame) memset(usParame, 1, 1);
     }
     virtual bool ValueChange() { //变量插值更变  返回插值是否完成

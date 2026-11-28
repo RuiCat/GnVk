@@ -114,7 +114,7 @@ void GNu::sSIM_MENU::InitValueToData(unsigned int *value, const char *name, int 
     memcpy(&(chd.srcValue), value, 4);   \
     GT_TMP_sSIM_MENU_CopyName
 
-    GT_TMP_sSIM_MENU_HasInitValue(value) bool out_range = false;
+    GT_TMP_sSIM_MENU_HasInitValue(value) bool out_range = false; (void)out_range; (void)out_range;
     int ca = (int)(((*value) & 0xff000000) >> 24);
     if(ca < min_value) {
         ca = min_value;
@@ -129,7 +129,7 @@ void GNu::sSIM_MENU::InitValueToData(unsigned int *value, const char *name, int 
     GT_TMP_sSIM_MENU_InitValue(GT_SP_VALUE_COLOR)
 }
 void GNu::sSIM_MENU::InitValueToData(int *value, const char *name, int max_value, int min_value, int add_value, const char *enum_name, P<GNg::sIMAGE> icon) {
-    GT_TMP_sSIM_MENU_HasInitValue(value) bool out_range = false;
+    GT_TMP_sSIM_MENU_HasInitValue(value) bool out_range = false; (void)out_range; (void)out_range;
     GT_TMP_sSIM_MENU_InitValue(GT_SP_VALUE_INT) if(enum_name && enum_name[0]) {
         char *pn = (char *)enum_name;
         uint8 li = 0;
@@ -197,7 +197,7 @@ void GNu::sSIM_MENU::InitValueToData(int *value, const char *name, int max_value
     }
 }
 void GNu::sSIM_MENU::InitValueToData(float *value, const char *name, float max_value, float min_value, float add_value, P<GNg::sIMAGE> icon) {
-    GT_TMP_sSIM_MENU_HasInitValue(value) bool out_range = false;
+    GT_TMP_sSIM_MENU_HasInitValue(value) bool out_range = false; (void)out_range; (void)out_range;
     if(*value < min_value) {
         *value = min_value;
         out_range = true;
@@ -367,7 +367,7 @@ void GNu::sSIM_MENU::zReadData(GNf::sFILE *fp, int &max_read_count) {
                     } else { //多选项
                         unsigned int mask;
                         memcpy(&mask, _chd->pointer, 4);
-                        if(mask > (1 << (unsigned int)(_chd->maxValue)) - 1) {
+                        if(mask > (1u << (unsigned int)(_chd->maxValue)) - 1) {
                             max_read_count = GN_INT_MIN;
                             return;
                         }

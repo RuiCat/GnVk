@@ -15,7 +15,7 @@ const VkFormat SSAO_FORMAT = VK_FORMAT_R8_UNORM;
 
 // 单张 R8 AO 目标（raw/blur 共用）。
 bool createSsaoImage(VkImage *image, VkDeviceMemory *memory, VkImageView *view) {
-    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.extent = {GN_Vk.swapchainExtent.width, GN_Vk.swapchainExtent.height, 1};
     ii.mipLevels = 1;
@@ -29,12 +29,12 @@ bool createSsaoImage(VkImage *image, VkDeviceMemory *memory, VkImageView *view) 
     if(vkCreateImage(GN_Vk.device, &ii, 0, image) != VK_SUCCESS) return false;
     VkMemoryRequirements mr;
     vkGetImageMemoryRequirements(GN_Vk.device, *image, &mr);
-    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if(vkAllocateMemory(GN_Vk.device, &mai, 0, memory) != VK_SUCCESS) return false;
     vkBindImageMemory(GN_Vk.device, *image, *memory, 0);
-    VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     vi.image = *image;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = SSAO_FORMAT;
@@ -71,7 +71,7 @@ bool createSsaoRenderPass(VkRenderPass *renderPass) {
     deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    VkRenderPassCreateInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rpi.attachmentCount = 1;
     rpi.pAttachments = &ad;
     rpi.subpassCount = 1;
@@ -82,7 +82,7 @@ bool createSsaoRenderPass(VkRenderPass *renderPass) {
 }
 
 bool createSsaoFramebuffer(VkRenderPass renderPass, VkImageView view, VkFramebuffer *fb) {
-    VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    VkFramebufferCreateInfo fci{}; fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fci.renderPass = renderPass;
     fci.attachmentCount = 1;
     fci.pAttachments = &view;
@@ -181,7 +181,7 @@ void writeSsaoDescriptors() {
     w[5].pImageInfo = &depth;
     vkUpdateDescriptorSets(GN_Vk.device, 6, w, 0, 0);
     // blur set 的第三个 sampler 单独写（binding 3=normal）
-    VkWriteDescriptorSet wn = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    VkWriteDescriptorSet wn{}; wn.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     wn.dstSet = GN_Vk.ssaoBlurDescriptorSet;
     wn.dstBinding = 3;
     wn.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -190,7 +190,7 @@ void writeSsaoDescriptors() {
     vkUpdateDescriptorSets(GN_Vk.device, 1, &wn, 0, 0);
     // 延迟布局 12 = blurAO（G2b 合成用）
     if(GN_Vk.deferredLightDescriptorSet) {
-        VkWriteDescriptorSet wd = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        VkWriteDescriptorSet wd{}; wd.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         wd.dstSet = GN_Vk.deferredLightDescriptorSet;
         wd.dstBinding = 12;
         wd.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -241,7 +241,7 @@ bool createSsaoLayouts() {
         ssaoBindings[i].descriptorCount = 1;
         ssaoBindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
-    VkDescriptorSetLayoutCreateInfo slci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    VkDescriptorSetLayoutCreateInfo slci{}; slci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     slci.bindingCount = 3;
     slci.pBindings = ssaoBindings;
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &slci, 0, &GN_Vk.ssaoDescriptorLayout) != VK_SUCCESS)
@@ -262,7 +262,7 @@ bool createSsaoLayouts() {
     if(vkCreateDescriptorSetLayout(GN_Vk.device, &slci, 0, &GN_Vk.ssaoBlurDescriptorLayout) !=
        VK_SUCCESS)
         return false;
-    VkPipelineLayoutCreateInfo pl = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkPipelineLayoutCreateInfo pl{}; pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pl.setLayoutCount = 1;
     pl.pSetLayouts = &GN_Vk.ssaoDescriptorLayout;
     if(vkCreatePipelineLayout(GN_Vk.device, &pl, 0, &GN_Vk.ssaoPipelineLayout) != VK_SUCCESS)
@@ -270,7 +270,7 @@ bool createSsaoLayouts() {
     pl.pSetLayouts = &GN_Vk.ssaoBlurDescriptorLayout;
     if(vkCreatePipelineLayout(GN_Vk.device, &pl, 0, &GN_Vk.ssaoBlurPipelineLayout) != VK_SUCCESS)
         return false;
-    VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetAllocateInfo dai{}; dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dai.descriptorPool = GN_Vk.descriptorPool;
     dai.descriptorSetCount = 1;
     dai.pSetLayouts = &GN_Vk.ssaoDescriptorLayout;
@@ -281,7 +281,7 @@ bool createSsaoLayouts() {
 }
 
 bool createSsaoSampler() {
-    VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     sci.magFilter = VK_FILTER_NEAREST;
     sci.minFilter = VK_FILTER_NEAREST;
     sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -394,7 +394,7 @@ void updateSsaoUniforms(const sMAT44 &viewProj) {
 
 void recordSsaoPasses(VkCommandBuffer cb) {
     const VkClearValue clearValue = {{{1.0f, 1.0f, 1.0f, 1.0f}}}; // R8：1=无遮蔽
-    VkRenderPassBeginInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    VkRenderPassBeginInfo rpi{}; rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass = GN_Vk.ssaoRenderPass;
     rpi.framebuffer = GN_Vk.ssaoFramebuffer;
     rpi.renderArea = {{0, 0}, GN_Vk.swapchainExtent};

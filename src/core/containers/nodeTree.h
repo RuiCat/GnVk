@@ -21,7 +21,7 @@ struct sNODE //★安全节点 用于方便构成子父嵌套关系的树形连�
     P_ zPthis; //节点自身的安全指针
     P<char> aName; //名称
 
-    sNODE() : zParent(0), zParentNode(0) {}
+    sNODE() : zParentNode(0), zParent(0) {}
 
     virtual ~sNODE() {
         GT_LIST_iterator(P<T>) in = zSub.begin(), en = zSub.end();

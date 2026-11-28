@@ -36,7 +36,7 @@ void readEnvironmentSh(float sh9[9][4]) {
 
 bool createProbeImages() {
     for(int k = 0; k < PROBE_TEXTURE_COUNT; ++k) {
-        VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo ii{}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         ii.imageType = VK_IMAGE_TYPE_3D;
         ii.extent = {PROBE_COUNT_X, PROBE_COUNT_Y, PROBE_COUNT_Z};
         ii.mipLevels = 1;
@@ -50,14 +50,14 @@ bool createProbeImages() {
         if(vkCreateImage(GN_Vk.device, &ii, 0, &GN_Vk.probeImages[k]) != VK_SUCCESS) return false;
         VkMemoryRequirements mr;
         vkGetImageMemoryRequirements(GN_Vk.device, GN_Vk.probeImages[k], &mr);
-        VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateInfo mai{}; mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         mai.allocationSize = mr.size;
         mai.memoryTypeIndex = FindMemType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if(vkAllocateMemory(GN_Vk.device, &mai, 0, &GN_Vk.probeMemories[k]) != VK_SUCCESS) {
             return false;
         }
         vkBindImageMemory(GN_Vk.device, GN_Vk.probeImages[k], GN_Vk.probeMemories[k], 0);
-        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vi.image = GN_Vk.probeImages[k];
         vi.viewType = VK_IMAGE_VIEW_TYPE_3D;
         vi.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -92,7 +92,7 @@ bool uploadProbeTextures() {
 
     VkCommandBuffer cb = beginOnceCommand();
     for(int k = 0; k < PROBE_TEXTURE_COUNT; ++k) {
-        VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier b{}; b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -126,7 +126,7 @@ bool uploadProbeTextures() {
 }
 
 bool createProbeSampler() {
-    VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    VkSamplerCreateInfo sci{}; sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     sci.magFilter = VK_FILTER_LINEAR;
     sci.minFilter = VK_FILTER_LINEAR;
     sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -160,7 +160,7 @@ bool createProbeUbo() {
 void writeProbeDescriptors() {
     if(GN_Vk.deferredLightDescriptorSet == VK_NULL_HANDLE) return;
     VkDescriptorBufferInfo ubo = {GN_Vk.probeUBOBuffer, 0, sizeof(GN3d::sPROBE_UBO)};
-    VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    VkWriteDescriptorSet w{}; w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     w.dstSet = GN_Vk.deferredLightDescriptorSet;
     w.dstBinding = 14;
     w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;

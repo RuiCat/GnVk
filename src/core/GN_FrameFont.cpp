@@ -23,9 +23,9 @@ char GNg::cFRAME_LAUNCHER_FONT::aPicIndex[128] = {
         GN_Delete(zActFrame);              \
     }
 GNg::cFRAME_LAUNCHER_FONT::cFRAME_LAUNCHER_FONT() : zFontFrame(0),
-                                                    zActFrame(0),
-                                                    zActTime_s(0),
                                                     zActState_s(0),
+                                                    zActTime_s(0),
+                                                    zActFrame(0),
                                                     zActMouseAuto(false) {
     zMax_num = 0;
 }
