@@ -107,6 +107,18 @@ lint-strict:
 	@bash tests/lint/context_groups.sh
 	@bash tests/lint/input.sh
 
+.PHONY: fuzz
+fuzz:
+	@echo "$(YELLOW)🔬 解析器 fuzz（ASan/UBSan，build-fuzz/）...$(RESET)"
+	@$(CMAKE) -S . -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+		-DCMAKE_CXX_FLAGS="-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer" \
+		-DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined" \
+		-DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" > /dev/null
+	@$(CMAKE) --build build-fuzz -j$(JOBS) --target fuzzParsers
+	@mkdir -p .local/fuzz
+	@FUZZ_SECS=$(if $(FUZZ_SECS),$(FUZZ_SECS),3600) FUZZ_ARTIFACT=.local/fuzz/last.bin \
+		LD_LIBRARY_PATH=build-fuzz:$$LD_LIBRARY_PATH ./build-fuzz/fuzzParsers
+
 .PHONY: warnings
 warnings:
 	@echo "$(YELLOW)🚨 告警预算门禁（B9，扩展警告口径 <500）...$(RESET)"
@@ -293,7 +305,7 @@ crosscheck:
 
 clean:
 	@echo "$(YELLOW)🧹 清理编译产物...$(RESET)"
-	rm -rf $(BUILD) build-cmake-debug build-asan build/obj build/obj-asan libGN_mini.so
+	rm -rf $(BUILD) build-cmake-debug build-asan build-fuzz build/obj build/obj-asan libGN_mini.so
 	@echo "$(GREEN)✅ 清理完成$(RESET)"
 
 # ── 帮助 ────────────────────────────────────────────────

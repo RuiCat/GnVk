@@ -284,3 +284,14 @@ LD_LIBRARY_PATH=. VK_ICD_FILENAMES=$PWD/.local/probes/lvp_icd.json CORNELL_GPU_R
 **CPU 可验剩余**：仅 DA-M2（分批迁移）。其余全部 done 或 blocked（GPU/ABI/环境）。
 
 > 单页总结（进度/blocked/下一步）：`docs/REMAINING_WORK_SUMMARY_2026-11-21.md`。
+
+
+## B9-5 fuzz 附带发现（out-of-scope，2026-11-28，ASan/UBSan 全量单测）
+
+> 这些在 UI/材质/物理层，非 B9 改动文件（git diff ab9264e..HEAD 为空），`make asan` 本不在 ci。登记待后续专项。
+
+| 项 | 锚点 | 现象 | 备注 |
+|---|---|---|---|
+| 布局栈越界 | `src/graphics/GN_Layout.cpp:848` ComputeArrangeRangeData | ASan stack-buffer-overflow READ size 1 | scrollListDrawCallSignatureFlag 测试经 cSCROLL_LIST::InitStyleToData→SetText 触发；需核 sDRAW_RANGE 缓冲尺寸 |
+| 非法枚举加载 | `src/graphics/GN_Material.cpp:39` | UBSan load of value 99 for eMATERIAL_BINDING_KIND | 负向测试故意传非法 kind，validKind 已拒绝；UBSan 枚举加载噪声，可考虑测试侧用合法中间值 |
+| 非法枚举加载 | `src/graphics/GN_PhysicsJoint.cpp:281` | UBSan load of value 99 for eJOINT_TYPE | 同上 |

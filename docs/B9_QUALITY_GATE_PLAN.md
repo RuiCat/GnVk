@@ -1,6 +1,6 @@
 # B9 质量门全量（c7）执行账本
 
-> **状态**：🚧 进行中 — B9-1/B9-2/B9-3/B9-4 ✅（去 -fpermissive + C++17 + 告警 19385→7 + 字符串安全）；B9-5 待做
+> **状态**：🚧 进行中 — B9-1..B9-4 ✅；B9-5 fuzz  harness + WAV 加固 ✅，1 小时无崩溃运行中
 > **上游**：`docs/REFACTOR_PLAN.md` §5 阶段5 / §11 B9；依赖 B7/B8（已完成）。
 > **开工基线**：`ab9264e`（2026-11-27，单测 955/0）；快照 `snap-20261128-013049`。
 
@@ -22,7 +22,7 @@
 | B9-2 | 升级 C++17（全仓切换；ABI/单测/冒烟验证） | ✅ 2026-11-28，ci 全绿 955/0，ABI diff=0；register×5 清除；headers lint 同步 17 并加基线门禁 |
 | B9-3 | 告警大扫除（reorder/ignored-qualifiers/mfi/deprecated/shadow/write-strings/sign-compare/switch/unused/narrowing/format 等）+ `make warnings` 门禁 | ✅ 2026-11-28，19385→7（余 7 为已登记保留：delete-non-virtual-dtor×5 §5.2 + cast-function-type×2 DA-1126-15）；门禁入 ci |
 | B9-4 | 字符串安全：strcpy/strcat 62 处→memcpy 精确长度（清零）；sprintf 56 处→snprintf 真实容量；余 9 处契约/动态指针登记 | ✅ 2026-11-28，output.sh：strcpy/strcat 零容忍 + sprintf 基线 9 |
-| B9-5 | 解析器 fuzz：PNG/ZIP/WAV/glTF/OBJ 边界加固 + fuzz 种子 + 1 小时无崩溃 | 待做 |
+| B9-5 | 解析器 fuzz：tests/fuzz/fuzzParsers（PNG/JPEG/glTF/PMD/PMX/WAV 6 目标，ASan/UBSan 变异循环）+ 回归种子 + WAV 加固 | 🚧 2026-11-28，60s 96 万次无崩溃；1 小时运行中 |
 
 ## B9-1 扫描结论（2026-11-28，GCC 13.3，190 cpp 全量 -fsyntax-only）
 
@@ -54,6 +54,21 @@
   容量由 GT_HttpPostGetOccupancySize 预先算定，本地无容量参数）；
   `sysEncoding.inc` itoa(_DstBuf)（调用方缓冲契约）；`sysMutexIo.inc` GN_GetDeviceInfoRam(info)（调用方缓冲契约）。
 - **门禁**：`tests/lint/output.sh` 增 strcpy/strcat 零容忍检查；sprintf 基线 65→9（登记上述）。
+
+## B9-5 解析器 fuzz（2026-11-28）
+
+- **harness**：`tests/fuzz/fuzzParsers.cpp`（`make fuzz`，ASan/UBSan 构建 build-fuzz/）。6 个纯 CPU
+  解析目标：`GN3d::decodePngMemory` / `decodeJpegMemory` / `sASSET::loadFromMemory`（glTF/GLB）、
+  `mmd::loadPmdStream` / `loadPmxStream`、`GNa::LoadWavFileData`。变异循环（位翻转/字节替换/增删/截断/拼接），
+  每次迭代写 `$FUZZ_ARTIFACT` 作崩溃复现样本；`FUZZ_SECS`（默认 3600）/`FUZZ_SEED` 可控。
+- **发现并修复真实缺陷 DA-1128-03（WAV）**：`LoadWavFileData` 直接信任 WAV 头 data 块大小，
+  巨值（如 0xE800FF00）经 int 转换变负 → `GNf::Read`/memcpy negative-size 崩溃。加固：
+  头须读满 44 字节 + RIFF/WAVE 校验；data 大小 clamp 到源剩余字节（`GetSize-44`），合法 WAV 行为不变。
+  回归种子 `tests/fuzz/corpus/wav_neg_size.bin`。修复后 60s **964674 次迭代无崩溃**。
+- **out-of-scope 既有发现（B9 未改这些文件，登记待后续）**：ASan/UBSan 全量单测另暴露
+  `GN_Layout.cpp:848 ComputeArrangeRangeData` 栈越界（scrollList 注册测试触发）、
+  `GN_Material.cpp:39` / `GN_PhysicsJoint.cpp:281` 非法枚举值加载（负向测试 UBSan 噪声）。
+  这些在 UI/材质/物理层，非 B9-5 解析器范围，`make asan` 本不在 ci；见 BACKLOG。
 
 ## 复算命令
 

@@ -26,8 +26,9 @@
     GNf::sFILE *fp = GNf::Open(filename_mem, "rb", memsize);                                       \
     if(!fp) return 0; /*文件打开失败返回0*/                                                        \
     char td[44];                                                                                   \
-    GNf::Read(td, 1, 44, fp); /*读取wav头信息共44个字节*/                                          \
-    if(td[0] != 'R' || td[1] != 'I' || td[2] != 'F' || td[3] != 'F') { /*判断是否不是wav格式文件*/ \
+    if(GNf::Read(td, 1, 44, fp) != 44) { GNf::Close(fp); return 0; } /*B9-5: 头须读满44字节*/        \
+    if(td[0] != 'R' || td[1] != 'I' || td[2] != 'F' || td[3] != 'F' ||                             \
+       td[8] != 'W' || td[9] != 'A' || td[10] != 'V' || td[11] != 'E') { /*RIFF/WAVE 校验*/         \
         GNf::Close(fp);                                                                            \
         return 0;                                                                                  \
     }                                                                                              \
@@ -39,8 +40,13 @@
     }
     GN_API uint8 *GNa::LoadWavFileData(char *filename_mem, unsigned short *format, unsigned short *channels, unsigned short *bit, unsigned int *freq, unsigned int *size, int memsize) {
         GT_TMP_LOAD_WAV_HEAD; //读取wav 文件头信息
-        uint8 *data = new uint8[*size]; //分配数据内存空间
-        GNf::Read((char *)data, 1, *size, fp); //一次过读取音频数据 !wav无压缩数据比较简单
+        // B9-5 加固（fuzz 发现）：data 块大小来自文件头，须 clamp 到源剩余字节，
+        // 否则巨值/负值会令 new[]/memcpy 崩溃。合法 WAV 的 *size 恰等于剩余字节，行为不变。
+        int wav_total = GNf::GetSize(fp);
+        unsigned int wav_avail = (wav_total > 44) ? (unsigned int)(wav_total - 44) : 0;
+        if(*size > wav_avail) *size = wav_avail;
+        uint8 *data = new uint8[*size + 1]; //分配数据内存空间（+1 防 0 尺寸歧义）
+        GNf::Read((char *)data, 1, (int)*size, fp); //一次过读取音频数据 !wav无压缩数据比较简单
         GNf::Close(fp); //关闭文件
         return data; //返回数据
     }

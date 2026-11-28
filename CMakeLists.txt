@@ -128,6 +128,9 @@ if(GN_BUILD_TESTS)
     file(GLOB GN_HEADLESS_SRC CONFIGURE_DEPENDS tests/headless/*.cpp)
     gn_add_exe(headlessCheck SRCS ${GN_HEADLESS_SRC})
 
+    # B9-5 解析器模糊测试（纯 CPU 解析器；ASan 构建见 make fuzz）
+    gn_add_exe(fuzzParsers SRCS tests/fuzz/fuzzParsers.cpp INCS src/mmd)
+
     # 普通示例：tests/<dir>/*.cpp → <name>
     foreach(name physicsBoxes characterDemo physicsVideo clothDemo fireLighting
                  editorGizmo gizmoInput undoDemo characterPush mmdViewer imoScene)
