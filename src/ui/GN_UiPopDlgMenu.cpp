@@ -69,7 +69,7 @@ void GNu::sSIM_MENU::InitValueToData(char *text, const char *name, int text_buf_
     int len = strlen(name);                        \
     chd.name = new char[len + 1];                  \
     /* 已核（B5f）：new char[len+1]，len = strlen(name)。 */ \
-    strcpy(chd.name, name);
+    memcpy(chd.name, name, strlen(name) + 1);
 
 #ifdef GN_DEBUG
 
@@ -99,7 +99,7 @@ void GNu::sSIM_MENU::InitValueToData(char *text, const char *name, int text_buf_
         GT_ChildTextValueSetShowStr(&chd);
     chd.enumName = new char[text_buf_size];
     // 已核（B5f）：enumName = new char[text_buf_size]，text 已在函数前面按 text_buf_size-1 截断。
-    strcpy(chd.enumName, text); //原初始值保存到列举名里
+    memcpy(chd.enumName, text, strlen(text) + 1); //原初始值保存到列举名里
 }
 void GNu::sSIM_MENU::InitValueToData(unsigned int *value, const char *name, int max_value, int min_value, int add_value, P<GNg::sIMAGE> icon) {
 #define GT_TMP_sSIM_MENU_InitValue(TYPE) \
@@ -235,7 +235,7 @@ void GNu::sSIM_MENU::InitSubMenuToData(sSIM_MENU *menu, const char *name, char m
         GN_DeleteArray(menu->zCaption);
     menu->zCaption = new char[len + 1];
     // 已核（B5f）：new char[len+1]，len = strlen(name)。
-    strcpy(menu->zCaption, name);
+    memcpy(menu->zCaption, name, strlen(name) + 1);
 }
 void GNu::sSIM_MENU::InitTextToData(const char *text, int *value, P<GNg::sIMAGE> icon) {
 #define GT_TMP_SIMPLE_MENU_InitText(VALUE_TYPE) \
@@ -245,7 +245,7 @@ void GNu::sSIM_MENU::InitTextToData(const char *text, int *value, P<GNg::sIMAGE>
     int len = strlen(text);                     \
     chd.name = new char[len + 1];               \
     /* 已核（B5f）：new char[len+1]，len = strlen(text)。 */              \
-    strcpy(chd.name, text);                     \
+    memcpy(chd.name, text, strlen(text) + 1);                     \
     chd.maxValue = (float)len;                  \
     chd.icon = icon;                            \
     if(value) {                                 \

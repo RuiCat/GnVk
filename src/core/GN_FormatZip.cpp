@@ -46,7 +46,7 @@
     /* 加固（STRCPY 审计）：ZipCurProcFileName 固定 384 字节，装不下就不拼。 */ \
     if(len + 2 > (int)GT_ZIP_PATH_BUF_SIZE) return -1;    \
     if(_dir != (char *)in_zip_name) strncpy(_dir, in_zip_name, len); \
-    strcpy(_dir + len, "/")
+    memcpy(_dir + len, "/", sizeof("/"))
 
             GT_TMP_ZIP_ADD_DIR_NAME_MAKE;
             zip_fileinfo zf;
@@ -71,7 +71,7 @@
         } else { //直接加内存文件
             // 加固（STRCPY 审计）：ZipCurProcFileName 固定 384 字节，超长名直接失败。
             if(strlen(in_zip_name) >= GT_ZIP_PATH_BUF_SIZE) return -1;
-            if((char *)in_zip_name != (char *)ZipCurProcFileName) strcpy(ZipCurProcFileName, in_zip_name);
+            if((char *)in_zip_name != (char *)ZipCurProcFileName) memcpy(ZipCurProcFileName, in_zip_name, strlen(in_zip_name) + 1);
             zip_fileinfo zf;
             zipMakeFileInfo(&zf, _A_NORMAL);
             int ret = 0;
@@ -103,7 +103,7 @@
                 // 加固（STRCPY 审计）：装得下 "/*.*"+NUL 才拼，否则记录失败。
                 if(gdir_len + 5 <= (int)sizeof(find_str)) {
                     strncpy(find_str, f_info->global_filename, gdir_len);
-                    strcpy(find_str + gdir_len, "/*.*");
+                    memcpy(find_str + gdir_len, "/*.*", sizeof("/*.*"));
                     GNf::FindFileDirInfoData(find_str, true, &f_list, &d_list);
                 } else ret = -1;
                 GN::sLIST<P<GNf::sFILE_INFO>>::iterator itf, etf;
@@ -115,10 +115,10 @@
                         p_info = (*itf);
                         // 加固（STRCPY 审计）：路径总长必须装进 ZipCurProcFileName[384]。
                         if(len + (int)strlen(p_info->name) + 1 > (int)GT_ZIP_PATH_BUF_SIZE) { ret = -1; continue; }
-                        strcpy(_dir + len, p_info->name);
+                        memcpy(_dir + len, p_info->name, strlen(p_info->name) + 1);
                         if(AddFile(_dir, p_info) < 0) {
                             GN_ErrorLast.New(384);
-                            sprintf(GN_ErrorLast, "压缩目录里的文件: %s 中途有错!", p_info->global_filename);
+                            snprintf(GN_ErrorLast, 384, "压缩目录里的文件: %s 中途有错!", p_info->global_filename);
                             ret = -1;
                         }
                     }
@@ -133,7 +133,7 @@
                             ;
                         } else {
                             if(len + (int)strlen(_name) + 1 > (int)GT_ZIP_PATH_BUF_SIZE) { ret = -1; continue; }
-                            strcpy(_dir + len, _name);
+                            memcpy(_dir + len, _name, strlen(_name) + 1);
                             if(AddDir(_dir, p_info, add_all_sub__) < 0) ret = -1;
                         }
                     }
@@ -145,7 +145,7 @@
     int GNd::cZIP::AddFile(const char *in_zip_name, const GNf::sFILE_INFO *f_info) {
         // 加固（STRCPY 审计）：ZipCurProcFileName 固定 384 字节，超长名直接失败。
         if(strlen(in_zip_name) >= GT_ZIP_PATH_BUF_SIZE) return -1;
-        if((char *)in_zip_name != (char *)ZipCurProcFileName) strcpy(ZipCurProcFileName, in_zip_name);
+        if((char *)in_zip_name != (char *)ZipCurProcFileName) memcpy(ZipCurProcFileName, in_zip_name, strlen(in_zip_name) + 1);
         zip_fileinfo zf;
         zipGetFileInfo(&zf, f_info);
         int ret = 0;
@@ -290,7 +290,7 @@
                     if(!on_unzip_file_begin(read_name, (const void **)&unzf, f_size)) continue;
                 }
                 if(unzOpenCurrentFile(unzf) != UNZ_OK) {
-                    sprintf(err_msg, "解压缩文件定位打开文件: %s 失败!" /*"unzipfile in open file: %s faile!"*/, read_name);
+                    snprintf(err_msg, sizeof(err_msg), "解压缩文件定位打开文件: %s 失败!" /*"unzipfile in open file: %s faile!"*/, read_name);
                     GN_ErrorLast(err_msg, 0);
                     GT_TMP_UNZ_RETURN(-4);
                 }
@@ -310,12 +310,12 @@
                     if(unzReadCurrentFile(unzf, buf, r_size) >= 0) {
                         _w_size = GNf::Write(buf, 1, r_size, outfile);
                         if(_w_size != r_size) {
-                            sprintf(err_msg, "解压缩文件 %s 写入解压好的数据时失败!" /*"unzipfile: %s write data faile!"*/, read_name);
+                            snprintf(err_msg, sizeof(err_msg), "解压缩文件 %s 写入解压好的数据时失败!" /*"unzipfile: %s write data faile!"*/, read_name);
                             GN_ErrorLast(err_msg, 0);
                             break;
                         }
                     } else {
-                        sprintf(err_msg, "解压缩文件 %s 的数据时失败!" /*"unzReadCurrentFile: %s faile!"*/, read_name);
+                        snprintf(err_msg, sizeof(err_msg), "解压缩文件 %s 的数据时失败!" /*"unzReadCurrentFile: %s faile!"*/, read_name);
                         GN_ErrorLast(err_msg, 0);
                         break;
                     }
@@ -327,7 +327,7 @@
                 unzCloseCurrentFile(unzf);
                 if(on_unzip_file_end) on_unzip_file_end(read_name);
                 if(_size < f_size) {
-                    sprintf(err_msg, "解压文件: %s 时遇到错误,解压缩被中断!", read_name);
+                    snprintf(err_msg, sizeof(err_msg), "解压文件: %s 时遇到错误,解压缩被中断!", read_name);
                     GN_ErrorLast(err_msg, 0);
                     GT_TMP_UNZ_RETURN(-5);
                 }

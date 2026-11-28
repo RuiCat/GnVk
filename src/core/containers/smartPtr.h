@@ -30,7 +30,7 @@
 #else
 //设置安全指针的名称(安全指针, 名称)以方便跟踪识别
 #define P_SetName(pointer, name) \
-    strcpy(pointer.zName, name); \
+    memcpy(pointer.zName, name, strlen(name) + 1); \
     if(pointer.zData) GN_Log("@@: %08x - %08x %s\n", pointer.zData->pmem, (pointer.zData->pmem) + pointer.Size(), zName);
 
 //打印安全指针的名称
@@ -169,7 +169,7 @@ struct P : public P_ //★★★安全指针  支持线程安全 预防内存涉
                 for(; it < et; ++it, ++id) *it = *id;
             } else if(sizeof(T) == sizeof(char)) { //是字符类型时
                 this->New((unsigned int)strlen((char *)p_data) + 1);
-                strcpy((char *)(this->zData->pmem), (char *)p_data);
+                memcpy((char *)(this->zData->pmem), (char *)p_data, strlen((char *)p_data) + 1);
                 return;
             }
             return;

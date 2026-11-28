@@ -107,8 +107,8 @@
     }
     void GNg::iFILE_IMAGE::GetSupportFmtFileExtName(char *out, bool upper) {
         // 已核（STRCPY 审计）：调用方缓存 160 字节（GNg::GN_Core.aImageExtNames），本函数写 20+16=36 字节。
-        strcpy(out, "png,bmp,tga,hdr,gim");
-        if(upper) strcpy(out + 19, ",PNG,BMP,TGA,HDR");
+        memcpy(out, "png,bmp,tga,hdr,gim", sizeof("png,bmp,tga,hdr,gim"));
+        if(upper) memcpy(out + 19, ",PNG,BMP,TGA,HDR", sizeof(",PNG,BMP,TGA,HDR"));
     }
     GNg::iFILE_IMAGE GT_FileImage;
     GN_API GNg::iFILE_IMAGE *GNg::FileImage = &GT_FileImage;

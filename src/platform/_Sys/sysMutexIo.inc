@@ -197,7 +197,7 @@ GN_SYS_API char * GN_GetInerfaceInfoSys() {
                             DWORD dwMajorVer, dwMinorVer, dwBuildNum;
                             pfGetVersionNum(&dwMajorVer, &dwMinorVer, &dwBuildNum);
                             dwBuildNum &= 0x0ffff;
-                            sprintf(sv, "%d.%d.%d", dwMajorVer, dwMinorVer, dwBuildNum);
+                            snprintf(sv, (int)(sizeof(sysInfo) - 8), "%d.%d.%d", dwMajorVer, dwMinorVer, dwBuildNum);
                             ::FreeLibrary(hModNtdll);
                             break;
                         }
@@ -234,7 +234,7 @@ GN_SYS_API char * GN_GetInerfaceInfoSys() {
         if(uname(&uinfos)) {
             strncpy(sysInfo, "Linux ?", 63);
             sysInfo[63] = 0;
-        } else sprintf(sysInfo, "%s %s", uinfos.sysname, uinfos.release);
+        } else snprintf(sysInfo, sizeof(sysInfo), "%s %s", uinfos.sysname, uinfos.release);
     }
 #endif
     return (char *)sysInfo;

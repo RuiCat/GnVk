@@ -671,7 +671,7 @@ GN_API void GN_StrInsertSegment(char **ppstr, const char *sub_str, short inpos, 
 	}else{
 		char *pstr2 = new char[inpos+sub_len+strlen(pstr+inpos)+1];
 		// 已核（B5f）：new char[inpos+sub_len+尾部+1]，三处写入恰好填满。
-		strncpy(pstr2, pstr, inpos); strncpy(pstr2+inpos, sub_str, sub_len); strcpy(pstr2+inpos+sub_len, pstr+inpos);
+		strncpy(pstr2, pstr, inpos); strncpy(pstr2+inpos, sub_str, sub_len); memcpy(pstr2+inpos+sub_len, pstr+inpos, strlen(pstr+inpos) + 1);
 		delete [] pstr;
 		*ppstr = pstr2;
 	}
@@ -894,8 +894,8 @@ GN_API P<char> GN_StrToPrintFmt(const char *str, short fn,  float *dec_out){
 	if(dn){
           unsigned short di = 0;
 		  for(; di < dn; ++di)ratio *= 0.1f;
-		  n_n = sprintf(n_str,"%d.%d", 1 + n + dn, dn);
-	}else n_n = sprintf(n_str,"%d", n);
+		  n_n = snprintf(n_str, sizeof(n_str),"%d.%d", 1 + n + dn, dn);
+	}else n_n = snprintf(n_str, sizeof(n_str),"%d", n);
 	if(dec_out)*dec_out = ratio;
 
 	P<char> fmt(fn+4+n_n + ulen);
@@ -905,10 +905,10 @@ GN_API P<char> GN_StrToPrintFmt(const char *str, short fn,  float *dec_out){
 	_fmt[1] = (_c ==' ' || _c =='#')? '#' : '0';
 	_fmt += 2;
 	// 已核（B5f）：分配 fn+4+n_n+ulen，最后一次写入落在 S-1，不越界。
-	strcpy(_fmt, n_str); _fmt += n_n;
+	memcpy(_fmt, n_str, strlen(n_str) + 1); _fmt += n_n;
 	*_fmt = dn? 'f': 'd';
 	// 已核（B5f）：_unit 长度已计入分配（+ulen）。
-    strcpy(_fmt + 1, _unit);
+    memcpy(_fmt + 1, _unit, strlen(_unit) + 1);
     return fmt;
 }
 GN_API int GN_StrSymbolToSingleChar(const char *str, char *str_out){

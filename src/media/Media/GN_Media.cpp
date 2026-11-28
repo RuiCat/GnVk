@@ -525,7 +525,7 @@ void GT_cVIDEO::Release() {
 }
 static char *GT_GetAvVersionStr(unsigned ver) {
     static char avVersionStr[16];
-    sprintf(avVersionStr, "%d.%d.%d", (ver & 0x00ff0000) >> 16, (ver & 0x0000ff00) >> 8, ver & 0xff);
+    snprintf(avVersionStr, sizeof(avVersionStr), "%d.%d.%d", (ver & 0x00ff0000) >> 16, (ver & 0x0000ff00) >> 8, ver & 0xff);
     return avVersionStr;
 }
 bool GT_cVIDEO::InitToData(const char *filename, int loop, bool sync_time, bool audio) {
@@ -546,7 +546,7 @@ bool GT_cVIDEO::InitToData(const char *filename, int loop, bool sync_time, bool 
             return false;
         }
         zClose();
-        strcpy(zFileName, filename);
+        memcpy(zFileName, filename, strlen(filename) + 1);
         zpFile = GNf::Open(zFileName, "rb");
         if(!zpFile) {
             GN_Log("打开文件 %s 失败!\n", filename);
@@ -771,8 +771,8 @@ bool GT_cVIDEO::InitToData(const char *filename, int loop, bool sync_time, bool 
         GNg::sIMAGE *_img = zImage;
         _img->CreateEmptyToData(w, h, 1, GNg::CR_RGB, 0);
         _img->fileName = new char[strlen(zFileName) + 16];
-        strcpy(_img->fileName, zFileName);
-        strcat(_img->fileName, " frame buffer");
+        memcpy(_img->fileName, zFileName, strlen(zFileName) + 1);
+        memcpy(_img->fileName + strlen(_img->fileName), " frame buffer", sizeof(" frame buffer"));
         if(zAudioIndex != -1) {
             memset(zpAVFrameRGBBuffer, 0, numBytes);
             _img->DataFill(zpAVFrameRGBBuffer, GNg::CR_RGB, w, h, 0, 0);

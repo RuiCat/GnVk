@@ -296,7 +296,7 @@ GN_SYS_API int GN_StrGB2312ToUTF8(const void *gb, void *utf8, int char_buf_len) 
         while((next = readdir(dir)) != NULL) {                                                                        \
             if(!strcmp(next->d_name, "..") || !isdigit(*next->d_name)) continue; /*返回目录或不是数字开头的目录忽略*/ \
                                                                                                                       \
-            sprintf(filename, "/proc/%s/status", next->d_name);                                                       \
+            snprintf(filename, sizeof(filename), "/proc/%s/status", next->d_name);                                                       \
             status = fopen(filename, "r");                                                                            \
             if(status) {                                                                                              \
                 /*读取该文件头一行, 通常格式为 Name: GNapp*/                                                          \

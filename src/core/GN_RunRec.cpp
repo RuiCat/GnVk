@@ -460,7 +460,7 @@ void GT_cRUN_REC::PrintInfoSet(const char *text) {
             ++rn;
             if(rn >= 254) { //超过最大显示行数时结束
                 zFocus = ti + 1 + 3;
-                strcpy(zpErrorInfo + (ti + 1), "...");
+                memcpy(zpErrorInfo + (ti + 1), "...", sizeof("..."));
                 return;
             }
         } else if(!text[ti]) { //自然结束
@@ -469,7 +469,7 @@ void GT_cRUN_REC::PrintInfoSet(const char *text) {
         }
     }
     zFocus = ti + 3;
-    strcpy(zpErrorInfo + ti, "..."); //超过最大缓冲时结束
+    memcpy(zpErrorInfo + ti, "...", sizeof("...")); //超过最大缓冲时结束
 }
 char *GT_cRUN_REC::PrintInfoGet(int *num_out) {
     if(num_out) *num_out = zFocus;
@@ -745,7 +745,7 @@ void GT_cRUN_REC::ValueCheck(int value, char *name, int ID_order) {
 #define GT_TMP_VALUE_CHECK(FMT)                             \
     if(!zGWPrintReady || GNg::ViewCur->orthoH < 16) return; \
     char str[GT_TMP_VALUECHECK_STR_MAXNUM];                 \
-    sprintf(str, FMT, name, value);                         \
+    snprintf(str, sizeof(str), FMT, name, value);                         \
     zPushShowValueInfo(ID_order, str);
 
     GT_TMP_VALUE_CHECK("%s:%d")
@@ -784,7 +784,7 @@ void GT_cRUN_REC::ValueCheck(bool value, char *name, int ID_order) {
     GNg::cVIEW2D *view = GNg::ViewCur;
     if(!zGWPrintReady || view->orthoH < 16) return;
     char str[GT_TMP_VALUECHECK_STR_MAXNUM];
-    sprintf(str, "%s:%s", name, value ? "true" : "false");
+    snprintf(str, sizeof(str), "%s:%s", name, value ? "true" : "false");
     zPushShowValueInfo(ID_order, str);
 }
 void GT_cRUN_REC::ValueCheck(void *value, char *name, int ID_order) { //指针类型
@@ -835,7 +835,7 @@ void GT_cRUN_REC::ProgressSizeGet(int &w, int &h) {
 void GT_cRUN_REC::VersionDraw(int x, int y, unsigned int icon_color, unsigned int text_color, unsigned int num_color) {
     if(!zGWPrintReady) return;
     char ver_str[32] = "V ";
-    strcat(ver_str, GN_VERSION);
+    memcpy(ver_str + strlen(ver_str), GN_VERSION, strlen(GN_VERSION) + 1);
 
     GNg::ImageDraw(&zIconLoad, x, y, 0, 0, icon_color);
     x += 10 + zIconLoad.width;
@@ -849,7 +849,7 @@ void GT_cRUN_REC::VersionDraw(int x, int y, unsigned int icon_color, unsigned in
 void GT_cRUN_REC::VersionSizeGet(int &w, int &h) {
     if(zGWPrintReady) {
         char ver_str[32] = "V ";
-        strcat(ver_str, GN_VERSION);
+        memcpy(ver_str + strlen(ver_str), GN_VERSION, strlen(GN_VERSION) + 1);
         w = 10 + zIconLoad.width + (aFont.GetFontRangeX() * (strlen(ver_str) + 6));
         h = zIconLoad.height;
     } else {

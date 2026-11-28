@@ -598,7 +598,7 @@ P<GNu::iUI_OBJECT> GNu::cUI_TEXT_ART::Clone() {
     char *cnt = _ui_text->text;
     _ui_text->text = new char[strlen(cnt) + 1];
     // 已核（B5f）：new char[strlen(cnt)+1]，精确容量。
-    strcpy(_ui_text->text, cnt);
+    memcpy(_ui_text->text, cnt, strlen(cnt) + 1);
     return ui_text;
 }
 void GNu::cUI_TEXT_ART::UpdateRun(unsigned int updatetime, sUI_LEVEL *parent) {

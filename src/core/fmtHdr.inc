@@ -241,7 +241,7 @@
         GN::sTBUF_INT tbuf(locbuf, 16000);
         int line_size = (w << 2);
         uint8 *wbuf = (uint8 *)tbuf.GetSpace(384 >= line_size ? 384 : line_size);
-        int head_size = sprintf((char *)wbuf, "#?RADIANCE\n# Made with GN\nFORMAT=32-bit_rle_rgbe\n\n-Y %d +X %d\n", h, w);
+        int head_size = snprintf((char *)wbuf, (384 >= line_size ? 384 : line_size), "#?RADIANCE\n# Made with GN\nFORMAT=32-bit_rle_rgbe\n\n-Y %d +X %d\n", h, w);
         GNf::Write((char *)wbuf, 1, head_size, fp);
 
         uint8 *lbuf = 0, *_data, *_end, *_wpos;

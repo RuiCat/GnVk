@@ -139,12 +139,12 @@ NET_API void GNn_UrlRemedy(char url_out[384], const char *url) {
         p_str++;
         if(p_str[0]) {
             p_str = GN_StrGetExtName(p_str);
-            if(!p_str) sprintf(out_pos + strlen(out_pos), "/%s", GNn_DefWebFileName);
+            if(!p_str) snprintf(out_pos + strlen(out_pos), (int)(384 - strlen(url_out) - 1), "/%s", GNn_DefWebFileName);
         } else {
             size_t remaining = 384 - strlen(url_out) - 1;
             strncat(out_pos, GNn_DefWebFileName, remaining);
             url_out[384 - 1] = 0;
         }
-    } else sprintf(out_pos + strlen(out_pos), "/%s", GNn_DefWebFileName);
+    } else snprintf(out_pos + strlen(out_pos), (int)(384 - strlen(url_out) - 1), "/%s", GNn_DefWebFileName);
 }
 #endif //_GN_NETBASE_H_

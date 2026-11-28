@@ -421,7 +421,7 @@ class NET_API cSERVER_TCP // ★TCP协议服务器基类
          P<sMY_CLIENT_ADDINFO> clt_addinfo(1);
 		 clt_addinfo->us_reserve = 2;
          clt_addinfo->data = new char[64];
-		 strcpy(clt_addinfo->data, "为属性赋值");
+		 memcpy(clt_addinfo->data, "为属性赋值", sizeof("为属性赋值"));
          us_ext = clt_addinfo; //这样即可为对应的客户附加了属性信息
 
 	 \*-------------------------------------------------------------------------------------------------------------------------------*/

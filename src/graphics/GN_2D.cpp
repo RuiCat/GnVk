@@ -162,13 +162,13 @@ void GNg::cVIEW2D::SaveToFile(const char *filename, short vx, short vy, short vw
         GN_Log("cVIEW2D::SaveToFile 文件名过长!!\n");
         return;
     }
-    strcpy(fn, filename);
+    memcpy(fn, filename, strlen(filename) + 1);
     char *extname = GN_StrGetExtName(fn);
     if(!extname) {
         GN_Log("cVIEW2D::SaveToFile 文件名格式有错!!\n");
         return;
     }
-    strcpy(extname, "png");
+    memcpy(extname, "png", sizeof("png"));
     GT_TMP_VIEW2D_SAVE_RANGE_ENSURE;
 
     bool col_turn;
@@ -366,10 +366,10 @@ GN_API GNg::eIMG_FILE_TYPE GNg::CheckHasImgFmtTypeFromImgPath(const sIMAGE *img,
     char filename[384];
     // 加固（STRCPY 审计）：留出 "0000"+"."+扩展名+NUL，超长或空名直接判未知格式。
     if(!img->fileName || strlen(img->fileName) + 16 > sizeof(filename)) return eIMG_FILE_UNKNOWN;
-    strcpy(filename, img->fileName);
+    memcpy(filename, img->fileName, strlen(img->fileName) + 1);
     char *pstr = filename + strlen(filename), *pstr1;
     if(img->add_0000) {
-        strcpy(pstr, "0000");
+        memcpy(pstr, "0000", sizeof("0000"));
         pstr1 = pstr + 4;
     } else pstr1 = pstr;
     *pstr1 = '.';
@@ -377,7 +377,7 @@ GN_API GNg::eIMG_FILE_TYPE GNg::CheckHasImgFmtTypeFromImgPath(const sIMAGE *img,
 
     uint8 i = 0, n = eIMG_FILE_TYPE_NUM;
     for(; i < n; ++i) {
-        strcpy(pstr1, ImgFileTypeNames[i]);
+        memcpy(pstr1, ImgFileTypeNames[i], strlen(ImgFileTypeNames[i]) + 1);
         if(!GNf::Access(pstr1, 0, ph)) return (eIMG_FILE_TYPE)i;
     }
     return eIMG_FILE_UNKNOWN;
@@ -402,7 +402,7 @@ GN_API P<char> GNg::ExportImageFile(const char *exp_path, GNg::sIMAGE *img) {
         strncpy(img_path, img->fileName, fnlen);
         char *p_ext_name = img_path + fnlen;
         if(img->add_0000) {
-            strcpy(p_ext_name, "0000");
+            memcpy(p_ext_name, "0000", sizeof("0000"));
             p_ext_name += 4;
         }
         char *media_data = 0;
@@ -410,14 +410,14 @@ GN_API P<char> GNg::ExportImageFile(const char *exp_path, GNg::sIMAGE *img) {
         unsigned int eni = 0, enn; /*模版代码:尝试用所有被支持的图片文件扩展名来加载指定图片数据*/
         char **ext_names = GN_StrSplitToData(enn, GetSupportImgFmtFileExtName(), ',');
         for(; eni < enn; ++eni) {
-            strcpy(p_ext_name, ext_names[eni]);
+            memcpy(p_ext_name, ext_names[eni], strlen(ext_names[eni]) + 1);
             media_data = GNf::FileFullLoadToMemory(img_path, &media_size);
             if(media_data) break; //检测到已存在文件
         }
         GN_DeletePPArray(ext_names, enn) if(media_data) {
             char *filename = GN_StrGetFileName(img_path);
             save_path.New(strlen(exp_path) + strlen(filename) + 2);
-            sprintf(save_path, "%s/%s", exp_path, filename);
+            snprintf(save_path, (int)(strlen(exp_path) + strlen(filename) + 2), "%s/%s", exp_path, filename);
             GNf::sFILE *fp = GNf::Open(save_path, "wb");
             if(fp) {
                 GNf::Write(media_data, 1, media_size, fp);
@@ -443,7 +443,7 @@ GN_API bool GNg::SaveImageToFile(const char *filename, sIMAGE *img, short x, sho
         GN_Log("调用 SaveImageToFile 文件名过长!\n");
         return false;
     }
-    strcpy(fn, filename);
+    memcpy(fn, filename, strlen(filename) + 1);
     char *_name = GN_StrGetExtName(fn);
     if(_name) --_name;
     else _name = (char *)fn + strlen(fn);
@@ -457,8 +457,8 @@ GN_API bool GNg::SaveImageToFile(const char *filename, sIMAGE *img, short x, sho
     for(; i < img->texnum; ++i) {
         data = img->DataGet(&data_size, x, y, w, h, i, true);
         if(!data) return false;
-        if(img->texnum > 1) sprintf(_name, "%04d.png", i);
-        else strcpy(_name, ".png");
+        if(img->texnum > 1) snprintf(_name, (int)(sizeof(fn) - (_name - fn)), "%04d.png", i);
+        else memcpy(_name, ".png", sizeof(".png"));
         if(!SavePngFile(fn, data, (GNg::COLOR_FORMAT)img->cFormat, w, h, true))
             GN_Log("调用 sIMAGE::SaveToFile %s 有错!\n", fn);
         delete[] data;

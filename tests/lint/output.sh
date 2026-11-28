@@ -32,12 +32,23 @@ else
     fail=1
 fi
 
-# 2) sprintf → 应为 snprintf
-n=$(grep -rnE '(^|[^nv_])sprintf\(' src/ --include=*.cpp 2>/dev/null | grep -v 'snprintf' | wc -l | tr -d ' ')
-# 存量基线（这些是老代码里写固定长度缓冲的，逐个改风险大，只防新增）
-SPRINTF_BASELINE=65
+# 2) 字符串安全（B9-4）：strcpy/strcat 清零；sprintf 仅余登记契约站点
+# strcpy/strcat 已全部改 memcpy（精确长度，见 STRCPY_AUDIT / B9_QUALITY_GATE_PLAN），零容忍。
+sc=$(grep -rn '\bstrcpy(\|\bstrcat(' src/ --include=*.cpp --include=*.h --include=*.inc 2>/dev/null | wc -l | tr -d ' ')
+if [ "$sc" -eq 0 ]; then
+    echo "  [PASS] src/ 无 strcpy/strcat（已改 memcpy 精确长度拷贝）"
+else
+    echo "  [FAIL] src/ 有 $sc 处 strcpy/strcat（请用 memcpy/snprintf/GN_StrCopyToLimit）："
+    grep -rn '\bstrcpy(\|\bstrcat(' src/ --include=*.cpp --include=*.h --include=*.inc 2>/dev/null | head -5 | sed 's/^/         /'
+    fail=1
+fi
+# sprintf → snprintf。存量基线 = 9 处登记契约/动态指针站点（容量由调用方/预计算保证，无法本地 snprintf）：
+#   GN_NetTrans.cpp 406/423/541/787/895/897/898（HTTP body 预计算缓冲，w_pos/zContent 指针写入）
+#   sysEncoding.inc itoa(_DstBuf)（调用方缓冲契约）、sysMutexIo.inc GN_GetDeviceInfoRam(info)（调用方缓冲契约）
+n=$(grep -rnE '(^|[^nv_])sprintf\(' src/ --include=*.cpp --include=*.h --include=*.inc 2>/dev/null | grep -v 'snprintf' | grep -vE ':\s*//|:\s*\*|:\s*/\*' | wc -l | tr -d ' ')
+SPRINTF_BASELINE=9
 if [ "$n" -le "$SPRINTF_BASELINE" ]; then
-    echo "  [PASS] sprintf 存量 $n 处（≤ 基线 $SPRINTF_BASELINE，只防新增）"
+    echo "  [PASS] sprintf 存量 $n 处（≤ 登记契约基线 $SPRINTF_BASELINE，只防新增）"
 else
     echo "  [FAIL] sprintf 从 $SPRINTF_BASELINE 增加到 $n 处（新代码请用 snprintf）"
     fail=1

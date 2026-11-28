@@ -245,7 +245,7 @@ void GNg::cTEXT_ART::TextOutNumber(unsigned int number, int x, int y, int w, int
     float tuv; //纹理坐标
     int px = x, py = y, step1; //光标当前处
     unsigned short t_count;
-    t_count = sprintf(text, "%d", number);
+    t_count = snprintf(text, sizeof(text), "%d", number);
     zTextCount = t_count;
 
     if(!w || !h) { // 一般简单模式处理 *******************************************************************************************
@@ -591,8 +591,8 @@ unsigned int GNg::GT_sTEXT_LABLE_RANGE::CallLableProc() {
     uint8 locbuf[8192];
     GN::sTBUF_INT tbuf(locbuf, 8192);
     char *com_lable = (char *)tbuf.GetSpace(pLable->lableStr.Num() + extStr.Num());
-    strcpy(com_lable, pLable->lableStr);
-    if(extStr) strcat(com_lable, extStr);
+    memcpy(com_lable, pLable->lableStr, strlen(pLable->lableStr) + 1);
+    if(extStr) memcpy(com_lable + strlen(com_lable), extStr, strlen(extStr) + 1);
     return pLable->onCpProc(com_lable, start, end);
 }
 void GNg::cTEXT_ARTEX::LableSet(const char *lable_str, bool _absolute, sCOLOR c,

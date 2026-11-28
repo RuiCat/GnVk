@@ -73,7 +73,7 @@ GN_API uint8 *GT_ImageFileLoadToData(const char *filename, int fname_len, GNg::P
         strncpy(tmp_flienmae, filename, sizeof(tmp_flienmae) - 1);
         tmp_flienmae[sizeof(tmp_flienmae) - 1] = 0;
         char *ext_name = tmp_flienmae + fname_len;
-        sprintf(ext_name, "%04d.", i); /*有动画序列就接上序好来读取*/
+        snprintf(ext_name, (int)(sizeof(tmp_flienmae) - fname_len), "%04d.", i); /*有动画序列就接上序好来读取*/
         ext_name += 5;
         ext_name[3] = 0; //先设好结束符
         char *types = gImageLoadContext.aLoadLastTypeName;

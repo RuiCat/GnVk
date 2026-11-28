@@ -508,7 +508,7 @@ GN_API uint8 *GT_WriteImageNameToBuffer(uint8 *wpos, GNg::sIMAGE *_img, char *im
             const int copied = GN_StrCopyToLimit(img_name, img_name_cap, pimg_name1);
             num = (unsigned int)copied + 1;
             if(_img->add_0000 && (int)num + 4 <= img_name_cap) {
-                strcat(img_name, "0000");
+                memcpy(img_name + strlen(img_name), "0000", sizeof("0000"));
                 num += 4;
             }
         }
@@ -689,7 +689,7 @@ void GT_Scene2DLoadShareObjData(GT_sSCENE2D_SHARE_OBJS_R &ref_objs, unsigned int
         GN_Log("2D 场景路径为空或过长, 放弃读取!\n");
         return;
     }
-	strcpy(file_path, file_name);
+	memcpy(file_path, file_name, strlen(file_name) + 1);
 	char *_filename = file_path + (GN_StrGetFileName(file_name) - file_name);
 
 	unsigned int si, num = (*((unsigned int*)((uint8*)fbuf+data_pos[9]))) + (*((unsigned int*)((uint8*)fbuf+data_pos[8])));
@@ -814,7 +814,7 @@ void GT_Scene2DSaveShareObjData(GT_sSCENE2D_SHARE_OBJS &share_objs, GN::sLIST<GN
 	char exp_path[384] = {0}, tmp_str[64];
 	if(exp_pathfile){
 		// 加固（STRCPY 审计）：导出路径超长会写穿 exp_path；超长时忽略导出路径（不写穿）。
-		if(strlen(exp_pathfile) < sizeof(exp_path)) strcpy(exp_path, exp_pathfile);
+		if(strlen(exp_pathfile) < sizeof(exp_path)) memcpy(exp_path, exp_pathfile, strlen(exp_pathfile) + 1);
 		else GN_Log("2D 场景导出路径过长, 忽略导出路径!\n");
 		char *_filename = GN_StrGetFileName(exp_path);
 		if(_filename > exp_path)*(_filename-1) = 0;

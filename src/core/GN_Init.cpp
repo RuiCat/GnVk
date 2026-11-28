@@ -66,7 +66,7 @@ GN_INIT_API char * GN_AppDir(const char *pathfile) {
     return (char *)GNg::GN_Core.aAppDir;
 }
 GN_INIT_API void GN_AppDirSet(const char *dir) {
-    if(dir && dir[0]) GNg::GN_Core.aAppFile = sprintf(GNg::GN_Core.aAppDir, "%s/", dir) + GNg::GN_Core.aAppDir;
+    if(dir && dir[0]) GNg::GN_Core.aAppFile = snprintf(GNg::GN_Core.aAppDir, sizeof(GNg::GN_Core.aAppDir), "%s/", dir) + GNg::GN_Core.aAppDir;
     else {
         GNg::GN_Core.aAppDir[0] = 0;
         GNg::GN_Core.aAppFile = GNg::GN_Core.aAppDir;
@@ -248,7 +248,7 @@ GN_INIT_API void GF_FrameCycleBeginProc() {
     {
         if(GT_AppDefaultSrcDownloadDir && GN_CallBackFuncIsNull()) {
             char mou_fname[384]; //有指定用户下载目录且没有手动设置回调就常试用默认名来加载程序模块来获取回调
-            sprintf(mou_fname, "%s/%s", GT_AppDefaultSrcDownloadDir.Begin(), GN_APP_MODULE_NAME);
+            snprintf(mou_fname, sizeof(mou_fname), "%s/%s", GT_AppDefaultSrcDownloadDir.Begin(), GN_APP_MODULE_NAME);
             bool init_func_err = !GN_InitCallBackFuncFromModule(mou_fname); (void)init_func_err;
         }
     }

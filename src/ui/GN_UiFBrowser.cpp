@@ -733,7 +733,7 @@ void GNu::cFILE_BROWSER::zSearch(P<P<char>> &sm, const char *cur_dir, bool searc
     }
     unsigned int dir_num = 0, si, smn, cn;
     char open_dir[GN_MAXFILEPATH], *_fname, *com1, *com2;
-    sprintf(open_dir, "%s/*.*", cur_dir);
+    snprintf(open_dir, sizeof(open_dir), "%s/*.*", cur_dir);
     GN::sLIST<P<GNf::sFILE_INFO>> file_list, dir_list;
     if(GNf::FindFileDirInfoData(open_dir, true, &file_list, &dir_list, ph) != -1) {
         if(!zShowReady) { //收到对象销毁结束通知
@@ -969,7 +969,7 @@ void GT_FILE_BROWSER_FindDel(P<GN_sTHREAD> this_thread, void *arg, void *arg2) {
     GNf_DirStatePop();
     if(!fb->zTkArgSSubDir) {
         GN_ErrorLast.New(GN_MAXFILEPATH);
-        sprintf(GN_ErrorLast, "删除目录: %s 途中有错!", dir);
+        snprintf(GN_ErrorLast, GN_MAXFILEPATH, "删除目录: %s 途中有错!", dir);
     }
     if(this_thread) this_thread->us_state = 255;
 }
@@ -1061,7 +1061,7 @@ void GT_FILE_BROWSER_FindCopy(P<GN_sTHREAD> this_thread, void *arg, void *arg2) 
     fb->zSearch__(fb->zTkArgSDir, "*.*", true, GT_FileBrowserCopyDirAndFile, fb->zTkArgPH2);
     if(!fb->zTkArgSSubDir) {
         GN_ErrorLast.New(GN_MAXFILEPATH);
-        sprintf(GN_ErrorLast, "复制目录: %s 途中有错!", (char *)fb->zTkArgSDir);
+        snprintf(GN_ErrorLast, GN_MAXFILEPATH, "复制目录: %s 途中有错!", (char *)fb->zTkArgSDir);
     }
     if(this_thread) this_thread->us_state = 255;
 }
@@ -1226,7 +1226,7 @@ void GNu::cFILE_BROWSER::zGenerateFileIcons() {
             zGlobalPaths[0].New(opendir_len + 4);
             char *gpath0 = zGlobalPaths[0];
             strncpy(gpath0, aOpenDir, opendir_len);
-            strcpy(gpath0 + opendir_len, "/..");
+            memcpy(gpath0 + opendir_len, "/..", sizeof("/.."));
             zGlobalPaths_[0] = gpath0;
         } else {
             P<char> *gpaths = zGlobalPaths;
@@ -1656,7 +1656,7 @@ int8 GNu::cFILE_BROWSER::UpdateRun(unsigned int updatatime, GNg::sIMAGE **img_ou
         text_color = (_fframe->zDisplay_num ? GNg_MultiplyColorRatio(aTextColor, color_data[0]) : aTextColor);
 
         char err_info[GN_MAXFILEPATH];
-        sprintf(err_info, zIsNoFileAndDir == 2 ? "打开目录: %s 失败 该目录不能访问!" : "%s 里找不到文件和目录!", aOpenDir);
+        snprintf(err_info, sizeof(err_info), zIsNoFileAndDir == 2 ? "打开目录: %s 失败 该目录不能访问!" : "%s 里找不到文件和目录!", aOpenDir);
         zTextOut.SetText(err_info, 0, tx, ty, tw, th);
         zTextOut.Show(text_color, aTextBlend); //显示提示
     }
@@ -2012,7 +2012,7 @@ char const *GNu::cFILE_BROWSER::GetNoUsedCloneName(const char *name, bool name_s
         ids.clear();
         if(newid >= 0) {
             static char cloneName[128];
-            sprintf(cloneName, "%05d#%s", newid + 1, pstr);
+            snprintf(cloneName, sizeof(cloneName), "%05d#%s", newid + 1, pstr);
             ret_name = cloneName;
         } else ret_name = pstr;
     } else ret_name = (char *)name; //没同名的就直接返回参数指定的名

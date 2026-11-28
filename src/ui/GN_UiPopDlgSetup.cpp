@@ -118,7 +118,7 @@ void GNu::cSIM_DIALOG::BeginInitToData(const char *fname) {
         zFileName = new char[di + 5];
         strncpy(zFileName, fname, di);
         // 已核（B5f）：new char[di+5]，".ygs"+NUL 恰好 5 字节。
-        strcpy(zFileName + di, ".ygs");
+        memcpy(zFileName + di, ".ygs", sizeof(".ygs"));
     }
 }
 void GNu::cSIM_DIALOG::EndInitToData() {
@@ -126,7 +126,7 @@ void GNu::cSIM_DIALOG::EndInitToData() {
         char *def_file_name = (char *)"GameSetting.ygs";
         zFileName = new char[strlen(def_file_name) + 1];
         // 已核（B5f）：new char[strlen+1]，精确容量。
-        strcpy(zFileName, def_file_name);
+        memcpy(zFileName, def_file_name, strlen(def_file_name) + 1);
     }
     /*- ygs文件格式数据布局 --------\   /- ygt文件格式数据布局 ----------*\   
 	|	char 文件类型标识4个字节    |	|	char 文件类型标识4个字节      |

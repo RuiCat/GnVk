@@ -477,7 +477,7 @@ GN_API int GNf::FindFileDirInfoData(const char *path, bool g_dir, GN::sLIST<P<sF
             // 加固（STRCPY 审计）：global_filename 固定 384 字节；超长路径退化为只存文件名，避免写穿。
             if(g_len + (int)strlen(p_file->name) + 1 <= (int)sizeof(p_file->global_filename)) {
                 strncpy(p_file->global_filename, path, g_len);
-                strcpy(p_file->global_filename + g_len, p_file->name);
+                memcpy(p_file->global_filename + g_len, p_file->name, strlen(p_file->name) + 1);
             } else GN_StrCopyToLimit(p_file->global_filename, (int)sizeof(p_file->global_filename), p_file->name);
             if(p_file->attrib & _A_SUBDIR) dirs_out->push_back(p_file);
             else files_out->push_back(p_file);
@@ -501,7 +501,7 @@ GN_API int GNf::FindFile_Num(const char *filename_, void *ph) {
     // 加固（STRCPY 审计）：目录段 + "/*.*" 必须装进 tmp_buf[384]，超长直接失败。
     if(len + 4 > sizeof(tmp_buf)) return -1;
     strncpy(tmp_buf, filename_, len);
-    strcpy(tmp_buf + len, "*.*");
+    memcpy(tmp_buf + len, "*.*", sizeof("*.*"));
     len = strlen(_fname);
     int fn = 0;
     sFILE_INFO p_file;
@@ -994,7 +994,7 @@ GN_API int GN_PluginsLoad_(const char *class_name, void (*add_plugin_func)(int *
         if(dir_name[0] == '.') {
             if(dir_name[1] == 0 || (dir_name[1] == '.' && dir_name[2] == 0)) continue;
         }
-        sprintf(pstr, "%s/%s%s", dir_name, dir_name, GN_StrGetModuleExtName(GN_eMODULE_DLL));
+        snprintf(pstr, (int)(sizeof(GNg::GN_FileState.aPluginsDir) - (pstr - GNg::GN_FileState.aPluginsDir)), "%s/%s%s", dir_name, dir_name, GN_StrGetModuleExtName(GN_eMODULE_DLL));
         mod = GT_ModuleOpen(GNg::GN_FileState.aPluginsDir);
         if(mod) {
             vfunc = (char *const (*)())GT_ModuleGetFunction(mod, "Version");

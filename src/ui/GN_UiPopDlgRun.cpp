@@ -210,8 +210,8 @@ GNu::sSIM_MENU *GNu::cSIM_DIALOG::UpdateRun(unsigned int updatatime) {
                         if(chd_type == GT_SP_VALUE_COLOR) //正常颜色值的处理
                             GNg::ImageDraw(0, vvx, draw_y + ch_ofs, zValueW, tfmt.height, *((unsigned int *)_chd->pointer));
                         else if(si != zSelect || zDetailSetState != eDETAIL_SET_VALUE_INPUT) { //正常数据值的处理
-                            if(chd_type == GT_SP_VALUE_INT) sprintf(v_str, "%d", *((int *)(_chd->pointer)));
-                            else sprintf(v_str, "%.4f", *((float *)(_chd->pointer)));
+                            if(chd_type == GT_SP_VALUE_INT) snprintf(v_str, sizeof(v_str), "%d", *((int *)(_chd->pointer)));
+                            else snprintf(v_str, sizeof(v_str), "%.4f", *((float *)(_chd->pointer)));
                             zTextOut.SetText(v_str, 0, vvx, draw_y, zValueW, tj);
                             zTextOut.Show(text_color, aTextBlend); //显示变量值
                         }
@@ -246,8 +246,8 @@ GNu::sSIM_MENU *GNu::cSIM_DIALOG::UpdateRun(unsigned int updatatime) {
                 if(_chd->icon) GNg::ImageDraw(_chd->icon, draw_x, draw_y, zIconW, tj, icon_color);
                 if(_chd->pointer) {
                     if(_chd->enumIdnum == GT_SP_VALUE_FLOAT)
-                        sprintf(v_str, _chd->name, *((float *)_chd->pointer));
-                    else sprintf(v_str, _chd->name, *((int *)_chd->pointer));
+                        snprintf(v_str, sizeof(v_str), _chd->name, *((float *)_chd->pointer));
+                    else snprintf(v_str, sizeof(v_str), _chd->name, *((int *)_chd->pointer));
                     zTextOut.SetText(v_str, 0, draw_x + iw, draw_y, draw_w - iw, tj); //显示跟随变量的静态文本
                 } else zTextOut.SetText(_chd->name, 0, draw_x + iw, draw_y, draw_w - iw, tj); //显示静态文本
                 zTextOut.Show(capt_color, aTextBlend);
@@ -333,9 +333,9 @@ GNu::sSIM_MENU *GNu::cSIM_DIALOG::UpdateRun(unsigned int updatatime) {
                             strncpy(_set_tool->info, zTextOut.zFontMapFormat < GNg::eFONT_FREETYPE ? " !Please enter: " : " ！请 输入: ", sizeof(_set_tool->info) - 1);
                             _set_tool->info[sizeof(_set_tool->info) - 1] = 0;
                             if(_chd->type == GT_SP_VALUE_FLOAT)
-                                sprintf(_set_tool->info + strlen(_set_tool->info), "%.4f - %.4f", _chd->minValue, _chd->maxValue);
+                                snprintf(_set_tool->info + strlen(_set_tool->info), (int)(sizeof(_set_tool->info) - strlen(_set_tool->info)), "%.4f - %.4f", _chd->minValue, _chd->maxValue);
                             else
-                                sprintf(_set_tool->info + strlen(_set_tool->info), "%d - %d", (int)_chd->minValue, (int)_chd->maxValue);
+                                snprintf(_set_tool->info + strlen(_set_tool->info), (int)(sizeof(_set_tool->info) - strlen(_set_tool->info)), "%d - %d", (int)_chd->minValue, (int)_chd->maxValue);
                             _set_tool->is = zSelect;
                             _set_tool->it = 0;
                             GT_DlgSetToolInfoStateReset(_set_tool, zEffect, capt_color);
@@ -513,7 +513,7 @@ GNu::sSIM_MENU *GNu::cSIM_DIALOG::UpdateRun(unsigned int updatatime) {
                                     char *pdstr = GN_StrHasPathDisableSymbol(_dir_name);
                                     if(pdstr) {
                                         _set_tool->is = 0;
-                                        sprintf(_set_tool->info, "%s名不能包含这些符号 %s", _chd->name[0] == '>' ? "文档" : "目录", pdstr); //提示目录路径名不能包含的符号
+                                        snprintf(_set_tool->info, sizeof(_set_tool->info), "%s名不能包含这些符号 %s", _chd->name[0] == '>' ? "文档" : "目录", pdstr); //提示目录路径名不能包含的符号
                                         GT_DlgSetToolInfoStateReset(_set_tool, zEffect, capt_color);
                                     } else {
                                         bool egph = GNf::sFILE::EnableGlobalPath;
@@ -522,15 +522,15 @@ GNu::sSIM_MENU *GNu::cSIM_DIALOG::UpdateRun(unsigned int updatatime) {
                                         if(_chd->name[0] == '>' && fb->aFileTypeFilterStr) {
                                             char *ftype_end = strchr(fb->aFileTypeFilterStr, ',');
                                             if(ftype_end) *ftype_end = 0;
-                                            sprintf(fb->aOpenDir + fb_dir_len, "/%s.%s", _dir_name, fb->aFileTypeFilterStr.Begin());
+                                            snprintf(fb->aOpenDir + fb_dir_len, (int)(sizeof(fb->aOpenDir) - fb_dir_len), "/%s.%s", _dir_name, fb->aFileTypeFilterStr.Begin());
                                             if(ftype_end) *ftype_end = ',';
-                                        } else sprintf(fb->aOpenDir + fb_dir_len, "/%s", _dir_name);
+                                        } else snprintf(fb->aOpenDir + fb_dir_len, (int)(sizeof(fb->aOpenDir) - fb_dir_len), "/%s", _dir_name);
                                         if(GNf::Access(fb->aOpenDir, 0)) {
                                             if(_chd->name[0] == '>') GNf::Close(GNf::Open(fb->aOpenDir, "wb"));
                                             else GNf::Mkdir(fb->aOpenDir);
                                         } else {
                                             _set_tool->is = 0;
-                                            sprintf(_set_tool->info, "%s 已在该目录下存在", _dir_name); //目录已存在
+                                            snprintf(_set_tool->info, sizeof(_set_tool->info), "%s 已在该目录下存在", _dir_name); //目录已存在
                                             GT_DlgSetToolInfoStateReset(_set_tool, zEffect, capt_color);
                                         }
                                         fb->aOpenDir[fb_dir_len] = 0;
@@ -557,9 +557,9 @@ GNu::sSIM_MENU *GNu::cSIM_DIALOG::UpdateRun(unsigned int updatatime) {
                     _text_in->UpdateRun(updatatime); //运行文本输入来接收用户输入的文本
 
                     if(zTextOut.zFontMapFormat < GNg::eFONT_FREETYPE)
-                        sprintf(v_str, " Please enter the text within %d", (int)_chd->maxValue);
+                        snprintf(v_str, sizeof(v_str), " Please enter the text within %d", (int)_chd->maxValue);
                     else
-                        sprintf(v_str, " 请输入文字%d个以内", (int)_chd->maxValue >> 1);
+                        snprintf(v_str, sizeof(v_str), " 请输入文字%d个以内", (int)_chd->maxValue >> 1);
 
                     zTextOut.SetText(v_str, 0, _set_tool->fx, _set_tool->fy + _set_tool->fh, _set_tool->fw, tj);
                     zTextOut.Show(_text_in->aTextColor, _text_in->aTextBlend); //显示可输入的个数提示
@@ -617,7 +617,7 @@ GNu::sSIM_MENU *GNu::cSIM_DIALOG::UpdateRun(unsigned int updatatime) {
                     ple->SetColor(cur_color);
                 }
                 *((unsigned int *)_chd->pointer) = cur_color.COLOR;
-                sprintf(v_str, "%08x", cur_color.COLOR);
+                snprintf(v_str, sizeof(v_str), "%08x", cur_color.COLOR);
                 _text_in->InitInputFmtToData(GNu::eTX_IN_HEX, v_str, 8);
                 if(zValueChangeProc) zValueChangeProc(zValueChangeArg);
             }
@@ -846,10 +846,10 @@ GNu::sSIM_MENU *GNu::cSIM_DIALOG::UpdateRun(unsigned int updatatime) {
                 } else {
                     _text_in = _set_tool->text_in;
                     if(_chd->type == GT_SP_VALUE_INT) { //详细修改整形值
-                        sprintf(v_str, "%d", *((int *)(_chd->pointer)));
+                        snprintf(v_str, sizeof(v_str), "%d", *((int *)(_chd->pointer)));
                         _text_in->InitInputFmtToData(eTX_IN_INT, v_str, 10);
                     } else { //详细修改浮点值
-                        sprintf(v_str, "%.4f", *((float *)(_chd->pointer)));
+                        snprintf(v_str, sizeof(v_str), "%.4f", *((float *)(_chd->pointer)));
                         _text_in->InitInputFmtToData(eTX_IN_FLOAT, v_str, 10);
                     }
                     if(zEffect) { //----------------------------------------------- 计算焦点插值位置
@@ -874,7 +874,7 @@ GNu::sSIM_MENU *GNu::cSIM_DIALOG::UpdateRun(unsigned int updatatime) {
                 if(_chd->type == GT_SP_VALUE_COLOR) { //详细修改颜色值
                     _text_in = _set_tool->text_in;
                     unsigned int &pcolor = *((unsigned int *)(_chd->pointer));
-                    sprintf(v_str, "%08x", pcolor);
+                    snprintf(v_str, sizeof(v_str), "%08x", pcolor);
                     _text_in->InitInputFmtToData(eTX_IN_HEX, v_str, 8);
                     _text_in->SetPos(draw_x + ti, f_fy + f_fh, ti * 10, tj);
                     _set_tool->palette->SetOffsetEF(zEffect ? 0.22f : 1.0f);

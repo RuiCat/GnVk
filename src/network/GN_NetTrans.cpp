@@ -499,10 +499,10 @@ int GNn::cCLIENT_HTTP::zHeadMsgMake(const char *filename, const char *method, co
             else { GN_Log("cCLIENT_HTTP 发出请求 有错! 提交附带数据类型不属于纯文本的必须制定数据大小!\n"); }
 #endif
         }
-        head_size = sprintf(head_msg, GNn__HttpHead__, method, filename, zHost.Begin());
-        head_size += sprintf(head_msg + head_size, GNn_HttpHead__Content, ct, content_size);
+        head_size = snprintf(head_msg, GN_MAX_BUF_HTTP_HEAD, GNn__HttpHead__, method, filename, zHost.Begin());
+        head_size += snprintf(head_msg + head_size, GN_MAX_BUF_HTTP_HEAD - head_size, GNn_HttpHead__Content, ct, content_size);
     } else {
-        head_size = sprintf(head_msg, GNn__HttpHead__, method, filename, zHost.Begin());
+        head_size = snprintf(head_msg, GN_MAX_BUF_HTTP_HEAD, GNn__HttpHead__, method, filename, zHost.Begin());
         int remaining = GN_MAX_BUF_HTTP_HEAD - head_size - 1;
         strncpy(head_msg + head_size, "Connection: Keep-Alive\r\n\r\n", remaining);
         head_msg[GN_MAX_BUF_HTTP_HEAD - 1] = 0;
@@ -547,9 +547,9 @@ int GNn::cCLIENT_HTTP::zHeadMsgMake(const char *filename, P<sHTTP_POST> &content
     char *head_msg = zBufTemp;
     int head_size;
     char boundary[256];
-    sprintf(boundary, "%s; boundary=%s", GNn_HTTP_CONTENT_MULTIPART, GNn_HttpContentBoundary);
-    head_size = sprintf(head_msg, GNn__HttpHead__, "POST", filename, zHost.Begin());
-    head_size += sprintf(head_msg + head_size, GNn_HttpHead__Content, boundary, _content_size);
+    snprintf(boundary, sizeof(boundary), "%s; boundary=%s", GNn_HTTP_CONTENT_MULTIPART, GNn_HttpContentBoundary);
+    head_size = snprintf(head_msg, GN_MAX_BUF_HTTP_HEAD, GNn__HttpHead__, "POST", filename, zHost.Begin());
+    head_size += snprintf(head_msg + head_size, GN_MAX_BUF_HTTP_HEAD - head_size, GNn_HttpHead__Content, boundary, _content_size);
     return head_size;
 }
 #define GT_TMP_CLIENT_HTTP_CBST 2339834857

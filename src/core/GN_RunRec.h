@@ -167,7 +167,7 @@ class GN_API GT_cRUN_REC //运行信息记录器
     }                                                \
     double s_e_Time = GN_TimeGetCount() - startTime; \
     time_proc                                        \
-        GN::RunRec.zRuntimeStrNum = sprintf(GN::RunRec.zpRunTime, /*"ALLRUN-TIME:%16.3fms  N:%10d\nEVERY--TIME:%16.10fms"*/ "总运行时间   :%16.6f 毫秒  运行次数:%10d\n单次运行时间 :%16.10f 毫秒", s_e_Time, fcnt, s_e_Time / fcnt)
+        GN::RunRec.zRuntimeStrNum = snprintf(GN::RunRec.zpRunTime, sizeof(GN::RunRec.zpRunTime), /*"ALLRUN-TIME:%16.3fms  N:%10d\nEVERY--TIME:%16.10fms"*/ "总运行时间   :%16.6f 毫秒  运行次数:%10d\n单次运行时间 :%16.10f 毫秒", s_e_Time, fcnt, s_e_Time / fcnt)
 
 //用来记录结束时间() !这个会收集多帧时间取个平均值
 #define GN_RUNTENDMF() GN_RUNTEND(GN_AverageFrameTimeT(double, s_e_Time, 80.0);)

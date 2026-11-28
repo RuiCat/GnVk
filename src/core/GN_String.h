@@ -7,7 +7,7 @@
     if(p_dest) delete[](p_dest);              \
     if((src) && (src)[0]) {                   \
         (p_dest) = new char[strlen(src) + 1]; \
-        strcpy((p_dest), (src));              \
+        memcpy((p_dest), (src), strlen((src)) + 1);              \
     } else (p_dest) = 0
 
 //检测指定字符是否空的非显示字符(指定字符)返回是否

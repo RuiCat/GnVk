@@ -364,13 +364,13 @@
     }
     void GNa::iFILE_AUDIO::GetSupportFmtFileExtName(char *out, bool upper) {
         /*  
-	strcpy(out, upper?"ogg,OGG,":"ogg,");
+	memcpy(out, upper?"ogg,OGG,":"ogg,", strlen(upper?"ogg,OGG,":"ogg,") + 1);
 	next_node->GetSupportFmtFileExtName(out+(upper?8:4), upper); //调用之前默认的方法
 */
         // 已核（STRCPY 审计）：调用方缓存 128 字节（GNg::GN_Core.aAudioExtNames），本函数只写 16 或 8 字节；
         // 该接口无容量参数，插件链扩展时须自行遵守调用方容量（见 docs/STRCPY_AUDIT_2026-11-21.md）。
-        if(upper) strcpy(out, "wav,WAV,mp3,MP3");
-        else strcpy(out, "wav,mp3");
+        if(upper) memcpy(out, "wav,WAV,mp3,MP3", sizeof("wav,WAV,mp3,MP3"));
+        else memcpy(out, "wav,mp3", sizeof("wav,mp3"));
     }
     GNa::iFILE_AUDIO GT_FileAudio;
     GN_API GNa::iFILE_AUDIO *GNa::FileAudio = &GT_FileAudio;

@@ -85,7 +85,7 @@ GN_SYS_API P<P<char>> GT_EnumSystemDirectory() {
     (_dir_names[0])(GT_CurAppDir, 0);
     _dir_names[0][strlen((char *)_dir_names[0]) - 1] = 0; //应用程序文件当前目录
     char tmpath[384];
-    sprintf(tmpath, "/Users/%s", getlogin());
+    snprintf(tmpath, sizeof(tmpath), "/Users/%s", getlogin());
     (_dir_names[2])(tmpath, 0);
     int remaining = sizeof(tmpath) - strlen(tmpath) - 1;
     strncat(tmpath, "/Desktop", remaining);

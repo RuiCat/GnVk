@@ -167,7 +167,7 @@ GN_NET_API int GNn::GetLocalMac(unsigned char mac[8][6]) {
 
 #elif defined(_LINUX_)
     struct ifreq ifr;
-    strcpy(ifr.ifr_name, "eth0");
+    memcpy(ifr.ifr_name, "eth0", sizeof("eth0"));
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if(sock == -1 || ioctl(sock, SIOCGIFHWADDR, &ifr) == -1) {
         close(sock);

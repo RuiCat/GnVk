@@ -577,7 +577,7 @@ bool cMODEL::LoadOBJ(const char *filename) {
 // ═══════════════════════════════════════════════════════════
 cMODEL *CreateCubeModel(float size, float r, float g, float b) {
     cMODEL *m = new cMODEL();
-    strcpy(m->aName, "Cube");
+    memcpy(m->aName, "Cube", sizeof("Cube"));
     float h = size * 0.5f;
 
     m->aMeshCount = 1;
@@ -636,14 +636,14 @@ cMODEL *CreateCubeModel(float size, float r, float g, float b) {
 
     m->aMeshes[0].aVertices = v;
     m->aMeshes[0].aIndices = idx;
-    strcpy(m->aMeshes[0].aName, "cube");
+    memcpy(m->aMeshes[0].aName, "cube", sizeof("cube"));
     m->UpdateTransform();
     return m;
 }
 
 cMODEL *CreateSphereModel(float radius, int segments, float r, float g, float b) {
     cMODEL *m = new cMODEL();
-    strcpy(m->aName, "Sphere");
+    memcpy(m->aName, "Sphere", sizeof("Sphere"));
     m->aMeshCount = 1;
     m->aMeshes = new sMESH[1];
     m->aMeshes[0].aDiffuse[0] = r;
@@ -702,14 +702,14 @@ cMODEL *CreateSphereModel(float radius, int segments, float r, float g, float b)
     m->aMeshes[0].aIndices = idx;
     m->aMeshes[0].aVertexCount = vc;
     m->aMeshes[0].aIndexCount = ic;
-    strcpy(m->aMeshes[0].aName, "sphere");
+    memcpy(m->aMeshes[0].aName, "sphere", sizeof("sphere"));
     m->UpdateTransform();
     return m;
 }
 
 cMODEL *CreatePlaneModel(float width, float depth, float r, float g, float b) {
     cMODEL *m = new cMODEL();
-    strcpy(m->aName, "Plane");
+    memcpy(m->aName, "Plane", sizeof("Plane"));
     m->aMeshCount = 1;
     m->aMeshes = new sMESH[1];
     m->aMeshes[0].aDiffuse[0] = r;
@@ -748,7 +748,7 @@ cMODEL *CreatePlaneModel(float width, float depth, float r, float g, float b) {
     m->aMeshes[0].aIndices = idx;
     m->aMeshes[0].aVertexCount = 4;
     m->aMeshes[0].aIndexCount = 6;
-    strcpy(m->aMeshes[0].aName, "plane");
+    memcpy(m->aMeshes[0].aName, "plane", sizeof("plane"));
     m->UpdateTransform();
     return m;
 }

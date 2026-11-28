@@ -2,6 +2,18 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-28 — B9-4：字符串安全（strcpy/strcat 清零 + sprintf→snprintf）
+
+**strcpy/strcat 62 处 → memcpy 精确长度**（字面量 sizeof 含 NUL；非字面量 strlen+1），均为
+STRCPY_AUDIT 已核精确分配/守卫/契约站点，行为等价；src/  strcpy/strcat 清零。
+**sprintf 56 处 → snprintf 真实容量**（固定数组 sizeof、偏移写 总容量−偏移、P<char> 用 New 尺寸、
+url_out[384] 参数契约用 384）。余 **9 处登记契约/动态指针**（GN_NetTrans HTTP body 预计算缓冲 ×7、
+itoa 调用方缓冲、GN_GetDeviceInfoRam 调用方缓冲），output.sh sprintf 基线 65→9。
+
+**门禁**：output.sh 增 strcpy/strcat 零容忍；sprintf 只防新增（≤9 登记）。
+
+验证：`make ci` 全绿（单测 955/0、smoke 13/0、gpuCheck 126/0、warnings 7<500、output.sh 全过）。
+
 ## 2026-11-28 — B9-3：告警大扫除 19385→7 + make warnings 门禁
 
 **扩展警告口径**（GCC 13.3，-Wall -Wextra -Wshadow -Wduplicated-cond -Wduplicated-branches -Wlogical-op

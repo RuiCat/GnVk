@@ -47,7 +47,7 @@ void GNu::cTREE_NODE_P_OPTR::UnfoldTag(P_ g, uint8 on) {
     if((unsigned int)strlen(objname) + 1 == name_num) { /*创建标记空间*/ \
         P<char> name1(name_num + 1);                                     \
         /* 已核（B5f）：name1 = P<char>(name_num+1)，且 strlen(objname)+1 == name_num。 */ \
-        strcpy(name1, objname);                                          \
+        memcpy(name1, objname, strlen(objname) + 1);                                          \
         name1[name_num] = 0;                                             \
         objname = name1;                                                 \
     }
