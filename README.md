@@ -82,10 +82,10 @@ make check
 # 含两条：2D 四象限像素断言 + 帧编排等价性（cRENDER_FRAME vs 裸 sFRAME_3D_SCOPE 逐字节比对）
 make headlessCheck
 
-# 示例无窗口冒烟（五个二进制各 8 帧；无 Vulkan 设备时 SKIP）
+# 示例无窗口冒烟（13 个示例各 8 帧；无 Vulkan 设备时 SKIP）
 make smoke
 
-# 一条命令全跑：check + smoke
+# 一条命令全门禁：check + smoke + doc-check + spv-check + lint-strict + warnings
 make ci
 
 # 交叉平台编译检查（experimental，D3：官方 Linux-only；MinGW-w64 按 Windows 目标编一遍；没工具链时 SKIP）
@@ -97,6 +97,26 @@ make shaders
 # 清理
 make clean
 ```
+
+### make 目标速查
+
+| 目标 | 作用 |
+|---|---|
+| `make` / `make all` | 配置 + 构建全部产物 |
+| `make unit` | 单元测试（纯逻辑，无需 GPU） |
+| `make check` | 单测 + 物理/角色场景验收 |
+| `make smoke` | 13 个示例无窗口冒烟（各 8 帧） |
+| `make ci` | 全门禁（check + smoke + doc-check + spv-check + lint-strict + warnings） |
+| `make headlessCheck` | 无窗口离屏渲染验收（2D 像素断言 + 帧编排等价性） |
+| `make debug` / `make asan` | 调试版 / ASan+UBSan 单测（独立构建目录） |
+| `make fuzz` | 解析器模糊测试（ASan/UBSan，`FUZZ_SECS` 可控） |
+| `make warnings` | 告警预算门禁（src 主位置 < 500） |
+| `make lint` / `make lint-strict` | 分层/输出/分组/输入约束检查 |
+| `make shaders` / `make spv-check` | 着色器编译 / 内嵌 SPIR-V 同步校验 |
+| `make stats` / `make doc-check` | 生成文档统计 / 校验文档数字+索引+版本 |
+| `make version-check` | 版本单一来源一致性 |
+| `make crosscheck` | 交叉平台编译检查（experimental） |
+| `make clean` | 清理构建产物 |
 
 ## 平台与图形后端
 
@@ -138,9 +158,13 @@ GnVk/
 │   ├── network/        # 网络模块
 │   ├── file/           # 文件系统
 │   ├── media/          # 视频播放 (FFmpeg)
+│   ├── mmd/            # MMD 模型加载 (PMD/PMX)
 │   ├── platform/       # 平台抽象层
 │   └── plugin/         # 插件接口
 ├── external/include/   # 第三方头文件
+├── tests/              # 单测 / 冒烟 / lint / fuzz / 工具脚本
+├── abi/                # ABI 基线与变更登记
+├── tools/              # 辅助工具
 ├── docs/               # 文档
 ├── CMakeLists.txt      # 构建定义（唯一来源）
 ├── CMakePresets.json   # 构建预设（default / debug）
