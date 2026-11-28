@@ -2,6 +2,22 @@
 
 > **状态**：✅ 现行 — 按日期倒序的变更记录，每轮含实测数字、已知边界与未做项。
 
+## 2026-11-28 — B9-5：解析器 fuzz harness + WAV 加固（DA-1128-03）
+
+**harness**：`tests/fuzz/fuzzParsers.cpp` + `make fuzz`（ASan/UBSan，build-fuzz/）。6 个纯 CPU
+解析目标（PNG/JPEG 解码、glTF/GLB 资产、PMD/PMX 模型、WAV 音频），变异循环（位翻转/替换/增删/截断/拼接），
+`FUZZ_SECS`/`FUZZ_SEED`/`FUZZ_ARTIFACT` 可控，每迭代写崩溃复现样本；回归种子 corpus/wav_neg_size.bin。
+
+**真实缺陷 DA-1128-03（WAV，已修复）**：`LoadWavFileData` 信任 WAV 头 data 块大小，巨值（0xE800FF00）
+经 int 转换变负 → `GNf::Read`/memcpy negative-size 崩溃。加固：头读满 44 字节 + RIFF/WAVE 校验 +
+data 大小 clamp 到 `GetSize-44`（合法 WAV 行为不变）。修复后 60s **964674 次**无崩溃；
+**1 小时长跑 56,836,188 次迭代无崩溃**（FUZZ_SECS=3600 FUZZ_SEED=7，exit=0）。
+
+**out-of-scope 既有发现**（B9 未改这些文件，登记 BACKLOG 待后续专项）：ASan/UBSan 全量单测另暴露
+GN_Layout.cpp:848 栈越界、GN_Material.cpp:39 / GN_PhysicsJoint.cpp:281 非法枚举加载（负向测试噪声）。
+
+验证：`make ci` 全绿（955/0、smoke 13/0、gpuCheck 126/0、warnings 7<500）；`nm -D` diff=0。
+
 ## 2026-11-28 — B9-4：字符串安全（strcpy/strcat 清零 + sprintf→snprintf）
 
 **strcpy/strcat 62 处 → memcpy 精确长度**（字面量 sizeof 含 NUL；非字面量 strlen+1），均为
