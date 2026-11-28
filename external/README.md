@@ -5,7 +5,7 @@
 
 | 目录/文件 | 内容 | 上游与版本（文件内声明） | 许可 | 备注 |
 |---|---|---|---|---|
-| `AL/` | OpenAL 头：`al.h`、`alc.h`、`efx.h`、`alu.h`、`alut*.h` 等 | OpenAL / OpenAL Soft；版本未标注 | 上游为 LGPL-2.0-or-later；头文件许可**待核对** | 仅声明接口，运行期链接系统 `libopenal` |
+| `AL/` | OpenAL 头：`al.h`、`alc.h`、`efx.h`、`alu.h`、`alut*.h`、`xram.h` 等 | **Creative Labs OpenAL 1.1 SDK 头**（据 `ALAPI`/`_XBOX`/`TARGET_OS_MAC` 等 deprecated 宏判定）；本仓库副本**许可文本被剥离** | **待核对（发布阻塞）**：原始 SDK 头许可无法从本副本确认；运行期链接系统 `libopenal`（OpenAL Soft，LGPL-2.0-or-later）。建议改用系统 libopenal-dev 提供的带许可 OpenAL Soft 头，或补齐 Creative Labs 许可文本后再标已核对 | 仅声明接口，不参与运行期许可义务 |
 | `libpng/` | `png.h`、`pngconf.h`、`zconf.h`、`zlib.h` | libpng 1.2.4（2002-07-08，`png.h` 首行给出） | libpng/zlib 许可（见文件头） | 运行期链接系统 `libpng16`，此处仅编译期使用 |
 | `libzip/` | `zip.c`/`zip.h`、`unzip.c`/`unzip.h` | Gilles Vollant，zip 0.15 alpha / unzip 0.15 beta（1998）；2011/2012 有本地修改注释 | zlib 式许可（见 `zip.h` 第 18-33 行） | **已知技术债**：`src/core/GN_Format.cpp` 以 `#include<libzip/zip.c>` 直接编译 C 源（计划阶段 4 拆为独立编译单元） |
 | `minimp3.h` | MP3 解码单头 | lieff/minimp3；版本未标注 | CC0 / public domain（文件头声明） | 仅头文件 |
